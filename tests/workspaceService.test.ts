@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canChangeWorkspace,
   isWorkspaceSnapshotInitialized,
   isWorkspaceTarget,
   isPathConflict,
@@ -119,6 +120,13 @@ describe("Workspace MVP service behavior", () => {
   // covers: BR-WS-DATA-003
   it("keeps mutation success results distinguishable from PathConflict", () => {
     expect(isPathConflict({ success: true, entries: [] })).toBe(false);
+  });
+
+  // covers: BR-WS-STATE-003
+  it("blocks Workspace close or switch while dirty editor or pending diff exists", () => {
+    expect(canChangeWorkspace({ editorDirty: false, hasPendingDiff: false })).toBe(true);
+    expect(canChangeWorkspace({ editorDirty: true, hasPendingDiff: false })).toBe(false);
+    expect(canChangeWorkspace({ editorDirty: false, hasPendingDiff: true })).toBe(false);
   });
 
   // covers: BR-WS-DATA-001

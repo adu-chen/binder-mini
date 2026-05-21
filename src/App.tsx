@@ -31,6 +31,7 @@ import {
 import type { AgentMessage, ProviderConfig, ToolExecution } from "./types/agent";
 import type { PendingDiff, TerminalDiffCard } from "./types/diff";
 import {
+  canChangeWorkspace,
   createWorkspaceFile,
   createWorkspaceFolder,
   deleteWorkspaceItem,
@@ -99,8 +100,25 @@ export default function App() {
       .catch((error) => setWorkspaceError(error instanceof Error ? error.message : String(error)));
   }, []);
 
+  function canLeaveCurrentWorkspace(): boolean {
+    return canChangeWorkspace({
+      editorDirty: Boolean(editorDocument?.dirty),
+      hasPendingDiff: Boolean(pendingDiff),
+    });
+  }
+
+  function workspaceBlockedMessage(): string {
+    if (editorDocument?.dirty) return "Save or discard the dirty editor before changing Workspace.";
+    if (pendingDiff) return "Accept or reject the pending diff before changing Workspace.";
+    return "Workspace cannot be changed yet.";
+  }
+
   async function handleOpenWorkspace() {
     setWorkspaceError(null);
+    if (workspaceSnapshot && !canLeaveCurrentWorkspace()) {
+      setWorkspaceError(workspaceBlockedMessage());
+      return;
+    }
     try {
       const result = await openWorkspace();
       if (!result.cancelled && result.snapshot) {
@@ -115,6 +133,22 @@ export default function App() {
     } catch (error) {
       setWorkspaceError(error instanceof Error ? error.message : String(error));
     }
+  }
+
+  function handleCloseWorkspace() {
+    setWorkspaceError(null);
+    if (!workspaceSnapshot) return;
+    if (!canLeaveCurrentWorkspace()) {
+      setWorkspaceError(workspaceBlockedMessage());
+      return;
+    }
+    setWorkspaceSnapshot(null);
+    setEditorDocument(null);
+    setEditorError(null);
+    setPendingDiff(null);
+    setNewWorkspaceItemPath("");
+    setStructureSourcePath("");
+    setStructureTargetPath("");
   }
 
   async function handleCreateWorkspaceItem(kind: "file" | "folder") {
@@ -444,6 +478,11 @@ export default function App() {
         <button className="primary-action" type="button" onClick={handleOpenWorkspace}>
           Open Workspace
         </button>
+        {workspaceSnapshot ? (
+          <button type="button" onClick={handleCloseWorkspace}>
+            Close Workspace
+          </button>
+        ) : null}
         {workspaceSnapshot ? (
           <div className="workspace-summary">
             <strong>{workspaceSnapshot.workspace.displayName}</strong>

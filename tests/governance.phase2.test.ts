@@ -11,11 +11,12 @@ import {
 } from "../src/services/agentService";
 import { canExecutePendingDiff, createTerminalDiffCard } from "../src/services/diffService";
 import { canSaveEditorDocument } from "../src/services/editorService";
-import { isPathConflict, isWorkspaceSnapshotInitialized, isWorkspaceTarget, normalizeRecentWorkspaces } from "../src/services/workspaceService";
+import { canChangeWorkspace, isPathConflict, isWorkspaceSnapshotInitialized, isWorkspaceTarget, normalizeRecentWorkspaces } from "../src/services/workspaceService";
 
 describe("Phase 2 governance skeleton", () => {
   // covers: BR-WS-STATE-001
   // covers: BR-WS-STATE-002
+  // covers: BR-WS-STATE-003
   // covers: BR-WS-PERSIST-001
   // covers: BR-WS-DATA-001
   // covers: BR-WS-DATA-002
@@ -48,6 +49,8 @@ describe("Phase 2 governance skeleton", () => {
         message: "Target path already exists: a.md",
       },
     })).toBe(true);
+    expect(canChangeWorkspace({ editorDirty: false, hasPendingDiff: false })).toBe(true);
+    expect(canChangeWorkspace({ editorDirty: true, hasPendingDiff: false })).toBe(false);
   });
 
   // covers: BR-ED-STATE-001

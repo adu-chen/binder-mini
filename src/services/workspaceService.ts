@@ -206,6 +206,26 @@ export function isPathConflict(
 
 /**
  * @GOV
+ * codes: BR-WS-STATE-003-GUARD-WS-WS-CLOSE-015,
+ *        BR-CORE-GOV-001-GUARD-WS-WS-CLOSE-015
+ * type: GUARD
+ * chain: WS-CLOSE
+ * rules: BR-WS-STATE-003, BR-CORE-GOV-001
+ * boundary: in=dirty editor and pending diff facts | out=Workspace close/switch decision
+ * term_ref: TERM-CORE-001
+ */
+export function canChangeWorkspace({
+  editorDirty,
+  hasPendingDiff,
+}: {
+  editorDirty: boolean;
+  hasPendingDiff: boolean;
+}): boolean {
+  return !editorDirty && !hasPendingDiff;
+}
+
+/**
+ * @GOV
  * codes: BR-WS-STATE-002-GUARD-WS-WS-OPEN-007,
  *        BR-CORE-GOV-001-GUARD-WS-WS-OPEN-007
  * type: GUARD

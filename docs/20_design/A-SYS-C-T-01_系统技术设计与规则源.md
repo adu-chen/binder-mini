@@ -150,6 +150,14 @@ status: active
 `WS-FILE-MANAGE` 描述文件创建、删除、移动、重命名和文件树刷新流程。
 
 <!-- CHAIN
+chain_id: WS-CLOSE
+主责模块: WS
+status: active
+-->
+
+`WS-CLOSE` 描述关闭或切换 Workspace 前的 dirty editor 和 pending diff 门禁流程。
+
+<!-- CHAIN
 chain_id: ED-OPEN-FILE
 主责模块: ED
 status: active
@@ -326,6 +334,15 @@ rule_id: BR-WS-DATA-004
 Workspace 结构操作遇到目标路径冲突时必须返回 PathConflict；未经用户确认不得覆盖既有文件或目录。
 
 <!-- RULE
+rule_id: BR-WS-STATE-003
+主链路: WS-CLOSE
+域: STATE
+需求映射: REQ-WS-009
+-->
+
+关闭或切换 Workspace 前必须处理 dirty editor 和 pending diff；存在未处理状态时不得清空或替换当前 Workspace。
+
+<!-- RULE
 rule_id: BR-ED-STATE-001
 主链路: ED-OPEN-FILE
 域: STATE
@@ -440,13 +457,13 @@ rule_id: BR-CORE-GOV-001
 
 | 候选规则 ID | 承接需求 | 建议链路 | 设计意图 |
 |-------------|----------|----------|----------|
-| BR-WS-STATE-003 | REQ-WS-009 | WS-CLOSE | 关闭或切换前必须处理 dirty editor 和 pending diff。 |
 | BR-WS-DATA-005 | REQ-WS-010 | WS-SEARCH | 搜索索引必须可重建，搜索结果必须限制在当前 Workspace。 |
 
 ## 变更记录
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-05-22 | v1.5 | 注册 Workspace 关闭切换 dirty/pending 门禁规则 |
 | 2026-05-22 | v1.4 | 注册 Workspace 创建结构操作与 PathConflict 规则 |
 | 2026-05-22 | v1.3 | 注册最近 Workspace 用户级持久化规则 |
 | 2026-05-22 | v1.2 | 注册 Workspace 初始化与递归 FileNode 正式规则 |

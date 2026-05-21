@@ -31,7 +31,7 @@
 | REQ-WS-006 | 创建文件与目录 | BR-WS-DATA-001、BR-WS-DATA-003、BR-WS-DATA-004、X-CONST-001 | WS-FILE-MANAGE | 已覆盖创建与冲突协议 |
 | REQ-WS-007 | 重命名、移动和删除 | BR-WS-DATA-001、BR-WS-DATA-003、BR-WS-DATA-004、X-CONST-001 | WS-FILE-MANAGE | 已覆盖结构操作与冲突协议 |
 | REQ-WS-008 | 路径冲突协议 | BR-WS-DATA-001、BR-WS-DATA-004、X-CONST-001 | WS-FILE-MANAGE | 已覆盖 PathConflict 规则 |
-| REQ-WS-009 | 关闭和切换 Workspace | BR-WS-STATE-001、X-CONST-003 | WS-OPEN | 待补关闭/切换状态机 |
+| REQ-WS-009 | 关闭和切换 Workspace | BR-WS-STATE-001、BR-WS-STATE-003、X-CONST-003 | WS-OPEN、WS-CLOSE | 已覆盖 dirty/pending 门禁 |
 | REQ-WS-010 | 搜索索引 | BR-WS-DATA-001、X-CONST-001 | WS-FILE-MANAGE | 待补搜索索引规则 |
 
 ## 3. Workspace 候选规则映射
@@ -40,7 +40,6 @@
 
 | 候选规则 ID | 承接需求 | 建议主链路 | 规则意图 |
 |-------------|----------|------------|----------|
-| BR-WS-STATE-003 | REQ-WS-009 | WS-CLOSE | 关闭或切换前必须处理 dirty editor 和 pending diff。 |
 | BR-WS-DATA-005 | REQ-WS-010 | WS-SEARCH | 搜索索引必须可重建，搜索结果必须限制在当前 Workspace。 |
 
 ## 4. 实现追踪方式
@@ -55,6 +54,7 @@
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-05-22 | v1.5 | 将 Workspace 关闭切换门禁候选规则升级为已注册规则映射 |
 | 2026-05-22 | v1.4 | 标记 Workspace rename/move/delete 结构操作实现完成 |
 | 2026-05-22 | v1.3 | 将 Workspace 创建结构操作与 PathConflict 候选规则升级为已注册规则映射 |
 | 2026-05-22 | v1.2 | 将最近 Workspace 候选规则升级为已注册规则映射 |
