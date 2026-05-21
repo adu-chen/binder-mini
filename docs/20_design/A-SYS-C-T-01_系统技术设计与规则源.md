@@ -53,6 +53,22 @@ en: InputReference
 forbidden: 附件, 知识库引用, @引用
 -->
 
+<!-- TERM
+term_id: TERM-WS-001
+chains: WS-FILE-MANAGE
+zh: 文件节点
+en: FileNode
+forbidden: 文件项, 文件记录, tree item
+-->
+
+<!-- TERM
+term_id: TERM-WS-002
+chains: WS-OPEN
+zh: 工作区数据库
+en: WorkspaceDatabase
+forbidden: 项目数据库, 本地库, db文件
+-->
+
 ## 1. 模块注册
 
 <!-- MODULE
@@ -249,6 +265,24 @@ rule_id: BR-WS-DATA-001
 文件管理操作的目标路径必须位于当前 Workspace 内，不得解析到 Workspace 边界之外。
 
 <!-- RULE
+rule_id: BR-WS-STATE-002
+主链路: WS-OPEN
+域: STATE
+需求映射: REQ-WS-001,REQ-WS-005
+-->
+
+Workspace active 前必须完成 `.binder` 和 workspace.db 初始化；初始化失败时不得返回 active Workspace snapshot。
+
+<!-- RULE
+rule_id: BR-WS-DATA-002
+主链路: WS-FILE-MANAGE
+域: DATA
+需求映射: REQ-WS-003
+-->
+
+Workspace 文件树必须以 Workspace 根目录为边界递归生成 FileNode，且不得暴露 `.binder` 内部数据。
+
+<!-- RULE
 rule_id: BR-ED-STATE-001
 主链路: ED-OPEN-FILE
 域: STATE
@@ -363,8 +397,6 @@ rule_id: BR-CORE-GOV-001
 
 | 候选规则 ID | 承接需求 | 建议链路 | 设计意图 |
 |-------------|----------|----------|----------|
-| BR-WS-STATE-002 | REQ-WS-001、REQ-WS-005 | WS-OPEN | Workspace active 前必须完成 `.binder` 和 workspace.db 初始化。 |
-| BR-WS-DATA-002 | REQ-WS-003 | WS-FILE-MANAGE | 文件树必须以 Workspace 根目录为边界递归生成 FileNode。 |
 | BR-WS-PERSIST-001 | REQ-WS-004 | WS-OPEN | 最近 Workspace 是用户级元数据，不属于 Workspace 内容。 |
 | BR-WS-DATA-003 | REQ-WS-006、REQ-WS-007 | WS-FILE-MANAGE | 创建、重命名、移动、删除必须通过 Workspace 边界守卫。 |
 | BR-WS-DATA-004 | REQ-WS-008 | WS-FILE-MANAGE | 目标冲突必须返回 PathConflict，未经确认不得覆盖。 |
@@ -375,5 +407,6 @@ rule_id: BR-CORE-GOV-001
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-05-22 | v1.2 | 注册 Workspace 初始化与递归 FileNode 正式规则 |
 | 2026-05-22 | v1.1 | 增加需求到规则映射约定和 Workspace 颗粒度候选规则 |
 | 2026-05-22 | v1.0 | 初始版本，注册首批模块、术语、链路、约束和规则 |

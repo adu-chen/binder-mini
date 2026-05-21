@@ -32,7 +32,7 @@ import type { AgentMessage, ProviderConfig, ToolExecution } from "./types/agent"
 import type { PendingDiff, TerminalDiffCard } from "./types/diff";
 import { openWorkspace, sortWorkspaceEntries } from "./services/workspaceService";
 import type { EditorDocument } from "./types/editor";
-import type { WorkspaceSnapshot } from "./types/workspace";
+import type { WorkspaceEntry, WorkspaceSnapshot } from "./types/workspace";
 
 /**
  * @GOV
@@ -331,24 +331,9 @@ export default function App() {
           <p className="muted">No workspace open</p>
         )}
         {workspaceError ? <p className="error-text">{workspaceError}</p> : null}
-        <ul className="file-list">
-          {workspaceSnapshot?.entries.map((entry) => (
-            <li key={entry.relativePath}>
-              <span aria-hidden="true">{entry.kind === "directory" ? "dir" : "file"}</span>
-              {entry.kind === "file" ? (
-                <button
-                  className="file-button"
-                  type="button"
-                  onClick={() => void handleOpenFile(entry.relativePath)}
-                >
-                  {entry.name}
-                </button>
-              ) : (
-                <span>{entry.name}</span>
-              )}
-            </li>
-          ))}
-        </ul>
+        {workspaceSnapshot ? (
+          <WorkspaceEntryList entries={workspaceSnapshot.entries} onOpenFile={handleOpenFile} />
+        ) : null}
       </aside>
       <section className="editor-surface">
         <div className="editor-toolbar">
@@ -528,5 +513,39 @@ export default function App() {
         <small>{machines.length} state machines registered</small>
       </aside>
     </main>
+  );
+}
+
+function WorkspaceEntryList({
+  entries,
+  onOpenFile,
+}: {
+  entries: WorkspaceEntry[];
+  onOpenFile: (relativePath: string) => void | Promise<void>;
+}) {
+  return (
+    <ul className="file-list">
+      {entries.map((entry) => (
+        <li key={entry.relativePath}>
+          <div className="file-row">
+            <span aria-hidden="true">{entry.kind === "directory" ? "dir" : "file"}</span>
+            {entry.kind === "file" ? (
+              <button
+                className="file-button"
+                type="button"
+                onClick={() => void onOpenFile(entry.relativePath)}
+              >
+                {entry.name}
+              </button>
+            ) : (
+              <span>{entry.name}</span>
+            )}
+          </div>
+          {entry.children?.length ? (
+            <WorkspaceEntryList entries={entry.children} onOpenFile={onOpenFile} />
+          ) : null}
+        </li>
+      ))}
+    </ul>
   );
 }

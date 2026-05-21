@@ -1,4 +1,4 @@
-import type { Workspace, WorkspaceFileTarget } from "../types/workspace";
+import type { Workspace, WorkspaceFileTarget, WorkspaceSnapshot } from "../types/workspace";
 import type { WorkspaceEntry, WorkspaceOpenResult } from "../types/workspace";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -28,21 +28,53 @@ export function isWorkspaceTarget(
 /**
  * @GOV
  * codes: BR-WS-STATE-001-QUERY-WS-WS-OPEN-006,
+ *        BR-WS-STATE-002-QUERY-WS-WS-OPEN-006,
  *        BR-WS-DATA-001-QUERY-WS-WS-FILE-MANAGE-006,
  *        BR-CORE-GOV-001-QUERY-WS-WS-OPEN-006
  * type: QUERY
  * chain: WS-OPEN, WS-FILE-MANAGE
- * rules: BR-WS-STATE-001, BR-WS-DATA-001, BR-CORE-GOV-001
- * boundary: in=Workspace open request | out=Workspace snapshot returned by Tauri command
- * term_ref: TERM-CORE-001
+ * rules: BR-WS-STATE-001, BR-WS-STATE-002, BR-WS-DATA-001, BR-CORE-GOV-001
+ * boundary: in=Workspace open request | out=initialized Workspace snapshot returned by Tauri command
+ * term_ref: TERM-WS-002
  */
 export async function openWorkspace(): Promise<WorkspaceOpenResult> {
   return invoke<WorkspaceOpenResult>("open_workspace");
 }
 
+/**
+ * @GOV
+ * codes: BR-WS-STATE-002-GUARD-WS-WS-OPEN-007,
+ *        BR-CORE-GOV-001-GUARD-WS-WS-OPEN-007
+ * type: GUARD
+ * chain: WS-OPEN
+ * rules: BR-WS-STATE-002, BR-CORE-GOV-001
+ * boundary: in=Workspace snapshot metadata | out=boolean indicating initialized WorkspaceDatabase
+ * term_ref: TERM-WS-002
+ */
+export function isWorkspaceSnapshotInitialized(snapshot: WorkspaceSnapshot): boolean {
+  return (
+    snapshot.workspace.status === "active" &&
+    snapshot.metadata.workspaceDatabaseInitialized &&
+    snapshot.metadata.workspaceDatabasePath.endsWith(".binder/workspace.db")
+  );
+}
+
+/**
+ * @GOV
+ * codes: BR-WS-DATA-002-DATA-WS-WS-FILE-MANAGE-007,
+ *        BR-CORE-GOV-001-DATA-WS-WS-FILE-MANAGE-007
+ * type: DATA
+ * chain: WS-FILE-MANAGE
+ * rules: BR-WS-DATA-002, BR-CORE-GOV-001
+ * boundary: in=recursive FileNode list | out=stable sorted recursive FileNode list
+ * term_ref: TERM-WS-001
+ */
 export function sortWorkspaceEntries(entries: WorkspaceEntry[]): WorkspaceEntry[] {
   return [...entries].sort((left, right) => {
     if (left.kind !== right.kind) return left.kind === "directory" ? -1 : 1;
     return left.name.localeCompare(right.name);
+  }).map((entry) => {
+    if (!entry.children) return { ...entry };
+    return { ...entry, children: sortWorkspaceEntries(entry.children) };
   });
 }

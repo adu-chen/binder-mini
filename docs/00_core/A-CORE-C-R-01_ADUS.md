@@ -40,7 +40,7 @@
 
 <!-- 自动生成。禁止人工编辑。-->
 <!-- 运行：npm run governance:generate -->
-<!-- 最后生成时间：2026-05-21T18:01:25.653Z -->
+<!-- 最后生成时间：2026-05-21T18:39:28.834Z -->
 
 ### 模块编码表
 
@@ -84,7 +84,9 @@
 | rule_id           | 域       | 主链路                                                 | 来源文档                                      | registry_status | 测试覆盖                                                                                                                                                                                                                                                                                                                          |
 | ----------------- | ------- | --------------------------------------------------- | ----------------------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | BR-WS-STATE-001   | STATE   | WS-OPEN                                             | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md | registered      | tests/governance.phase2.test.ts::Phase 2 governance skeleton, tests/workspaceService.test.ts::Workspace MVP service behavior                                                                                                                                                                                                  |
-| BR-WS-DATA-001    | DATA    | WS-FILE-MANAGE                                      | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md | registered      | tests/governance.phase2.test.ts::Phase 2 governance skeleton, tests/workspaceService.test.ts::sorts Workspace entries with directories first                                                                                                                                                                                  |
+| BR-WS-DATA-001    | DATA    | WS-FILE-MANAGE                                      | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md | registered      | tests/governance.phase2.test.ts::Phase 2 governance skeleton, tests/workspaceService.test.ts::requires Workspace database metadata before treating a snapshot as initialized                                                                                                                                                  |
+| BR-WS-STATE-002   | STATE   | WS-OPEN                                             | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md | registered      | tests/governance.phase2.test.ts::Phase 2 governance skeleton, tests/workspaceService.test.ts::sorts recursive FileNode children without flattening directories                                                                                                                                                                |
+| BR-WS-DATA-002    | DATA    | WS-FILE-MANAGE                                      | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md | registered      | tests/governance.phase2.test.ts::Phase 2 governance skeleton, tests/workspaceService.test.ts::sorts Workspace entries with directories first                                                                                                                                                                                  |
 | BR-ED-STATE-001   | STATE   | ED-OPEN-FILE                                        | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md | registered      | tests/editorService.test.ts::Editor MVP service behavior, tests/governance.phase2.test.ts::keeps Workspace targets inside the active Workspace                                                                                                                                                                                |
 | BR-ED-PERSIST-001 | PERSIST | ED-SAVE-FILE                                        | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md | registered      | tests/editorService.test.ts::uses editable mode for md and txt files only, tests/governance.phase2.test.ts::keeps Workspace targets inside the active Workspace                                                                                                                                                               |
 | BR-AG-STATE-001   | STATE   | AG-SEND-MESSAGE                                     | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md | registered      | tests/agentService.test.ts::Agent Provider MVP service behavior, tests/agentService.test.ts::keeps InputReference readonly and message content normalized, tests/agentService.test.ts::summarizes read and search tool results, tests/governance.phase2.test.ts::keeps Editor save readiness tied to editable dirty documents |
@@ -108,13 +110,15 @@
 
 ### 术语注册表
 
-| term_id       | 所属链路                                                        | 正式中文名 | 正式英文名            | 禁用别名                   | 来源文档                                      |
-| ------------- | ----------------------------------------------------------- | ----- | ---------------- | ---------------------- | ----------------------------------------- |
-| TERM-CORE-001 | WS-OPEN,AG-SEND-MESSAGE,DE-CREATE-DIFF                      | 工作区   | Workspace        | 项目目录, 当前目录, 工作目录       | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
-| TERM-DE-001   | DE-CREATE-DIFF,DE-ACCEPT-DIFF,DE-REJECT-DIFF,DE-EXPIRE-DIFF | 待审差异  | PendingDiff      | 修改候选, diff候选, 待处理修改    | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
-| TERM-DE-002   | DE-ACCEPT-DIFF,DE-REJECT-DIFF,DE-EXPIRE-DIFF                | 终态差异卡 | TerminalDiffCard | 结果卡, 结束卡, 历史卡          | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
-| TERM-AG-001   | AG-TOOL-CALL                                                | 工具执行  | ToolExecution    | 工具调用过程, 执行动作, tool run | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
-| TERM-AG-002   | AG-SEND-MESSAGE,AG-TOOL-CALL                                | 输入引用  | InputReference   | 附件, 知识库引用, @引用         | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| term_id       | 所属链路                                                        | 正式中文名  | 正式英文名             | 禁用别名                   | 来源文档                                      |
+| ------------- | ----------------------------------------------------------- | ------ | ----------------- | ---------------------- | ----------------------------------------- |
+| TERM-CORE-001 | WS-OPEN,AG-SEND-MESSAGE,DE-CREATE-DIFF                      | 工作区    | Workspace         | 项目目录, 当前目录, 工作目录       | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-DE-001   | DE-CREATE-DIFF,DE-ACCEPT-DIFF,DE-REJECT-DIFF,DE-EXPIRE-DIFF | 待审差异   | PendingDiff       | 修改候选, diff候选, 待处理修改    | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-DE-002   | DE-ACCEPT-DIFF,DE-REJECT-DIFF,DE-EXPIRE-DIFF                | 终态差异卡  | TerminalDiffCard  | 结果卡, 结束卡, 历史卡          | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-AG-001   | AG-TOOL-CALL                                                | 工具执行   | ToolExecution     | 工具调用过程, 执行动作, tool run | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-AG-002   | AG-SEND-MESSAGE,AG-TOOL-CALL                                | 输入引用   | InputReference    | 附件, 知识库引用, @引用         | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-WS-001   | WS-FILE-MANAGE                                              | 文件节点   | FileNode          | 文件项, 文件记录, tree item   | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-WS-002   | WS-OPEN                                                     | 工作区数据库 | WorkspaceDatabase | 项目数据库, 本地库, db文件       | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
 
 ### 链路视图
 
@@ -189,22 +193,24 @@
 
 #### WS-FILE-MANAGE
 
-| codes                                                                                                                                                   | type  | rules                                                            | 文件                               | 行号 |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ---------------------------------------------------------------- | -------------------------------- | -- |
-| BR-WS-STATE-001-DATA-WS-WS-OPEN-002, BR-WS-DATA-001-DATA-WS-WS-FILE-MANAGE-002, BR-SYS-GOV-001-DATA-WS-WS-OPEN-003, BR-CORE-GOV-001-DATA-WS-WS-OPEN-004 | DATA  | BR-WS-STATE-001, BR-WS-DATA-001, BR-SYS-GOV-001, BR-CORE-GOV-001 | src/machines/workspaceMachine.ts | 2  |
-| BR-WS-STATE-001-GUARD-WS-WS-OPEN-005, BR-WS-DATA-001-GUARD-WS-WS-FILE-MANAGE-003, BR-CORE-GOV-001-GUARD-WS-WS-FILE-MANAGE-004                           | GUARD | BR-WS-STATE-001, BR-WS-DATA-001, BR-CORE-GOV-001                 | src/services/workspaceService.ts | 6  |
-| BR-WS-STATE-001-QUERY-WS-WS-OPEN-006, BR-WS-DATA-001-QUERY-WS-WS-FILE-MANAGE-006, BR-CORE-GOV-001-QUERY-WS-WS-OPEN-006                                  | QUERY | BR-WS-STATE-001, BR-WS-DATA-001, BR-CORE-GOV-001                 | src/services/workspaceService.ts | 29 |
-| BR-WS-STATE-001-DATA-WS-WS-OPEN-001, BR-WS-DATA-001-DATA-WS-WS-FILE-MANAGE-001                                                                          | DATA  | BR-WS-STATE-001, BR-WS-DATA-001                                  | src/types/workspace.ts           | 2  |
+| codes                                                                                                                                                          | type  | rules                                                             | 文件                               | 行号 |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ----------------------------------------------------------------- | -------------------------------- | -- |
+| BR-WS-STATE-001-DATA-WS-WS-OPEN-002, BR-WS-DATA-001-DATA-WS-WS-FILE-MANAGE-002, BR-SYS-GOV-001-DATA-WS-WS-OPEN-003, BR-CORE-GOV-001-DATA-WS-WS-OPEN-004        | DATA  | BR-WS-STATE-001, BR-WS-DATA-001, BR-SYS-GOV-001, BR-CORE-GOV-001  | src/machines/workspaceMachine.ts | 2  |
+| BR-WS-STATE-001-GUARD-WS-WS-OPEN-005, BR-WS-DATA-001-GUARD-WS-WS-FILE-MANAGE-003, BR-CORE-GOV-001-GUARD-WS-WS-FILE-MANAGE-004                                  | GUARD | BR-WS-STATE-001, BR-WS-DATA-001, BR-CORE-GOV-001                  | src/services/workspaceService.ts | 6  |
+| BR-WS-STATE-001-QUERY-WS-WS-OPEN-006, BR-WS-STATE-002-QUERY-WS-WS-OPEN-006, BR-WS-DATA-001-QUERY-WS-WS-FILE-MANAGE-006, BR-CORE-GOV-001-QUERY-WS-WS-OPEN-006   | QUERY | BR-WS-STATE-001, BR-WS-STATE-002, BR-WS-DATA-001, BR-CORE-GOV-001 | src/services/workspaceService.ts | 29 |
+| BR-WS-DATA-002-DATA-WS-WS-FILE-MANAGE-007, BR-CORE-GOV-001-DATA-WS-WS-FILE-MANAGE-007                                                                          | DATA  | BR-WS-DATA-002, BR-CORE-GOV-001                                   | src/services/workspaceService.ts | 63 |
+| BR-WS-STATE-001-DATA-WS-WS-OPEN-001, BR-WS-STATE-002-DATA-WS-WS-OPEN-001, BR-WS-DATA-001-DATA-WS-WS-FILE-MANAGE-001, BR-WS-DATA-002-DATA-WS-WS-FILE-MANAGE-001 | DATA  | BR-WS-STATE-001, BR-WS-STATE-002, BR-WS-DATA-001, BR-WS-DATA-002  | src/types/workspace.ts           | 2  |
 
 #### WS-OPEN
 
-| codes                                                                                                                                                   | type  | rules                                                            | 文件                               | 行号 |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ---------------------------------------------------------------- | -------------------------------- | -- |
-| BR-SYS-GOV-001-RB-SYS-WS-OPEN-001, BR-CORE-GOV-001-RB-SYS-WS-OPEN-001                                                                                   | RB    | BR-SYS-GOV-001, BR-CORE-GOV-001                                  | src/App.tsx                      | 38 |
-| BR-WS-STATE-001-DATA-WS-WS-OPEN-002, BR-WS-DATA-001-DATA-WS-WS-FILE-MANAGE-002, BR-SYS-GOV-001-DATA-WS-WS-OPEN-003, BR-CORE-GOV-001-DATA-WS-WS-OPEN-004 | DATA  | BR-WS-STATE-001, BR-WS-DATA-001, BR-SYS-GOV-001, BR-CORE-GOV-001 | src/machines/workspaceMachine.ts | 2  |
-| BR-WS-STATE-001-GUARD-WS-WS-OPEN-005, BR-WS-DATA-001-GUARD-WS-WS-FILE-MANAGE-003, BR-CORE-GOV-001-GUARD-WS-WS-FILE-MANAGE-004                           | GUARD | BR-WS-STATE-001, BR-WS-DATA-001, BR-CORE-GOV-001                 | src/services/workspaceService.ts | 6  |
-| BR-WS-STATE-001-QUERY-WS-WS-OPEN-006, BR-WS-DATA-001-QUERY-WS-WS-FILE-MANAGE-006, BR-CORE-GOV-001-QUERY-WS-WS-OPEN-006                                  | QUERY | BR-WS-STATE-001, BR-WS-DATA-001, BR-CORE-GOV-001                 | src/services/workspaceService.ts | 29 |
-| BR-WS-STATE-001-DATA-WS-WS-OPEN-001, BR-WS-DATA-001-DATA-WS-WS-FILE-MANAGE-001                                                                          | DATA  | BR-WS-STATE-001, BR-WS-DATA-001                                  | src/types/workspace.ts           | 2  |
+| codes                                                                                                                                                          | type  | rules                                                             | 文件                               | 行号 |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ----------------------------------------------------------------- | -------------------------------- | -- |
+| BR-SYS-GOV-001-RB-SYS-WS-OPEN-001, BR-CORE-GOV-001-RB-SYS-WS-OPEN-001                                                                                          | RB    | BR-SYS-GOV-001, BR-CORE-GOV-001                                   | src/App.tsx                      | 38 |
+| BR-WS-STATE-001-DATA-WS-WS-OPEN-002, BR-WS-DATA-001-DATA-WS-WS-FILE-MANAGE-002, BR-SYS-GOV-001-DATA-WS-WS-OPEN-003, BR-CORE-GOV-001-DATA-WS-WS-OPEN-004        | DATA  | BR-WS-STATE-001, BR-WS-DATA-001, BR-SYS-GOV-001, BR-CORE-GOV-001  | src/machines/workspaceMachine.ts | 2  |
+| BR-WS-STATE-001-GUARD-WS-WS-OPEN-005, BR-WS-DATA-001-GUARD-WS-WS-FILE-MANAGE-003, BR-CORE-GOV-001-GUARD-WS-WS-FILE-MANAGE-004                                  | GUARD | BR-WS-STATE-001, BR-WS-DATA-001, BR-CORE-GOV-001                  | src/services/workspaceService.ts | 6  |
+| BR-WS-STATE-001-QUERY-WS-WS-OPEN-006, BR-WS-STATE-002-QUERY-WS-WS-OPEN-006, BR-WS-DATA-001-QUERY-WS-WS-FILE-MANAGE-006, BR-CORE-GOV-001-QUERY-WS-WS-OPEN-006   | QUERY | BR-WS-STATE-001, BR-WS-STATE-002, BR-WS-DATA-001, BR-CORE-GOV-001 | src/services/workspaceService.ts | 29 |
+| BR-WS-STATE-002-GUARD-WS-WS-OPEN-007, BR-CORE-GOV-001-GUARD-WS-WS-OPEN-007                                                                                     | GUARD | BR-WS-STATE-002, BR-CORE-GOV-001                                  | src/services/workspaceService.ts | 45 |
+| BR-WS-STATE-001-DATA-WS-WS-OPEN-001, BR-WS-STATE-002-DATA-WS-WS-OPEN-001, BR-WS-DATA-001-DATA-WS-WS-FILE-MANAGE-001, BR-WS-DATA-002-DATA-WS-WS-FILE-MANAGE-001 | DATA  | BR-WS-STATE-001, BR-WS-STATE-002, BR-WS-DATA-001, BR-WS-DATA-002  | src/types/workspace.ts           | 2  |
 
 ### 规则视图
 
@@ -246,7 +252,9 @@
 | BR-ED-STATE-001-GUARD-ED-ED-OPEN-FILE-005, BR-ED-PERSIST-001-RB-ED-ED-SAVE-FILE-003, BR-CORE-GOV-001-RB-ED-ED-SAVE-FILE-004                                                                                                                                             | RB    | ED-OPEN-FILE, ED-SAVE-FILE                                     | src/services/editorService.ts    | 5  |
 | BR-ED-STATE-001-QUERY-ED-ED-OPEN-FILE-006, BR-ED-PERSIST-001-EFFECT-ED-ED-SAVE-FILE-006, BR-CORE-GOV-001-RB-ED-ED-OPEN-FILE-006                                                                                                                                         | RB    | ED-OPEN-FILE, ED-SAVE-FILE                                     | src/services/editorService.ts    | 19 |
 | BR-WS-STATE-001-GUARD-WS-WS-OPEN-005, BR-WS-DATA-001-GUARD-WS-WS-FILE-MANAGE-003, BR-CORE-GOV-001-GUARD-WS-WS-FILE-MANAGE-004                                                                                                                                           | GUARD | WS-OPEN, WS-FILE-MANAGE                                        | src/services/workspaceService.ts | 6  |
-| BR-WS-STATE-001-QUERY-WS-WS-OPEN-006, BR-WS-DATA-001-QUERY-WS-WS-FILE-MANAGE-006, BR-CORE-GOV-001-QUERY-WS-WS-OPEN-006                                                                                                                                                  | QUERY | WS-OPEN, WS-FILE-MANAGE                                        | src/services/workspaceService.ts | 29 |
+| BR-WS-STATE-001-QUERY-WS-WS-OPEN-006, BR-WS-STATE-002-QUERY-WS-WS-OPEN-006, BR-WS-DATA-001-QUERY-WS-WS-FILE-MANAGE-006, BR-CORE-GOV-001-QUERY-WS-WS-OPEN-006                                                                                                            | QUERY | WS-OPEN, WS-FILE-MANAGE                                        | src/services/workspaceService.ts | 29 |
+| BR-WS-STATE-002-GUARD-WS-WS-OPEN-007, BR-CORE-GOV-001-GUARD-WS-WS-OPEN-007                                                                                                                                                                                              | GUARD | WS-OPEN                                                        | src/services/workspaceService.ts | 45 |
+| BR-WS-DATA-002-DATA-WS-WS-FILE-MANAGE-007, BR-CORE-GOV-001-DATA-WS-WS-FILE-MANAGE-007                                                                                                                                                                                   | DATA  | WS-FILE-MANAGE                                                 | src/services/workspaceService.ts | 63 |
 
 #### BR-DE-PERSIST-001
 
@@ -310,21 +318,36 @@
 
 #### BR-WS-DATA-001
 
-| codes                                                                                                                                                   | type  | chain                   | 文件                               | 行号 |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ----------------------- | -------------------------------- | -- |
-| BR-WS-STATE-001-DATA-WS-WS-OPEN-002, BR-WS-DATA-001-DATA-WS-WS-FILE-MANAGE-002, BR-SYS-GOV-001-DATA-WS-WS-OPEN-003, BR-CORE-GOV-001-DATA-WS-WS-OPEN-004 | DATA  | WS-OPEN, WS-FILE-MANAGE | src/machines/workspaceMachine.ts | 2  |
-| BR-WS-STATE-001-GUARD-WS-WS-OPEN-005, BR-WS-DATA-001-GUARD-WS-WS-FILE-MANAGE-003, BR-CORE-GOV-001-GUARD-WS-WS-FILE-MANAGE-004                           | GUARD | WS-OPEN, WS-FILE-MANAGE | src/services/workspaceService.ts | 6  |
-| BR-WS-STATE-001-QUERY-WS-WS-OPEN-006, BR-WS-DATA-001-QUERY-WS-WS-FILE-MANAGE-006, BR-CORE-GOV-001-QUERY-WS-WS-OPEN-006                                  | QUERY | WS-OPEN, WS-FILE-MANAGE | src/services/workspaceService.ts | 29 |
-| BR-WS-STATE-001-DATA-WS-WS-OPEN-001, BR-WS-DATA-001-DATA-WS-WS-FILE-MANAGE-001                                                                          | DATA  | WS-OPEN, WS-FILE-MANAGE | src/types/workspace.ts           | 2  |
+| codes                                                                                                                                                          | type  | chain                   | 文件                               | 行号 |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ----------------------- | -------------------------------- | -- |
+| BR-WS-STATE-001-DATA-WS-WS-OPEN-002, BR-WS-DATA-001-DATA-WS-WS-FILE-MANAGE-002, BR-SYS-GOV-001-DATA-WS-WS-OPEN-003, BR-CORE-GOV-001-DATA-WS-WS-OPEN-004        | DATA  | WS-OPEN, WS-FILE-MANAGE | src/machines/workspaceMachine.ts | 2  |
+| BR-WS-STATE-001-GUARD-WS-WS-OPEN-005, BR-WS-DATA-001-GUARD-WS-WS-FILE-MANAGE-003, BR-CORE-GOV-001-GUARD-WS-WS-FILE-MANAGE-004                                  | GUARD | WS-OPEN, WS-FILE-MANAGE | src/services/workspaceService.ts | 6  |
+| BR-WS-STATE-001-QUERY-WS-WS-OPEN-006, BR-WS-STATE-002-QUERY-WS-WS-OPEN-006, BR-WS-DATA-001-QUERY-WS-WS-FILE-MANAGE-006, BR-CORE-GOV-001-QUERY-WS-WS-OPEN-006   | QUERY | WS-OPEN, WS-FILE-MANAGE | src/services/workspaceService.ts | 29 |
+| BR-WS-STATE-001-DATA-WS-WS-OPEN-001, BR-WS-STATE-002-DATA-WS-WS-OPEN-001, BR-WS-DATA-001-DATA-WS-WS-FILE-MANAGE-001, BR-WS-DATA-002-DATA-WS-WS-FILE-MANAGE-001 | DATA  | WS-OPEN, WS-FILE-MANAGE | src/types/workspace.ts           | 2  |
+
+#### BR-WS-DATA-002
+
+| codes                                                                                                                                                          | type | chain                   | 文件                               | 行号 |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ----------------------- | -------------------------------- | -- |
+| BR-WS-DATA-002-DATA-WS-WS-FILE-MANAGE-007, BR-CORE-GOV-001-DATA-WS-WS-FILE-MANAGE-007                                                                          | DATA | WS-FILE-MANAGE          | src/services/workspaceService.ts | 63 |
+| BR-WS-STATE-001-DATA-WS-WS-OPEN-001, BR-WS-STATE-002-DATA-WS-WS-OPEN-001, BR-WS-DATA-001-DATA-WS-WS-FILE-MANAGE-001, BR-WS-DATA-002-DATA-WS-WS-FILE-MANAGE-001 | DATA | WS-OPEN, WS-FILE-MANAGE | src/types/workspace.ts           | 2  |
 
 #### BR-WS-STATE-001
 
-| codes                                                                                                                                                   | type  | chain                   | 文件                               | 行号 |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ----------------------- | -------------------------------- | -- |
-| BR-WS-STATE-001-DATA-WS-WS-OPEN-002, BR-WS-DATA-001-DATA-WS-WS-FILE-MANAGE-002, BR-SYS-GOV-001-DATA-WS-WS-OPEN-003, BR-CORE-GOV-001-DATA-WS-WS-OPEN-004 | DATA  | WS-OPEN, WS-FILE-MANAGE | src/machines/workspaceMachine.ts | 2  |
-| BR-WS-STATE-001-GUARD-WS-WS-OPEN-005, BR-WS-DATA-001-GUARD-WS-WS-FILE-MANAGE-003, BR-CORE-GOV-001-GUARD-WS-WS-FILE-MANAGE-004                           | GUARD | WS-OPEN, WS-FILE-MANAGE | src/services/workspaceService.ts | 6  |
-| BR-WS-STATE-001-QUERY-WS-WS-OPEN-006, BR-WS-DATA-001-QUERY-WS-WS-FILE-MANAGE-006, BR-CORE-GOV-001-QUERY-WS-WS-OPEN-006                                  | QUERY | WS-OPEN, WS-FILE-MANAGE | src/services/workspaceService.ts | 29 |
-| BR-WS-STATE-001-DATA-WS-WS-OPEN-001, BR-WS-DATA-001-DATA-WS-WS-FILE-MANAGE-001                                                                          | DATA  | WS-OPEN, WS-FILE-MANAGE | src/types/workspace.ts           | 2  |
+| codes                                                                                                                                                          | type  | chain                   | 文件                               | 行号 |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ----------------------- | -------------------------------- | -- |
+| BR-WS-STATE-001-DATA-WS-WS-OPEN-002, BR-WS-DATA-001-DATA-WS-WS-FILE-MANAGE-002, BR-SYS-GOV-001-DATA-WS-WS-OPEN-003, BR-CORE-GOV-001-DATA-WS-WS-OPEN-004        | DATA  | WS-OPEN, WS-FILE-MANAGE | src/machines/workspaceMachine.ts | 2  |
+| BR-WS-STATE-001-GUARD-WS-WS-OPEN-005, BR-WS-DATA-001-GUARD-WS-WS-FILE-MANAGE-003, BR-CORE-GOV-001-GUARD-WS-WS-FILE-MANAGE-004                                  | GUARD | WS-OPEN, WS-FILE-MANAGE | src/services/workspaceService.ts | 6  |
+| BR-WS-STATE-001-QUERY-WS-WS-OPEN-006, BR-WS-STATE-002-QUERY-WS-WS-OPEN-006, BR-WS-DATA-001-QUERY-WS-WS-FILE-MANAGE-006, BR-CORE-GOV-001-QUERY-WS-WS-OPEN-006   | QUERY | WS-OPEN, WS-FILE-MANAGE | src/services/workspaceService.ts | 29 |
+| BR-WS-STATE-001-DATA-WS-WS-OPEN-001, BR-WS-STATE-002-DATA-WS-WS-OPEN-001, BR-WS-DATA-001-DATA-WS-WS-FILE-MANAGE-001, BR-WS-DATA-002-DATA-WS-WS-FILE-MANAGE-001 | DATA  | WS-OPEN, WS-FILE-MANAGE | src/types/workspace.ts           | 2  |
+
+#### BR-WS-STATE-002
+
+| codes                                                                                                                                                          | type  | chain                   | 文件                               | 行号 |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ----------------------- | -------------------------------- | -- |
+| BR-WS-STATE-001-QUERY-WS-WS-OPEN-006, BR-WS-STATE-002-QUERY-WS-WS-OPEN-006, BR-WS-DATA-001-QUERY-WS-WS-FILE-MANAGE-006, BR-CORE-GOV-001-QUERY-WS-WS-OPEN-006   | QUERY | WS-OPEN, WS-FILE-MANAGE | src/services/workspaceService.ts | 29 |
+| BR-WS-STATE-002-GUARD-WS-WS-OPEN-007, BR-CORE-GOV-001-GUARD-WS-WS-OPEN-007                                                                                     | GUARD | WS-OPEN                 | src/services/workspaceService.ts | 45 |
+| BR-WS-STATE-001-DATA-WS-WS-OPEN-001, BR-WS-STATE-002-DATA-WS-WS-OPEN-001, BR-WS-DATA-001-DATA-WS-WS-FILE-MANAGE-001, BR-WS-DATA-002-DATA-WS-WS-FILE-MANAGE-001 | DATA  | WS-OPEN, WS-FILE-MANAGE | src/types/workspace.ts           | 2  |
 
 ### triage 汇总
 

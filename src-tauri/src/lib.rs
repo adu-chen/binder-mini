@@ -17,6 +17,15 @@ struct WorkspaceEntry {
     name: String,
     relative_path: String,
     kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    children: Option<Vec<WorkspaceEntry>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceMetadata {
+    workspace_database_path: String,
+    workspace_database_initialized: bool,
 }
 
 #[derive(Serialize)]
@@ -24,6 +33,7 @@ struct WorkspaceEntry {
 struct WorkspaceSnapshot {
     workspace: Workspace,
     entries: Vec<WorkspaceEntry>,
+    metadata: WorkspaceMetadata,
 }
 
 #[derive(Serialize)]
@@ -78,7 +88,8 @@ async fn open_workspace(app: tauri::AppHandle) -> Result<WorkspaceOpenResult, St
         });
     };
 
-    let entries = read_workspace_entries(&root_path)?;
+    let metadata = initialize_workspace_metadata(&root_path)?;
+    let entries = read_workspace_entries(&root_path, &root_path)?;
     let display_name = root_path
         .file_name()
         .and_then(|value| value.to_str())
@@ -94,16 +105,34 @@ async fn open_workspace(app: tauri::AppHandle) -> Result<WorkspaceOpenResult, St
                 status: "active",
             },
             entries,
+            metadata,
         }),
     })
 }
 
-fn read_workspace_entries(root_path: &Path) -> Result<Vec<WorkspaceEntry>, String> {
+fn initialize_workspace_metadata(root_path: &Path) -> Result<WorkspaceMetadata, String> {
+    let binder_dir = root_path.join(".binder");
+    fs::create_dir_all(&binder_dir).map_err(|error| error.to_string())?;
+    let workspace_database_path = binder_dir.join("workspace.db");
+    if !workspace_database_path.exists() {
+        fs::write(&workspace_database_path, b"{\"version\":1}\n")
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(WorkspaceMetadata {
+        workspace_database_path: workspace_database_path.to_string_lossy().to_string(),
+        workspace_database_initialized: workspace_database_path.is_file(),
+    })
+}
+
+fn read_workspace_entries(
+    root_path: &Path,
+    current_path: &Path,
+) -> Result<Vec<WorkspaceEntry>, String> {
     let mut entries = Vec::new();
-    for entry in fs::read_dir(root_path).map_err(|error| error.to_string())? {
+    for entry in fs::read_dir(current_path).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
         let path = entry.path();
-        if !is_direct_child(root_path, &path) {
+        if should_skip_workspace_internal(root_path, &path) {
             continue;
         }
         let file_type = entry.file_type().map_err(|error| error.to_string())?;
@@ -113,22 +142,41 @@ fn read_workspace_entries(root_path: &Path) -> Result<Vec<WorkspaceEntry>, Strin
             "file"
         };
         let name = entry.file_name().to_string_lossy().to_string();
+        let relative_path = path
+            .strip_prefix(root_path)
+            .map_err(|error| error.to_string())?
+            .to_string_lossy()
+            .to_string();
+        let children = if file_type.is_dir() {
+            Some(read_workspace_entries(root_path, &path)?)
+        } else {
+            None
+        };
         entries.push(WorkspaceEntry {
-            relative_path: name.clone(),
+            relative_path,
             name,
             kind,
+            children,
         });
     }
+    sort_workspace_entries(&mut entries);
+    Ok(entries)
+}
+
+fn sort_workspace_entries(entries: &mut [WorkspaceEntry]) {
     entries.sort_by(|left, right| match (left.kind, right.kind) {
         ("directory", "file") => std::cmp::Ordering::Less,
         ("file", "directory") => std::cmp::Ordering::Greater,
         _ => left.name.cmp(&right.name),
     });
-    Ok(entries)
 }
 
-fn is_direct_child(root_path: &Path, path: &PathBuf) -> bool {
+fn should_skip_workspace_internal(root_path: &Path, path: &Path) -> bool {
     path.parent() == Some(root_path)
+        && path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .is_some_and(|name| name == ".binder")
 }
 
 #[tauri::command]
@@ -156,12 +204,15 @@ fn read_file(workspace_root: String, file_path: String) -> Result<String, String
 
 #[tauri::command]
 fn list_files(workspace_root: String, dir_path: Option<String>) -> Result<ListFilesResult, String> {
+    let root = PathBuf::from(&workspace_root)
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
     let dir = resolve_workspace_path(&workspace_root, dir_path.as_deref().unwrap_or(""))?;
     if !dir.is_dir() {
         return Err("target is not a directory".to_string());
     }
     Ok(ListFilesResult {
-        entries: read_workspace_entries(&dir)?,
+        entries: read_workspace_entries(&root, &dir)?,
     })
 }
 
@@ -253,6 +304,9 @@ fn collect_search_results(
     for entry in fs::read_dir(current).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
         let path = entry.path();
+        if should_skip_workspace_internal(root, &path) {
+            continue;
+        }
         let file_type = entry.file_type().map_err(|error| error.to_string())?;
         if file_type.is_dir() {
             collect_search_results(root, &path, query, results)?;
@@ -276,6 +330,69 @@ fn collect_search_results(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_workspace_root(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after UNIX_EPOCH")
+            .as_nanos();
+        std::env::temp_dir().join(format!("binder-mini-{name}-{stamp}"))
+    }
+
+    #[test]
+    fn initializes_workspace_database_without_exposing_internal_dir() {
+        let root = test_workspace_root("metadata");
+        fs::create_dir_all(root.join("docs")).expect("fixture workspace should be created");
+
+        let metadata = initialize_workspace_metadata(&root).expect("metadata should initialize");
+        let entries = read_workspace_entries(&root, &root).expect("entries should load");
+
+        assert!(metadata.workspace_database_initialized);
+        assert!(PathBuf::from(metadata.workspace_database_path).is_file());
+        assert!(entries.iter().all(|entry| entry.name != ".binder"));
+
+        fs::remove_dir_all(root).expect("fixture workspace should be removed");
+    }
+
+    #[test]
+    fn reads_recursive_workspace_entries_with_relative_paths() {
+        let root = test_workspace_root("tree");
+        fs::create_dir_all(root.join("docs/nested")).expect("fixture tree should be created");
+        fs::write(root.join("docs/nested/readme.md"), "hello")
+            .expect("fixture file should be written");
+        fs::write(root.join("z.txt"), "z").expect("fixture file should be written");
+
+        let entries = read_workspace_entries(&root, &root).expect("entries should load");
+        let docs = entries
+            .iter()
+            .find(|entry| entry.relative_path == "docs")
+            .expect("docs directory should exist");
+        let nested = docs
+            .children
+            .as_ref()
+            .expect("docs should have children")
+            .iter()
+            .find(|entry| entry.relative_path == "docs/nested")
+            .expect("nested directory should exist");
+
+        assert_eq!(entries[0].kind, "directory");
+        assert_eq!(
+            nested
+                .children
+                .as_ref()
+                .expect("nested should have children")[0]
+                .relative_path,
+            "docs/nested/readme.md"
+        );
+
+        fs::remove_dir_all(root).expect("fixture workspace should be removed");
+    }
 }
 
 pub fn run() {

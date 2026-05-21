@@ -11,16 +11,26 @@ import {
 } from "../src/services/agentService";
 import { canExecutePendingDiff, createTerminalDiffCard } from "../src/services/diffService";
 import { canSaveEditorDocument } from "../src/services/editorService";
-import { isWorkspaceTarget } from "../src/services/workspaceService";
+import { isWorkspaceSnapshotInitialized, isWorkspaceTarget } from "../src/services/workspaceService";
 
 describe("Phase 2 governance skeleton", () => {
   // covers: BR-WS-STATE-001
+  // covers: BR-WS-STATE-002
   // covers: BR-WS-DATA-001
+  // covers: BR-WS-DATA-002
   it("keeps Workspace targets inside the active Workspace", () => {
     const workspace = { rootPath: "/tmp/ws", displayName: "ws", status: "active" as const };
     expect(isWorkspaceTarget(workspace, { workspaceRoot: "/tmp/ws", relativePath: "a.md" })).toBe(true);
     expect(isWorkspaceTarget(workspace, { workspaceRoot: "/tmp/ws", relativePath: "../a.md" })).toBe(false);
     expect(createWorkspaceMachineDefinition().initial).toBe("noWorkspace");
+    expect(isWorkspaceSnapshotInitialized({
+      workspace,
+      entries: [{ name: "docs", relativePath: "docs", kind: "directory", children: [] }],
+      metadata: {
+        workspaceDatabasePath: "/tmp/ws/.binder/workspace.db",
+        workspaceDatabaseInitialized: true,
+      },
+    })).toBe(true);
   });
 
   // covers: BR-ED-STATE-001

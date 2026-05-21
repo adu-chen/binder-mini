@@ -25,9 +25,9 @@
 |---------|----------|-------------------|--------|----------|
 | REQ-WS-001 | 打开 Workspace | BR-WS-STATE-001、X-CONST-003 | WS-OPEN | 已覆盖 MVP 打开流程 |
 | REQ-WS-002 | Workspace 边界 | BR-WS-DATA-001、X-CONST-001、BR-CORE-GOV-001 | WS-FILE-MANAGE | 已覆盖边界约束 |
-| REQ-WS-003 | 递归文件树 | BR-WS-STATE-001、BR-WS-DATA-001 | WS-OPEN、WS-FILE-MANAGE | 仅覆盖 MVP 文件树，递归结构待补规则 |
+| REQ-WS-003 | 递归文件树 | BR-WS-STATE-001、BR-WS-DATA-001、BR-WS-DATA-002 | WS-OPEN、WS-FILE-MANAGE | 已覆盖递归 FileNode |
 | REQ-WS-004 | 最近 Workspace | BR-WS-STATE-001 | WS-OPEN | 待补持久化规则 |
-| REQ-WS-005 | workspace.db 初始化 | BR-WS-STATE-001、X-CONST-003 | WS-OPEN | 待补初始化规则 |
+| REQ-WS-005 | workspace.db 初始化 | BR-WS-STATE-001、BR-WS-STATE-002、X-CONST-003 | WS-OPEN | 已覆盖初始化规则 |
 | REQ-WS-006 | 创建文件与目录 | BR-WS-DATA-001、X-CONST-001 | WS-FILE-MANAGE | 边界已覆盖，冲突协议待补 |
 | REQ-WS-007 | 重命名、移动和删除 | BR-WS-DATA-001、X-CONST-001 | WS-FILE-MANAGE | 边界已覆盖，结构操作待补 |
 | REQ-WS-008 | 路径冲突协议 | BR-WS-DATA-001、X-CONST-001 | WS-FILE-MANAGE | 待补 PathConflict 规则 |
@@ -40,8 +40,6 @@
 
 | 候选规则 ID | 承接需求 | 建议主链路 | 规则意图 |
 |-------------|----------|------------|----------|
-| BR-WS-STATE-002 | REQ-WS-001、REQ-WS-005 | WS-OPEN | Workspace active 前必须完成 `.binder` 和 workspace.db 初始化。 |
-| BR-WS-DATA-002 | REQ-WS-003 | WS-FILE-MANAGE | 文件树必须以 Workspace 根目录为边界递归生成 FileNode。 |
 | BR-WS-PERSIST-001 | REQ-WS-004 | WS-OPEN | 最近 Workspace 是用户级元数据，不属于 Workspace 内容。 |
 | BR-WS-DATA-003 | REQ-WS-006、REQ-WS-007 | WS-FILE-MANAGE | 创建、重命名、移动、删除必须通过 Workspace 边界守卫。 |
 | BR-WS-DATA-004 | REQ-WS-008 | WS-FILE-MANAGE | 目标冲突必须返回 PathConflict，未经确认不得覆盖。 |
@@ -60,4 +58,5 @@
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-05-22 | v1.1 | 将 Workspace 初始化与递归 FileNode 候选规则升级为已注册规则映射 |
 | 2026-05-22 | v1.0 | 初始版本，建立 Workspace 需求到技术规则映射 |
