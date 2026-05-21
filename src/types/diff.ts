@@ -16,10 +16,17 @@ export interface PendingDiff {
   originalText: string;
   proposedText: string;
   status: "pending";
+  summary: string;
 }
 
 export interface TerminalDiffCard {
   diffId: string;
   status: "accepted" | "rejected" | "expired" | "error";
   message: string;
+}
+
+export interface EditCurrentEditorDocumentRequest {
+  filePath: string;
+  originalText: string;
+  instruction: string;
 }

@@ -128,7 +128,7 @@ button {
   border: 1px solid #ccd3dd;
   box-sizing: border-box;
   font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  min-height: calc(100vh - 98px);
+  min-height: 52vh;
   padding: 12px;
   resize: none;
   width: 100%;
@@ -218,4 +218,67 @@ button {
 .tool-actions button:disabled {
   color: #8a96a8;
   cursor: default;
+}
+
+.diff-card {
+  border: 1px solid #ccd3dd;
+  margin-top: 16px;
+  padding: 12px;
+}
+
+.diff-card header,
+.terminal-diff-card {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.diff-card header span,
+.terminal-diff-card span {
+  color: #5b6777;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.diff-preview {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.diff-preview pre {
+  background: #f6f7f9;
+  border: 1px solid #d8dee6;
+  box-sizing: border-box;
+  margin: 6px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px;
+  white-space: pre-wrap;
+}
+
+.diff-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.diff-actions button,
+.panel > button:not(.primary-action) {
+  border: 1px solid #ccd3dd;
+  background: #ffffff;
+  cursor: pointer;
+  min-height: 32px;
+}
+
+.terminal-diff-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.terminal-diff-card {
+  border: 1px solid #d8dee6;
+  padding: 8px;
 }

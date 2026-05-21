@@ -6,6 +6,7 @@ import { createWorkspaceMachineDefinition } from "./machines/workspaceMachine";
 import {
   canRecordAgentMessage,
   canSendAgentMessage,
+  completeToolExecution,
   createAssistantStreamMessage,
   createPendingToolExecution,
   createUserAgentMessage,
@@ -16,11 +17,19 @@ import {
   streamAssistantResponse,
 } from "./services/agentService";
 import {
+  acceptPendingDiff,
+  createPendingDiffFromCurrentEditor,
+  createTerminalDiffCard,
+  rejectPendingDiff,
+  shouldExpirePendingDiff,
+} from "./services/diffService";
+import {
   canSaveEditorDocument,
   openEditorDocument,
   saveEditorDocument,
 } from "./services/editorService";
 import type { AgentMessage, ProviderConfig, ToolExecution } from "./types/agent";
+import type { PendingDiff, TerminalDiffCard } from "./types/diff";
 import { openWorkspace, sortWorkspaceEntries } from "./services/workspaceService";
 import type { EditorDocument } from "./types/editor";
 import type { WorkspaceSnapshot } from "./types/workspace";
@@ -53,6 +62,10 @@ export default function App() {
   const [toolExecutions, setToolExecutions] = useState<ToolExecution[]>([]);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [agentStreaming, setAgentStreaming] = useState(false);
+  const [pendingDiff, setPendingDiff] = useState<PendingDiff | null>(null);
+  const [terminalDiffCards, setTerminalDiffCards] = useState<TerminalDiffCard[]>(
+    [],
+  );
   const machines = [
     createWorkspaceMachineDefinition(),
     createEditorMachineDefinition(),
@@ -70,6 +83,7 @@ export default function App() {
           entries: sortWorkspaceEntries(result.snapshot.entries),
         });
         setEditorDocument(null);
+        setPendingDiff(null);
       }
     } catch (error) {
       setWorkspaceError(error instanceof Error ? error.message : String(error));
@@ -80,12 +94,14 @@ export default function App() {
     if (!workspaceSnapshot) return;
     setEditorError(null);
     try {
-      setEditorDocument(
-        await openEditorDocument({
+      const openedDocument = await openEditorDocument({
           workspaceRoot: workspaceSnapshot.workspace.rootPath,
           relativePath,
-        }),
-      );
+        });
+      setEditorDocument(openedDocument);
+      if (pendingDiff && pendingDiff.filePath !== openedDocument.filePath) {
+        expirePendingDiff(pendingDiff);
+      }
     } catch (error) {
       setEditorError(error instanceof Error ? error.message : String(error));
     }
@@ -98,6 +114,30 @@ export default function App() {
       setEditorDocument(await saveEditorDocument(editorDocument));
     } catch (error) {
       setEditorError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  function expirePendingDiff(diff: PendingDiff) {
+    setTerminalDiffCards((cards) => [
+      createTerminalDiffCard(diff.id, "expired"),
+      ...cards,
+    ]);
+    setPendingDiff(null);
+  }
+
+  function handleEditorChange(content: string) {
+    if (!editorDocument) return;
+    const nextDocument = {
+      ...editorDocument,
+      content,
+      dirty: true,
+    };
+    setEditorDocument(nextDocument);
+    if (
+      pendingDiff &&
+      shouldExpirePendingDiff(pendingDiff, nextDocument.filePath, content)
+    ) {
+      expirePendingDiff(pendingDiff);
     }
   }
 
@@ -190,6 +230,91 @@ export default function App() {
     }
   }
 
+  function handleCreatePendingDiff() {
+    setAgentError(null);
+    if (!editorDocument || editorDocument.mode !== "editable") {
+      setAgentError("Open an editable current document before proposing an edit.");
+      return;
+    }
+    if (!canRecordAgentMessage(agentInput)) {
+      setAgentError("Edit instruction cannot be empty.");
+      return;
+    }
+    const execution = createPendingToolExecution("edit_current_editor_document");
+    try {
+      const diff = createPendingDiffFromCurrentEditor({
+        filePath: editorDocument.filePath,
+        originalText: editorDocument.content,
+        instruction: agentInput,
+      });
+      if (pendingDiff) {
+        setTerminalDiffCards((cards) => [
+          createTerminalDiffCard(pendingDiff.id, "expired"),
+          ...cards,
+        ]);
+      }
+      setPendingDiff(diff);
+      setToolExecutions((executions) => [
+        completeToolExecution(execution, `PendingDiff created for ${diff.filePath}`),
+        ...executions,
+      ]);
+      setAgentMessages((messages) => [
+        ...messages,
+        createUserAgentMessage(agentInput),
+        {
+          id: `msg-${Date.now()}-diff`,
+          role: "assistant",
+          content: `Created PendingDiff for ${diff.filePath}. Review before writing.`,
+          streamStatus: "complete",
+        },
+      ]);
+      setAgentInput("");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setToolExecutions((executions) => [
+        {
+          ...execution,
+          status: "failed",
+          errorMessage: message,
+        },
+        ...executions,
+      ]);
+      setAgentError(message);
+    }
+  }
+
+  async function handleAcceptPendingDiff() {
+    if (!pendingDiff || !editorDocument) return;
+    try {
+      const result = acceptPendingDiff(
+        pendingDiff,
+        editorDocument.filePath,
+        editorDocument.content,
+      );
+      if (result.terminalCard.status === "expired") {
+        setTerminalDiffCards((cards) => [result.terminalCard, ...cards]);
+        setPendingDiff(null);
+        return;
+      }
+      const savedDocument = await saveEditorDocument({
+        ...editorDocument,
+        content: result.content,
+        dirty: true,
+      });
+      setEditorDocument(savedDocument);
+      setTerminalDiffCards((cards) => [result.terminalCard, ...cards]);
+      setPendingDiff(null);
+    } catch (error) {
+      setEditorError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  function handleRejectPendingDiff() {
+    if (!pendingDiff) return;
+    setTerminalDiffCards((cards) => [rejectPendingDiff(pendingDiff), ...cards]);
+    setPendingDiff(null);
+  }
+
   return (
     <main className="app-shell">
       <aside className="panel">
@@ -246,17 +371,52 @@ export default function App() {
             className="editor-textarea"
             readOnly={editorDocument.mode === "readonly"}
             value={editorDocument.content}
-            onChange={(event) =>
-              setEditorDocument({
-                ...editorDocument,
-                content: event.target.value,
-                dirty: true,
-              })
-            }
+            onChange={(event) => handleEditorChange(event.target.value)}
           />
         ) : (
           <p className="muted">Open a file from the Workspace.</p>
         )}
+        {pendingDiff ? (
+          <section className="diff-card">
+            <header>
+              <strong>PendingDiff</strong>
+              <span>{pendingDiff.filePath}</span>
+            </header>
+            <p>{pendingDiff.summary}</p>
+            <div className="diff-preview">
+              <div>
+                <strong>Original</strong>
+                <pre>{pendingDiff.originalText}</pre>
+              </div>
+              <div>
+                <strong>Proposed</strong>
+                <pre>{pendingDiff.proposedText}</pre>
+              </div>
+            </div>
+            <div className="diff-actions">
+              <button
+                className="primary-action"
+                type="button"
+                onClick={() => void handleAcceptPendingDiff()}
+              >
+                Accept
+              </button>
+              <button type="button" onClick={handleRejectPendingDiff}>
+                Reject
+              </button>
+            </div>
+          </section>
+        ) : null}
+        {terminalDiffCards.length > 0 ? (
+          <div className="terminal-diff-list">
+            {terminalDiffCards.map((card) => (
+              <div className="terminal-diff-card" key={`${card.diffId}-${card.status}`}>
+                <strong>{card.status}</strong>
+                <span>{card.message}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </section>
       <aside className="panel">
         <h2>Agent</h2>
@@ -324,6 +484,13 @@ export default function App() {
           onClick={() => void handleSendAgentMessage()}
         >
           {agentStreaming ? "Streaming" : "Send"}
+        </button>
+        <button
+          type="button"
+          onClick={handleCreatePendingDiff}
+          disabled={!editorDocument || editorDocument.mode !== "editable"}
+        >
+          Propose edit
         </button>
         <div className="tool-actions">
           <button

@@ -48,7 +48,7 @@ describe("Phase 2 governance skeleton", () => {
   // covers: BR-DE-STATE-002
   // covers: BR-DE-STATE-003
   it("keeps PendingDiff execution and terminal cards explicit", () => {
-    expect(canExecutePendingDiff({ id: "d1", filePath: "a.md", originalText: "a", proposedText: "b", status: "pending" })).toBe(true);
+    expect(canExecutePendingDiff({ id: "d1", filePath: "a.md", originalText: "a", proposedText: "b", status: "pending", summary: "change" })).toBe(true);
     expect(createTerminalDiffCard("d1", "accepted").status).toBe("accepted");
     expect(createDiffMachineDefinition().states.pending.ACCEPT_REQUESTED).toBe("accepting");
   });

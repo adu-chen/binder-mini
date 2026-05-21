@@ -31,7 +31,11 @@ export interface InputReference {
   mode: "readonly";
 }
 
-export type ToolName = "read_file" | "list_files" | "search_files";
+export type ToolName =
+  | "read_file"
+  | "list_files"
+  | "search_files"
+  | "edit_current_editor_document";
 
 export interface ToolExecution {
   id: string;
