@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isWorkspaceSnapshotInitialized,
   isWorkspaceTarget,
+  isPathConflict,
   normalizeRecentWorkspaces,
   sortWorkspaceEntries,
 } from "../src/services/workspaceService";
@@ -96,6 +97,23 @@ describe("Workspace MVP service behavior", () => {
       { rootPath: "/tmp/a", displayName: "new-a", lastOpenedAt: 3 },
       { rootPath: "/tmp/b", displayName: "b", lastOpenedAt: 2 },
     ]);
+  });
+
+  // covers: BR-WS-DATA-003
+  // covers: BR-WS-DATA-004
+  it("recognizes PathConflict mutation results without treating them as success", () => {
+    const result = {
+      success: false,
+      entries: [],
+      conflict: {
+        code: "PATH_CONFLICT" as const,
+        targetPath: "notes.md",
+        existingKind: "file" as const,
+        message: "Target path already exists: notes.md",
+      },
+    };
+
+    expect(isPathConflict(result)).toBe(true);
   });
 
   // covers: BR-WS-DATA-001

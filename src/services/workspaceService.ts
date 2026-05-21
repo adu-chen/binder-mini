@@ -1,5 +1,11 @@
 import type { Workspace, WorkspaceFileTarget, WorkspaceSnapshot } from "../types/workspace";
-import type { RecentWorkspace, WorkspaceEntry, WorkspaceOpenResult } from "../types/workspace";
+import type {
+  PathConflict,
+  RecentWorkspace,
+  WorkspaceEntry,
+  WorkspaceMutationResult,
+  WorkspaceOpenResult,
+} from "../types/workspace";
 import { invoke } from "@tauri-apps/api/core";
 
 /**
@@ -77,6 +83,56 @@ export function normalizeRecentWorkspaces(workspaces: RecentWorkspace[]): Recent
   return [...byRoot.values()]
     .sort((left, right) => right.lastOpenedAt - left.lastOpenedAt)
     .slice(0, 10);
+}
+
+/**
+ * @GOV
+ * codes: BR-WS-DATA-001-EFFECT-WS-WS-FILE-MANAGE-010,
+ *        BR-WS-DATA-003-EFFECT-WS-WS-FILE-MANAGE-010,
+ *        BR-WS-DATA-004-GUARD-WS-WS-FILE-MANAGE-010,
+ *        BR-CORE-GOV-001-EFFECT-WS-WS-FILE-MANAGE-010
+ * type: EFFECT
+ * chain: WS-FILE-MANAGE
+ * rules: BR-WS-DATA-001, BR-WS-DATA-003, BR-WS-DATA-004, BR-CORE-GOV-001
+ * boundary: in=Workspace root and relative file path | out=create result with refreshed FileNode list or PathConflict
+ * term_ref: TERM-WS-004
+ */
+export async function createWorkspaceFile(
+  workspaceRoot: string,
+  relativePath: string,
+): Promise<WorkspaceMutationResult> {
+  return invoke<WorkspaceMutationResult>("create_workspace_file", {
+    workspaceRoot,
+    relativePath,
+  });
+}
+
+/**
+ * @GOV
+ * codes: BR-WS-DATA-001-EFFECT-WS-WS-FILE-MANAGE-011,
+ *        BR-WS-DATA-003-EFFECT-WS-WS-FILE-MANAGE-011,
+ *        BR-WS-DATA-004-GUARD-WS-WS-FILE-MANAGE-011,
+ *        BR-CORE-GOV-001-EFFECT-WS-WS-FILE-MANAGE-011
+ * type: EFFECT
+ * chain: WS-FILE-MANAGE
+ * rules: BR-WS-DATA-001, BR-WS-DATA-003, BR-WS-DATA-004, BR-CORE-GOV-001
+ * boundary: in=Workspace root and relative folder path | out=create result with refreshed FileNode list or PathConflict
+ * term_ref: TERM-WS-004
+ */
+export async function createWorkspaceFolder(
+  workspaceRoot: string,
+  relativePath: string,
+): Promise<WorkspaceMutationResult> {
+  return invoke<WorkspaceMutationResult>("create_workspace_folder", {
+    workspaceRoot,
+    relativePath,
+  });
+}
+
+export function isPathConflict(
+  result: WorkspaceMutationResult,
+): result is WorkspaceMutationResult & { conflict: PathConflict } {
+  return result.conflict?.code === "PATH_CONFLICT";
 }
 
 /**

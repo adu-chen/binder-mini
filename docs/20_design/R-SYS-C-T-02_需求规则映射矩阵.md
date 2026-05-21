@@ -28,9 +28,9 @@
 | REQ-WS-003 | 递归文件树 | BR-WS-STATE-001、BR-WS-DATA-001、BR-WS-DATA-002 | WS-OPEN、WS-FILE-MANAGE | 已覆盖递归 FileNode |
 | REQ-WS-004 | 最近 Workspace | BR-WS-STATE-001、BR-WS-PERSIST-001 | WS-OPEN | 已覆盖用户级持久化规则 |
 | REQ-WS-005 | workspace.db 初始化 | BR-WS-STATE-001、BR-WS-STATE-002、X-CONST-003 | WS-OPEN | 已覆盖初始化规则 |
-| REQ-WS-006 | 创建文件与目录 | BR-WS-DATA-001、X-CONST-001 | WS-FILE-MANAGE | 边界已覆盖，冲突协议待补 |
-| REQ-WS-007 | 重命名、移动和删除 | BR-WS-DATA-001、X-CONST-001 | WS-FILE-MANAGE | 边界已覆盖，结构操作待补 |
-| REQ-WS-008 | 路径冲突协议 | BR-WS-DATA-001、X-CONST-001 | WS-FILE-MANAGE | 待补 PathConflict 规则 |
+| REQ-WS-006 | 创建文件与目录 | BR-WS-DATA-001、BR-WS-DATA-003、BR-WS-DATA-004、X-CONST-001 | WS-FILE-MANAGE | 已覆盖创建与冲突协议 |
+| REQ-WS-007 | 重命名、移动和删除 | BR-WS-DATA-001、BR-WS-DATA-003、X-CONST-001 | WS-FILE-MANAGE | 规则已覆盖，rename/move/delete 实现待补 |
+| REQ-WS-008 | 路径冲突协议 | BR-WS-DATA-001、BR-WS-DATA-004、X-CONST-001 | WS-FILE-MANAGE | 已覆盖 PathConflict 规则 |
 | REQ-WS-009 | 关闭和切换 Workspace | BR-WS-STATE-001、X-CONST-003 | WS-OPEN | 待补关闭/切换状态机 |
 | REQ-WS-010 | 搜索索引 | BR-WS-DATA-001、X-CONST-001 | WS-FILE-MANAGE | 待补搜索索引规则 |
 
@@ -40,8 +40,6 @@
 
 | 候选规则 ID | 承接需求 | 建议主链路 | 规则意图 |
 |-------------|----------|------------|----------|
-| BR-WS-DATA-003 | REQ-WS-006、REQ-WS-007 | WS-FILE-MANAGE | 创建、重命名、移动、删除必须通过 Workspace 边界守卫。 |
-| BR-WS-DATA-004 | REQ-WS-008 | WS-FILE-MANAGE | 目标冲突必须返回 PathConflict，未经确认不得覆盖。 |
 | BR-WS-STATE-003 | REQ-WS-009 | WS-CLOSE | 关闭或切换前必须处理 dirty editor 和 pending diff。 |
 | BR-WS-DATA-005 | REQ-WS-010 | WS-SEARCH | 搜索索引必须可重建，搜索结果必须限制在当前 Workspace。 |
 
@@ -57,6 +55,7 @@
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-05-22 | v1.3 | 将 Workspace 创建结构操作与 PathConflict 候选规则升级为已注册规则映射 |
 | 2026-05-22 | v1.2 | 将最近 Workspace 候选规则升级为已注册规则映射 |
 | 2026-05-22 | v1.1 | 将 Workspace 初始化与递归 FileNode 候选规则升级为已注册规则映射 |
 | 2026-05-22 | v1.0 | 初始版本，建立 Workspace 需求到技术规则映射 |

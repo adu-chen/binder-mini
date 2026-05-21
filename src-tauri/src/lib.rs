@@ -40,6 +40,15 @@ struct RecentWorkspace {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct PathConflict {
+    code: &'static str,
+    target_path: String,
+    existing_kind: &'static str,
+    message: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct WorkspaceSnapshot {
     workspace: Workspace,
     entries: Vec<WorkspaceEntry>,
@@ -58,6 +67,15 @@ struct WorkspaceOpenResult {
 #[serde(rename_all = "camelCase")]
 struct ListFilesResult {
     entries: Vec<WorkspaceEntry>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceMutationResult {
+    success: bool,
+    entries: Vec<WorkspaceEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    conflict: Option<PathConflict>,
 }
 
 #[derive(Serialize)]
@@ -309,6 +327,72 @@ fn list_files(workspace_root: String, dir_path: Option<String>) -> Result<ListFi
 }
 
 #[tauri::command]
+fn create_workspace_file(
+    workspace_root: String,
+    relative_path: String,
+) -> Result<WorkspaceMutationResult, String> {
+    create_workspace_item(&workspace_root, &relative_path, "file")
+}
+
+#[tauri::command]
+fn create_workspace_folder(
+    workspace_root: String,
+    relative_path: String,
+) -> Result<WorkspaceMutationResult, String> {
+    create_workspace_item(&workspace_root, &relative_path, "directory")
+}
+
+fn create_workspace_item(
+    workspace_root: &str,
+    relative_path: &str,
+    kind: &'static str,
+) -> Result<WorkspaceMutationResult, String> {
+    let root = PathBuf::from(workspace_root)
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let target = resolve_workspace_path(workspace_root, relative_path)?;
+    if target.exists() {
+        return Ok(WorkspaceMutationResult {
+            success: false,
+            entries: read_workspace_entries(&root, &root)?,
+            conflict: Some(path_conflict(&target, relative_path)),
+        });
+    }
+    let parent = target
+        .parent()
+        .ok_or_else(|| "target parent is not a directory".to_string())?;
+    if !parent.is_dir() {
+        return Err("target parent is not a directory".to_string());
+    }
+    if kind == "directory" {
+        fs::create_dir(&target).map_err(|error| error.to_string())?;
+    } else {
+        fs::write(&target, b"").map_err(|error| error.to_string())?;
+    }
+    Ok(WorkspaceMutationResult {
+        success: true,
+        entries: read_workspace_entries(&root, &root)?,
+        conflict: None,
+    })
+}
+
+fn path_conflict(target: &Path, relative_path: &str) -> PathConflict {
+    let existing_kind = if target.is_file() {
+        "file"
+    } else if target.is_dir() {
+        "directory"
+    } else {
+        "other"
+    };
+    PathConflict {
+        code: "PATH_CONFLICT",
+        target_path: relative_path.to_string(),
+        existing_kind,
+        message: format!("Target path already exists: {relative_path}"),
+    }
+}
+
+#[tauri::command]
 fn search_files(workspace_root: String, query: String) -> Result<Vec<SearchResult>, String> {
     let trimmed_query = query.trim().to_lowercase();
     if trimmed_query.is_empty() {
@@ -528,6 +612,51 @@ mod tests {
 
         fs::remove_dir_all(root).expect("fixture workspace should be removed");
     }
+
+    #[test]
+    fn creates_workspace_file_and_folder_without_leaving_boundary() {
+        let root = test_workspace_root("create");
+        fs::create_dir_all(root.join("docs")).expect("fixture workspace should be created");
+        let root_string = root.to_string_lossy().to_string();
+
+        let folder_result = create_workspace_item(&root_string, "docs/new", "directory")
+            .expect("folder should be created");
+        let file_result = create_workspace_item(&root_string, "docs/new/readme.md", "file")
+            .expect("file should be created");
+
+        assert!(folder_result.success);
+        assert!(file_result.success);
+        assert!(root.join("docs/new/readme.md").is_file());
+        assert!(file_result
+            .entries
+            .iter()
+            .any(|entry| entry.relative_path == "docs"));
+        assert!(create_workspace_item(&root_string, "../outside.md", "file").is_err());
+
+        fs::remove_dir_all(root).expect("fixture workspace should be removed");
+    }
+
+    #[test]
+    fn returns_path_conflict_without_overwriting_existing_target() {
+        let root = test_workspace_root("conflict");
+        fs::create_dir_all(&root).expect("fixture workspace should be created");
+        fs::write(root.join("exists.md"), "original").expect("fixture file should be written");
+        let root_string = root.to_string_lossy().to_string();
+
+        let result = create_workspace_item(&root_string, "exists.md", "file")
+            .expect("conflict should be returned as mutation result");
+
+        assert!(!result.success);
+        let conflict = result.conflict.expect("conflict should be present");
+        assert_eq!(conflict.code, "PATH_CONFLICT");
+        assert_eq!(conflict.existing_kind, "file");
+        assert_eq!(
+            fs::read_to_string(root.join("exists.md")).expect("file should remain readable"),
+            "original"
+        );
+
+        fs::remove_dir_all(root).expect("fixture workspace should be removed");
+    }
 }
 
 pub fn run() {
@@ -541,6 +670,8 @@ pub fn run() {
             write_workspace_file,
             read_file,
             list_files,
+            create_workspace_file,
+            create_workspace_folder,
             search_files
         ])
         .run(tauri::generate_context!())

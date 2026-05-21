@@ -93,6 +93,32 @@ button {
   font-size: 13px;
 }
 
+.workspace-create {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.workspace-create input {
+  border: 1px solid #cfd6df;
+  border-radius: 6px;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.workspace-create div {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.workspace-create button {
+  border: 1px solid #cfd6df;
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 8px 10px;
+}
+
 .file-list {
   display: grid;
   gap: 4px;

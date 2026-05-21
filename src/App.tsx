@@ -31,6 +31,9 @@ import {
 import type { AgentMessage, ProviderConfig, ToolExecution } from "./types/agent";
 import type { PendingDiff, TerminalDiffCard } from "./types/diff";
 import {
+  createWorkspaceFile,
+  createWorkspaceFolder,
+  isPathConflict,
   listRecentWorkspaces,
   normalizeRecentWorkspaces,
   openWorkspace,
@@ -53,6 +56,7 @@ export default function App() {
     useState<WorkspaceSnapshot | null>(null);
   const [recentWorkspaces, setRecentWorkspaces] = useState<RecentWorkspace[]>([]);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [newWorkspaceItemPath, setNewWorkspaceItemPath] = useState("");
   const [editorDocument, setEditorDocument] = useState<EditorDocument | null>(
     null,
   );
@@ -98,6 +102,30 @@ export default function App() {
         setEditorDocument(null);
         setPendingDiff(null);
       }
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function handleCreateWorkspaceItem(kind: "file" | "folder") {
+    if (!workspaceSnapshot) return;
+    const relativePath = newWorkspaceItemPath.trim();
+    if (!relativePath) return;
+    setWorkspaceError(null);
+    try {
+      const result =
+        kind === "file"
+          ? await createWorkspaceFile(workspaceSnapshot.workspace.rootPath, relativePath)
+          : await createWorkspaceFolder(workspaceSnapshot.workspace.rootPath, relativePath);
+      if (isPathConflict(result)) {
+        setWorkspaceError(result.conflict.message);
+        return;
+      }
+      setWorkspaceSnapshot({
+        ...workspaceSnapshot,
+        entries: sortWorkspaceEntries(result.entries),
+      });
+      setNewWorkspaceItemPath("");
     } catch (error) {
       setWorkspaceError(error instanceof Error ? error.message : String(error));
     }
@@ -357,6 +385,24 @@ export default function App() {
           </section>
         ) : null}
         {workspaceError ? <p className="error-text">{workspaceError}</p> : null}
+        {workspaceSnapshot ? (
+          <div className="workspace-create">
+            <input
+              aria-label="New Workspace item path"
+              placeholder="notes/new.md"
+              value={newWorkspaceItemPath}
+              onChange={(event) => setNewWorkspaceItemPath(event.target.value)}
+            />
+            <div>
+              <button type="button" onClick={() => void handleCreateWorkspaceItem("file")}>
+                File
+              </button>
+              <button type="button" onClick={() => void handleCreateWorkspaceItem("folder")}>
+                Folder
+              </button>
+            </div>
+          </div>
+        ) : null}
         {workspaceSnapshot ? (
           <WorkspaceEntryList entries={workspaceSnapshot.entries} onOpenFile={handleOpenFile} />
         ) : null}

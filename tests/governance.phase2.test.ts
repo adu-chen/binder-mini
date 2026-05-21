@@ -11,7 +11,7 @@ import {
 } from "../src/services/agentService";
 import { canExecutePendingDiff, createTerminalDiffCard } from "../src/services/diffService";
 import { canSaveEditorDocument } from "../src/services/editorService";
-import { isWorkspaceSnapshotInitialized, isWorkspaceTarget, normalizeRecentWorkspaces } from "../src/services/workspaceService";
+import { isPathConflict, isWorkspaceSnapshotInitialized, isWorkspaceTarget, normalizeRecentWorkspaces } from "../src/services/workspaceService";
 
 describe("Phase 2 governance skeleton", () => {
   // covers: BR-WS-STATE-001
@@ -19,6 +19,8 @@ describe("Phase 2 governance skeleton", () => {
   // covers: BR-WS-PERSIST-001
   // covers: BR-WS-DATA-001
   // covers: BR-WS-DATA-002
+  // covers: BR-WS-DATA-003
+  // covers: BR-WS-DATA-004
   it("keeps Workspace targets inside the active Workspace", () => {
     const workspace = { rootPath: "/tmp/ws", displayName: "ws", status: "active" as const };
     expect(isWorkspaceTarget(workspace, { workspaceRoot: "/tmp/ws", relativePath: "a.md" })).toBe(true);
@@ -36,6 +38,16 @@ describe("Phase 2 governance skeleton", () => {
       { rootPath: "/tmp/ws", displayName: "ws", lastOpenedAt: 1 },
       { rootPath: "/tmp/ws", displayName: "ws", lastOpenedAt: 2 },
     ])).toEqual([{ rootPath: "/tmp/ws", displayName: "ws", lastOpenedAt: 2 }]);
+    expect(isPathConflict({
+      success: false,
+      entries: [],
+      conflict: {
+        code: "PATH_CONFLICT",
+        targetPath: "a.md",
+        existingKind: "file",
+        message: "Target path already exists: a.md",
+      },
+    })).toBe(true);
   });
 
   // covers: BR-ED-STATE-001

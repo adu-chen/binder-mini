@@ -77,6 +77,14 @@ en: RecentWorkspace
 forbidden: 最近项目, 最近目录, 历史工作区
 -->
 
+<!-- TERM
+term_id: TERM-WS-004
+chains: WS-FILE-MANAGE
+zh: 路径冲突
+en: PathConflict
+forbidden: 覆盖提示, 文件冲突, 已存在错误
+-->
+
 ## 1. 模块注册
 
 <!-- MODULE
@@ -300,6 +308,24 @@ rule_id: BR-WS-PERSIST-001
 最近 Workspace 必须作为用户级元数据持久化，不得写入 Workspace 内容目录；记录必须按最近打开时间去重排序。
 
 <!-- RULE
+rule_id: BR-WS-DATA-003
+主链路: WS-FILE-MANAGE
+域: DATA
+需求映射: REQ-WS-006,REQ-WS-007
+-->
+
+创建、重命名、移动和删除等 Workspace 结构操作必须通过 Workspace 边界守卫，且操作成功后必须刷新 Workspace 文件树。
+
+<!-- RULE
+rule_id: BR-WS-DATA-004
+主链路: WS-FILE-MANAGE
+域: DATA
+需求映射: REQ-WS-008
+-->
+
+Workspace 结构操作遇到目标路径冲突时必须返回 PathConflict；未经用户确认不得覆盖既有文件或目录。
+
+<!-- RULE
 rule_id: BR-ED-STATE-001
 主链路: ED-OPEN-FILE
 域: STATE
@@ -414,8 +440,6 @@ rule_id: BR-CORE-GOV-001
 
 | 候选规则 ID | 承接需求 | 建议链路 | 设计意图 |
 |-------------|----------|----------|----------|
-| BR-WS-DATA-003 | REQ-WS-006、REQ-WS-007 | WS-FILE-MANAGE | 创建、重命名、移动、删除必须通过 Workspace 边界守卫。 |
-| BR-WS-DATA-004 | REQ-WS-008 | WS-FILE-MANAGE | 目标冲突必须返回 PathConflict，未经确认不得覆盖。 |
 | BR-WS-STATE-003 | REQ-WS-009 | WS-CLOSE | 关闭或切换前必须处理 dirty editor 和 pending diff。 |
 | BR-WS-DATA-005 | REQ-WS-010 | WS-SEARCH | 搜索索引必须可重建，搜索结果必须限制在当前 Workspace。 |
 
@@ -423,6 +447,7 @@ rule_id: BR-CORE-GOV-001
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-05-22 | v1.4 | 注册 Workspace 创建结构操作与 PathConflict 规则 |
 | 2026-05-22 | v1.3 | 注册最近 Workspace 用户级持久化规则 |
 | 2026-05-22 | v1.2 | 注册 Workspace 初始化与递归 FileNode 正式规则 |
 | 2026-05-22 | v1.1 | 增加需求到规则映射约定和 Workspace 颗粒度候选规则 |
