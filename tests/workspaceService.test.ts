@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isWorkspaceSnapshotInitialized,
   isWorkspaceTarget,
+  normalizeRecentWorkspaces,
   sortWorkspaceEntries,
 } from "../src/services/workspaceService";
 
@@ -81,6 +82,20 @@ describe("Workspace MVP service behavior", () => {
         },
       }),
     ).toBe(false);
+  });
+
+  // covers: BR-WS-PERSIST-001
+  it("deduplicates recent Workspaces by root path and keeps newest first", () => {
+    expect(
+      normalizeRecentWorkspaces([
+        { rootPath: "/tmp/a", displayName: "old-a", lastOpenedAt: 1 },
+        { rootPath: "/tmp/b", displayName: "b", lastOpenedAt: 2 },
+        { rootPath: "/tmp/a", displayName: "new-a", lastOpenedAt: 3 },
+      ]),
+    ).toEqual([
+      { rootPath: "/tmp/a", displayName: "new-a", lastOpenedAt: 3 },
+      { rootPath: "/tmp/b", displayName: "b", lastOpenedAt: 2 },
+    ]);
   });
 
   // covers: BR-WS-DATA-001

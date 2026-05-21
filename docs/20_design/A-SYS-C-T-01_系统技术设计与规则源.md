@@ -69,6 +69,14 @@ en: WorkspaceDatabase
 forbidden: 项目数据库, 本地库, db文件
 -->
 
+<!-- TERM
+term_id: TERM-WS-003
+chains: WS-OPEN
+zh: 最近工作区
+en: RecentWorkspace
+forbidden: 最近项目, 最近目录, 历史工作区
+-->
+
 ## 1. 模块注册
 
 <!-- MODULE
@@ -283,6 +291,15 @@ rule_id: BR-WS-DATA-002
 Workspace 文件树必须以 Workspace 根目录为边界递归生成 FileNode，且不得暴露 `.binder` 内部数据。
 
 <!-- RULE
+rule_id: BR-WS-PERSIST-001
+主链路: WS-OPEN
+域: PERSIST
+需求映射: REQ-WS-004
+-->
+
+最近 Workspace 必须作为用户级元数据持久化，不得写入 Workspace 内容目录；记录必须按最近打开时间去重排序。
+
+<!-- RULE
 rule_id: BR-ED-STATE-001
 主链路: ED-OPEN-FILE
 域: STATE
@@ -397,7 +414,6 @@ rule_id: BR-CORE-GOV-001
 
 | 候选规则 ID | 承接需求 | 建议链路 | 设计意图 |
 |-------------|----------|----------|----------|
-| BR-WS-PERSIST-001 | REQ-WS-004 | WS-OPEN | 最近 Workspace 是用户级元数据，不属于 Workspace 内容。 |
 | BR-WS-DATA-003 | REQ-WS-006、REQ-WS-007 | WS-FILE-MANAGE | 创建、重命名、移动、删除必须通过 Workspace 边界守卫。 |
 | BR-WS-DATA-004 | REQ-WS-008 | WS-FILE-MANAGE | 目标冲突必须返回 PathConflict，未经确认不得覆盖。 |
 | BR-WS-STATE-003 | REQ-WS-009 | WS-CLOSE | 关闭或切换前必须处理 dirty editor 和 pending diff。 |
@@ -407,6 +423,7 @@ rule_id: BR-CORE-GOV-001
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-05-22 | v1.3 | 注册最近 Workspace 用户级持久化规则 |
 | 2026-05-22 | v1.2 | 注册 Workspace 初始化与递归 FileNode 正式规则 |
 | 2026-05-22 | v1.1 | 增加需求到规则映射约定和 Workspace 颗粒度候选规则 |
 | 2026-05-22 | v1.0 | 初始版本，注册首批模块、术语、链路、约束和规则 |

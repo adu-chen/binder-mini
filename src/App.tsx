@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createAgentMachineDefinition } from "./machines/agentMachine";
 import { createDiffMachineDefinition } from "./machines/diffMachine";
 import { createEditorMachineDefinition } from "./machines/editorMachine";
@@ -30,9 +30,14 @@ import {
 } from "./services/editorService";
 import type { AgentMessage, ProviderConfig, ToolExecution } from "./types/agent";
 import type { PendingDiff, TerminalDiffCard } from "./types/diff";
-import { openWorkspace, sortWorkspaceEntries } from "./services/workspaceService";
+import {
+  listRecentWorkspaces,
+  normalizeRecentWorkspaces,
+  openWorkspace,
+  sortWorkspaceEntries,
+} from "./services/workspaceService";
 import type { EditorDocument } from "./types/editor";
-import type { WorkspaceEntry, WorkspaceSnapshot } from "./types/workspace";
+import type { RecentWorkspace, WorkspaceEntry, WorkspaceSnapshot } from "./types/workspace";
 
 /**
  * @GOV
@@ -46,6 +51,7 @@ import type { WorkspaceEntry, WorkspaceSnapshot } from "./types/workspace";
 export default function App() {
   const [workspaceSnapshot, setWorkspaceSnapshot] =
     useState<WorkspaceSnapshot | null>(null);
+  const [recentWorkspaces, setRecentWorkspaces] = useState<RecentWorkspace[]>([]);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [editorDocument, setEditorDocument] = useState<EditorDocument | null>(
     null,
@@ -73,6 +79,12 @@ export default function App() {
     createDiffMachineDefinition(),
   ];
 
+  useEffect(() => {
+    void listRecentWorkspaces()
+      .then((workspaces) => setRecentWorkspaces(normalizeRecentWorkspaces(workspaces)))
+      .catch((error) => setWorkspaceError(error instanceof Error ? error.message : String(error)));
+  }, []);
+
   async function handleOpenWorkspace() {
     setWorkspaceError(null);
     try {
@@ -82,6 +94,7 @@ export default function App() {
           ...result.snapshot,
           entries: sortWorkspaceEntries(result.snapshot.entries),
         });
+        setRecentWorkspaces(normalizeRecentWorkspaces(result.recentWorkspaces ?? []));
         setEditorDocument(null);
         setPendingDiff(null);
       }
@@ -330,6 +343,19 @@ export default function App() {
         ) : (
           <p className="muted">No workspace open</p>
         )}
+        {recentWorkspaces.length ? (
+          <section className="recent-workspaces" aria-label="Recent Workspaces">
+            <strong>Recent</strong>
+            <ul>
+              {recentWorkspaces.map((workspace) => (
+                <li key={workspace.rootPath}>
+                  <span>{workspace.displayName}</span>
+                  <small>{workspace.rootPath}</small>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
         {workspaceError ? <p className="error-text">{workspaceError}</p> : null}
         {workspaceSnapshot ? (
           <WorkspaceEntryList entries={workspaceSnapshot.entries} onOpenFile={handleOpenFile} />

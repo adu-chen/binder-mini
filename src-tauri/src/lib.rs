@@ -1,6 +1,8 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
 #[derive(Serialize)]
@@ -28,6 +30,14 @@ struct WorkspaceMetadata {
     workspace_database_initialized: bool,
 }
 
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecentWorkspace {
+    root_path: String,
+    display_name: String,
+    last_opened_at: u64,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WorkspaceSnapshot {
@@ -41,6 +51,7 @@ struct WorkspaceSnapshot {
 struct WorkspaceOpenResult {
     cancelled: bool,
     snapshot: Option<WorkspaceSnapshot>,
+    recent_workspaces: Option<Vec<RecentWorkspace>>,
 }
 
 #[derive(Serialize)]
@@ -85,6 +96,9 @@ async fn open_workspace(app: tauri::AppHandle) -> Result<WorkspaceOpenResult, St
         return Ok(WorkspaceOpenResult {
             cancelled: true,
             snapshot: None,
+            recent_workspaces: Some(list_recent_workspaces_from_store(
+                &recent_workspace_store_path(&app)?,
+            )?),
         });
     };
 
@@ -95,6 +109,15 @@ async fn open_workspace(app: tauri::AppHandle) -> Result<WorkspaceOpenResult, St
         .and_then(|value| value.to_str())
         .unwrap_or("Workspace")
         .to_string();
+
+    let recent_workspaces = record_recent_workspace_at_store(
+        &recent_workspace_store_path(&app)?,
+        RecentWorkspace {
+            root_path: root_path.to_string_lossy().to_string(),
+            display_name: display_name.clone(),
+            last_opened_at: current_unix_seconds(),
+        },
+    )?;
 
     Ok(WorkspaceOpenResult {
         cancelled: false,
@@ -107,7 +130,76 @@ async fn open_workspace(app: tauri::AppHandle) -> Result<WorkspaceOpenResult, St
             entries,
             metadata,
         }),
+        recent_workspaces: Some(recent_workspaces),
     })
+}
+
+#[tauri::command]
+fn list_recent_workspaces(app: tauri::AppHandle) -> Result<Vec<RecentWorkspace>, String> {
+    list_recent_workspaces_from_store(&recent_workspace_store_path(&app)?)
+}
+
+fn recent_workspace_store_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    fs::create_dir_all(&app_data_dir).map_err(|error| error.to_string())?;
+    Ok(app_data_dir.join("recent-workspaces.json"))
+}
+
+fn list_recent_workspaces_from_store(store_path: &Path) -> Result<Vec<RecentWorkspace>, String> {
+    if !store_path.exists() {
+        return Ok(Vec::new());
+    }
+    let content = fs::read_to_string(store_path).map_err(|error| error.to_string())?;
+    let parsed: Vec<RecentWorkspace> =
+        serde_json::from_str(&content).map_err(|error| error.to_string())?;
+    Ok(normalize_recent_workspaces(parsed))
+}
+
+fn record_recent_workspace_at_store(
+    store_path: &Path,
+    workspace: RecentWorkspace,
+) -> Result<Vec<RecentWorkspace>, String> {
+    if let Some(parent) = store_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let mut recent = list_recent_workspaces_from_store(store_path)?;
+    recent.push(workspace);
+    let normalized = normalize_recent_workspaces(recent);
+    let content = serde_json::to_string_pretty(&normalized).map_err(|error| error.to_string())?;
+    fs::write(store_path, content).map_err(|error| error.to_string())?;
+    Ok(normalized)
+}
+
+fn normalize_recent_workspaces(mut workspaces: Vec<RecentWorkspace>) -> Vec<RecentWorkspace> {
+    workspaces.sort_by(|left, right| {
+        right
+            .last_opened_at
+            .cmp(&left.last_opened_at)
+            .then_with(|| left.root_path.cmp(&right.root_path))
+    });
+    let mut deduped = Vec::new();
+    for workspace in workspaces {
+        if !deduped
+            .iter()
+            .any(|existing: &RecentWorkspace| existing.root_path == workspace.root_path)
+        {
+            deduped.push(workspace);
+        }
+        if deduped.len() >= 10 {
+            break;
+        }
+    }
+    deduped
+}
+
+fn current_unix_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
 }
 
 fn initialize_workspace_metadata(root_path: &Path) -> Result<WorkspaceMetadata, String> {
@@ -393,6 +485,49 @@ mod tests {
 
         fs::remove_dir_all(root).expect("fixture workspace should be removed");
     }
+
+    #[test]
+    fn records_recent_workspaces_in_user_level_store_ordered_by_time() {
+        let root = test_workspace_root("recent");
+        fs::create_dir_all(&root).expect("fixture workspace should be created");
+        let store_path = root.join("app-data/recent-workspaces.json");
+
+        record_recent_workspace_at_store(
+            &store_path,
+            RecentWorkspace {
+                root_path: "/tmp/a".to_string(),
+                display_name: "old-a".to_string(),
+                last_opened_at: 1,
+            },
+        )
+        .expect("first recent workspace should be recorded");
+        record_recent_workspace_at_store(
+            &store_path,
+            RecentWorkspace {
+                root_path: "/tmp/a".to_string(),
+                display_name: "new-a".to_string(),
+                last_opened_at: 3,
+            },
+        )
+        .expect("second recent workspace should be recorded");
+        let recent = record_recent_workspace_at_store(
+            &store_path,
+            RecentWorkspace {
+                root_path: "/tmp/b".to_string(),
+                display_name: "b".to_string(),
+                last_opened_at: 2,
+            },
+        )
+        .expect("third recent workspace should be recorded");
+
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].root_path, "/tmp/a");
+        assert_eq!(recent[0].display_name, "new-a");
+        assert_eq!(recent[1].root_path, "/tmp/b");
+        assert!(store_path.is_file());
+
+        fs::remove_dir_all(root).expect("fixture workspace should be removed");
+    }
 }
 
 pub fn run() {
@@ -401,6 +536,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             health_check,
             open_workspace,
+            list_recent_workspaces,
             read_workspace_file,
             write_workspace_file,
             read_file,

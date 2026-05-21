@@ -11,11 +11,12 @@ import {
 } from "../src/services/agentService";
 import { canExecutePendingDiff, createTerminalDiffCard } from "../src/services/diffService";
 import { canSaveEditorDocument } from "../src/services/editorService";
-import { isWorkspaceSnapshotInitialized, isWorkspaceTarget } from "../src/services/workspaceService";
+import { isWorkspaceSnapshotInitialized, isWorkspaceTarget, normalizeRecentWorkspaces } from "../src/services/workspaceService";
 
 describe("Phase 2 governance skeleton", () => {
   // covers: BR-WS-STATE-001
   // covers: BR-WS-STATE-002
+  // covers: BR-WS-PERSIST-001
   // covers: BR-WS-DATA-001
   // covers: BR-WS-DATA-002
   it("keeps Workspace targets inside the active Workspace", () => {
@@ -31,6 +32,10 @@ describe("Phase 2 governance skeleton", () => {
         workspaceDatabaseInitialized: true,
       },
     })).toBe(true);
+    expect(normalizeRecentWorkspaces([
+      { rootPath: "/tmp/ws", displayName: "ws", lastOpenedAt: 1 },
+      { rootPath: "/tmp/ws", displayName: "ws", lastOpenedAt: 2 },
+    ])).toEqual([{ rootPath: "/tmp/ws", displayName: "ws", lastOpenedAt: 2 }]);
   });
 
   // covers: BR-ED-STATE-001
