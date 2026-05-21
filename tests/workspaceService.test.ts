@@ -116,6 +116,11 @@ describe("Workspace MVP service behavior", () => {
     expect(isPathConflict(result)).toBe(true);
   });
 
+  // covers: BR-WS-DATA-003
+  it("keeps mutation success results distinguishable from PathConflict", () => {
+    expect(isPathConflict({ success: true, entries: [] })).toBe(false);
+  });
+
   // covers: BR-WS-DATA-001
   it("rejects file targets outside the active Workspace boundary", () => {
     const workspace = {

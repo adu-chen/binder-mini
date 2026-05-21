@@ -33,14 +33,22 @@ import type { PendingDiff, TerminalDiffCard } from "./types/diff";
 import {
   createWorkspaceFile,
   createWorkspaceFolder,
+  deleteWorkspaceItem,
   isPathConflict,
   listRecentWorkspaces,
+  moveWorkspaceItem,
   normalizeRecentWorkspaces,
   openWorkspace,
+  renameWorkspaceItem,
   sortWorkspaceEntries,
 } from "./services/workspaceService";
 import type { EditorDocument } from "./types/editor";
-import type { RecentWorkspace, WorkspaceEntry, WorkspaceSnapshot } from "./types/workspace";
+import type {
+  RecentWorkspace,
+  WorkspaceEntry,
+  WorkspaceMutationResult,
+  WorkspaceSnapshot,
+} from "./types/workspace";
 
 /**
  * @GOV
@@ -57,6 +65,8 @@ export default function App() {
   const [recentWorkspaces, setRecentWorkspaces] = useState<RecentWorkspace[]>([]);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [newWorkspaceItemPath, setNewWorkspaceItemPath] = useState("");
+  const [structureSourcePath, setStructureSourcePath] = useState("");
+  const [structureTargetPath, setStructureTargetPath] = useState("");
   const [editorDocument, setEditorDocument] = useState<EditorDocument | null>(
     null,
   );
@@ -129,6 +139,77 @@ export default function App() {
     } catch (error) {
       setWorkspaceError(error instanceof Error ? error.message : String(error));
     }
+  }
+
+  async function applyWorkspaceMutation(
+    action: () => Promise<WorkspaceMutationResult>,
+    clearInputs: () => void,
+  ) {
+    if (!workspaceSnapshot) return;
+    setWorkspaceError(null);
+    try {
+      const result = await action();
+      if (isPathConflict(result)) {
+        setWorkspaceError(result.conflict.message);
+        return;
+      }
+      setWorkspaceSnapshot({
+        ...workspaceSnapshot,
+        entries: sortWorkspaceEntries(result.entries),
+      });
+      clearInputs();
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function handleRenameWorkspaceItem() {
+    if (!workspaceSnapshot) return;
+    const sourcePath = structureSourcePath.trim();
+    const newName = structureTargetPath.trim();
+    if (!sourcePath || !newName) return;
+    await applyWorkspaceMutation(
+      () =>
+        renameWorkspaceItem(workspaceSnapshot.workspace.rootPath, {
+          sourcePath,
+          newName,
+        }),
+      () => {
+        setStructureSourcePath("");
+        setStructureTargetPath("");
+      },
+    );
+  }
+
+  async function handleMoveWorkspaceItem() {
+    if (!workspaceSnapshot) return;
+    const sourcePath = structureSourcePath.trim();
+    const targetPath = structureTargetPath.trim();
+    if (!sourcePath || !targetPath) return;
+    await applyWorkspaceMutation(
+      () =>
+        moveWorkspaceItem(workspaceSnapshot.workspace.rootPath, {
+          sourcePath,
+          targetPath,
+        }),
+      () => {
+        setStructureSourcePath("");
+        setStructureTargetPath("");
+      },
+    );
+  }
+
+  async function handleDeleteWorkspaceItem() {
+    if (!workspaceSnapshot) return;
+    const relativePath = structureSourcePath.trim();
+    if (!relativePath) return;
+    await applyWorkspaceMutation(
+      () => deleteWorkspaceItem(workspaceSnapshot.workspace.rootPath, relativePath),
+      () => {
+        setStructureSourcePath("");
+        setStructureTargetPath("");
+      },
+    );
   }
 
   async function handleOpenFile(relativePath: string) {
@@ -399,6 +480,33 @@ export default function App() {
               </button>
               <button type="button" onClick={() => void handleCreateWorkspaceItem("folder")}>
                 Folder
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {workspaceSnapshot ? (
+          <div className="workspace-structure">
+            <input
+              aria-label="Workspace structure source path"
+              placeholder="source path"
+              value={structureSourcePath}
+              onChange={(event) => setStructureSourcePath(event.target.value)}
+            />
+            <input
+              aria-label="Workspace structure target path or new name"
+              placeholder="target path or new name"
+              value={structureTargetPath}
+              onChange={(event) => setStructureTargetPath(event.target.value)}
+            />
+            <div>
+              <button type="button" onClick={() => void handleRenameWorkspaceItem()}>
+                Rename
+              </button>
+              <button type="button" onClick={() => void handleMoveWorkspaceItem()}>
+                Move
+              </button>
+              <button type="button" onClick={() => void handleDeleteWorkspaceItem()}>
+                Delete
               </button>
             </div>
           </div>

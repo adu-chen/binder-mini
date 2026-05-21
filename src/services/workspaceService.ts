@@ -3,8 +3,10 @@ import type {
   PathConflict,
   RecentWorkspace,
   WorkspaceEntry,
+  WorkspaceMoveRequest,
   WorkspaceMutationResult,
   WorkspaceOpenResult,
+  WorkspaceRenameRequest,
 } from "../types/workspace";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -124,6 +126,73 @@ export async function createWorkspaceFolder(
   relativePath: string,
 ): Promise<WorkspaceMutationResult> {
   return invoke<WorkspaceMutationResult>("create_workspace_folder", {
+    workspaceRoot,
+    relativePath,
+  });
+}
+
+/**
+ * @GOV
+ * codes: BR-WS-DATA-001-EFFECT-WS-WS-FILE-MANAGE-012,
+ *        BR-WS-DATA-003-EFFECT-WS-WS-FILE-MANAGE-012,
+ *        BR-WS-DATA-004-GUARD-WS-WS-FILE-MANAGE-012,
+ *        BR-CORE-GOV-001-EFFECT-WS-WS-FILE-MANAGE-012
+ * type: EFFECT
+ * chain: WS-FILE-MANAGE
+ * rules: BR-WS-DATA-001, BR-WS-DATA-003, BR-WS-DATA-004, BR-CORE-GOV-001
+ * boundary: in=Workspace root and rename request | out=rename result with refreshed FileNode list or PathConflict
+ * term_ref: TERM-WS-004
+ */
+export async function renameWorkspaceItem(
+  workspaceRoot: string,
+  request: WorkspaceRenameRequest,
+): Promise<WorkspaceMutationResult> {
+  return invoke<WorkspaceMutationResult>("rename_workspace_item", {
+    workspaceRoot,
+    relativePath: request.sourcePath,
+    newName: request.newName,
+  });
+}
+
+/**
+ * @GOV
+ * codes: BR-WS-DATA-001-EFFECT-WS-WS-FILE-MANAGE-013,
+ *        BR-WS-DATA-003-EFFECT-WS-WS-FILE-MANAGE-013,
+ *        BR-WS-DATA-004-GUARD-WS-WS-FILE-MANAGE-013,
+ *        BR-CORE-GOV-001-EFFECT-WS-WS-FILE-MANAGE-013
+ * type: EFFECT
+ * chain: WS-FILE-MANAGE
+ * rules: BR-WS-DATA-001, BR-WS-DATA-003, BR-WS-DATA-004, BR-CORE-GOV-001
+ * boundary: in=Workspace root and move request | out=move result with refreshed FileNode list or PathConflict
+ * term_ref: TERM-WS-004
+ */
+export async function moveWorkspaceItem(
+  workspaceRoot: string,
+  request: WorkspaceMoveRequest,
+): Promise<WorkspaceMutationResult> {
+  return invoke<WorkspaceMutationResult>("move_workspace_item", {
+    workspaceRoot,
+    sourcePath: request.sourcePath,
+    targetPath: request.targetPath,
+  });
+}
+
+/**
+ * @GOV
+ * codes: BR-WS-DATA-001-EFFECT-WS-WS-FILE-MANAGE-014,
+ *        BR-WS-DATA-003-EFFECT-WS-WS-FILE-MANAGE-014,
+ *        BR-CORE-GOV-001-EFFECT-WS-WS-FILE-MANAGE-014
+ * type: EFFECT
+ * chain: WS-FILE-MANAGE
+ * rules: BR-WS-DATA-001, BR-WS-DATA-003, BR-CORE-GOV-001
+ * boundary: in=Workspace root and relative path | out=delete result with refreshed FileNode list
+ * term_ref: TERM-WS-004
+ */
+export async function deleteWorkspaceItem(
+  workspaceRoot: string,
+  relativePath: string,
+): Promise<WorkspaceMutationResult> {
+  return invoke<WorkspaceMutationResult>("delete_workspace_item", {
     workspaceRoot,
     relativePath,
   });

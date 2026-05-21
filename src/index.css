@@ -93,26 +93,37 @@ button {
   font-size: 13px;
 }
 
-.workspace-create {
+.workspace-create,
+.workspace-structure {
   display: grid;
   gap: 8px;
   margin-top: 16px;
 }
 
-.workspace-create input {
+.workspace-create input,
+.workspace-structure input {
   border: 1px solid #cfd6df;
   border-radius: 6px;
   min-width: 0;
   padding: 8px 10px;
 }
 
-.workspace-create div {
+.workspace-create div,
+.workspace-structure div {
   display: grid;
   gap: 8px;
+}
+
+.workspace-create div {
   grid-template-columns: 1fr 1fr;
 }
 
-.workspace-create button {
+.workspace-structure div {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.workspace-create button,
+.workspace-structure button {
   border: 1px solid #cfd6df;
   border-radius: 6px;
   cursor: pointer;

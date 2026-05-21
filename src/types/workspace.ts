@@ -55,6 +55,16 @@ export interface WorkspaceMutationResult {
   conflict?: PathConflict;
 }
 
+export interface WorkspaceMoveRequest {
+  sourcePath: string;
+  targetPath: string;
+}
+
+export interface WorkspaceRenameRequest {
+  sourcePath: string;
+  newName: string;
+}
+
 export interface WorkspaceSnapshot {
   workspace: Workspace;
   entries: WorkspaceEntry[];

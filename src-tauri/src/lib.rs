@@ -342,6 +342,32 @@ fn create_workspace_folder(
     create_workspace_item(&workspace_root, &relative_path, "directory")
 }
 
+#[tauri::command]
+fn rename_workspace_item(
+    workspace_root: String,
+    relative_path: String,
+    new_name: String,
+) -> Result<WorkspaceMutationResult, String> {
+    rename_workspace_item_impl(&workspace_root, &relative_path, &new_name)
+}
+
+#[tauri::command]
+fn move_workspace_item(
+    workspace_root: String,
+    source_path: String,
+    target_path: String,
+) -> Result<WorkspaceMutationResult, String> {
+    move_workspace_item_impl(&workspace_root, &source_path, &target_path)
+}
+
+#[tauri::command]
+fn delete_workspace_item(
+    workspace_root: String,
+    relative_path: String,
+) -> Result<WorkspaceMutationResult, String> {
+    delete_workspace_item_impl(&workspace_root, &relative_path)
+}
+
 fn create_workspace_item(
     workspace_root: &str,
     relative_path: &str,
@@ -350,6 +376,7 @@ fn create_workspace_item(
     let root = PathBuf::from(workspace_root)
         .canonicalize()
         .map_err(|error| error.to_string())?;
+    ensure_workspace_mutation_path(relative_path)?;
     let target = resolve_workspace_path(workspace_root, relative_path)?;
     if target.exists() {
         return Ok(WorkspaceMutationResult {
@@ -374,6 +401,143 @@ fn create_workspace_item(
         entries: read_workspace_entries(&root, &root)?,
         conflict: None,
     })
+}
+
+fn rename_workspace_item_impl(
+    workspace_root: &str,
+    relative_path: &str,
+    new_name: &str,
+) -> Result<WorkspaceMutationResult, String> {
+    ensure_workspace_mutation_path(relative_path)?;
+    ensure_workspace_item_name(new_name)?;
+    let root = PathBuf::from(workspace_root)
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let source = resolve_existing_workspace_item(workspace_root, relative_path)?;
+    let parent = source
+        .parent()
+        .ok_or_else(|| "target parent is not a directory".to_string())?;
+    let target = parent.join(new_name);
+    ensure_path_inside_root(&root, &target)?;
+    if target.exists() {
+        return Ok(WorkspaceMutationResult {
+            success: false,
+            entries: read_workspace_entries(&root, &root)?,
+            conflict: Some(path_conflict(&target, new_name)),
+        });
+    }
+    fs::rename(&source, &target).map_err(|error| error.to_string())?;
+    Ok(WorkspaceMutationResult {
+        success: true,
+        entries: read_workspace_entries(&root, &root)?,
+        conflict: None,
+    })
+}
+
+fn move_workspace_item_impl(
+    workspace_root: &str,
+    source_path: &str,
+    target_path: &str,
+) -> Result<WorkspaceMutationResult, String> {
+    ensure_workspace_mutation_path(source_path)?;
+    ensure_workspace_mutation_path(target_path)?;
+    let root = PathBuf::from(workspace_root)
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let source = resolve_existing_workspace_item(workspace_root, source_path)?;
+    let target = resolve_workspace_path(workspace_root, target_path)?;
+    if target.exists() {
+        return Ok(WorkspaceMutationResult {
+            success: false,
+            entries: read_workspace_entries(&root, &root)?,
+            conflict: Some(path_conflict(&target, target_path)),
+        });
+    }
+    let parent = target
+        .parent()
+        .ok_or_else(|| "target parent is not a directory".to_string())?;
+    if !parent.is_dir() {
+        return Err("target parent is not a directory".to_string());
+    }
+    fs::rename(&source, &target).map_err(|error| error.to_string())?;
+    Ok(WorkspaceMutationResult {
+        success: true,
+        entries: read_workspace_entries(&root, &root)?,
+        conflict: None,
+    })
+}
+
+fn delete_workspace_item_impl(
+    workspace_root: &str,
+    relative_path: &str,
+) -> Result<WorkspaceMutationResult, String> {
+    ensure_workspace_mutation_path(relative_path)?;
+    let root = PathBuf::from(workspace_root)
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let target = resolve_existing_workspace_item(workspace_root, relative_path)?;
+    if target.is_dir() {
+        fs::remove_dir_all(&target).map_err(|error| error.to_string())?;
+    } else {
+        fs::remove_file(&target).map_err(|error| error.to_string())?;
+    }
+    Ok(WorkspaceMutationResult {
+        success: true,
+        entries: read_workspace_entries(&root, &root)?,
+        conflict: None,
+    })
+}
+
+fn resolve_existing_workspace_item(
+    workspace_root: &str,
+    relative_path: &str,
+) -> Result<PathBuf, String> {
+    let target = resolve_workspace_path(workspace_root, relative_path)?;
+    if !target.exists() {
+        return Err("target does not exist".to_string());
+    }
+    Ok(target)
+}
+
+fn ensure_workspace_item_name(name: &str) -> Result<(), String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() || trimmed == ".binder" {
+        return Err("invalid Workspace item name".to_string());
+    }
+    let path = Path::new(trimmed);
+    if path.components().count() != 1
+        || path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err("invalid Workspace item name".to_string());
+    }
+    Ok(())
+}
+
+fn ensure_workspace_mutation_path(relative_path: &str) -> Result<(), String> {
+    let mut components = Path::new(relative_path).components();
+    let Some(Component::Normal(first)) = components.next() else {
+        return Err("invalid Workspace item path".to_string());
+    };
+    if first == ".binder" {
+        return Err("Workspace internal data cannot be modified".to_string());
+    }
+    Ok(())
+}
+
+fn ensure_path_inside_root(root: &Path, target: &Path) -> Result<(), String> {
+    let comparable_path = target
+        .canonicalize()
+        .unwrap_or_else(|_| target.to_path_buf());
+    if !comparable_path.starts_with(root) {
+        return Err("file target is outside Workspace".to_string());
+    }
+    Ok(())
 }
 
 fn path_conflict(target: &Path, relative_path: &str) -> PathConflict {
@@ -657,6 +821,86 @@ mod tests {
 
         fs::remove_dir_all(root).expect("fixture workspace should be removed");
     }
+
+    #[test]
+    fn renames_moves_and_deletes_workspace_items() {
+        let root = test_workspace_root("structure");
+        fs::create_dir_all(root.join("docs")).expect("fixture workspace should be created");
+        fs::create_dir_all(root.join("archive")).expect("fixture workspace should be created");
+        fs::write(root.join("docs/readme.md"), "content").expect("fixture file should be written");
+        let root_string = root.to_string_lossy().to_string();
+
+        let renamed = rename_workspace_item_impl(&root_string, "docs/readme.md", "notes.md")
+            .expect("file should be renamed");
+        let moved = move_workspace_item_impl(&root_string, "docs/notes.md", "archive/notes.md")
+            .expect("file should be moved");
+        let deleted = delete_workspace_item_impl(&root_string, "archive/notes.md")
+            .expect("file should be deleted");
+
+        assert!(renamed.success);
+        assert!(moved.success);
+        assert!(deleted.success);
+        assert!(!root.join("archive/notes.md").exists());
+        assert!(deleted
+            .entries
+            .iter()
+            .any(|entry| entry.relative_path == "archive"));
+
+        fs::remove_dir_all(root).expect("fixture workspace should be removed");
+    }
+
+    #[test]
+    fn protects_internal_workspace_data_during_structure_mutations() {
+        let root = test_workspace_root("internal");
+        fs::create_dir_all(root.join(".binder")).expect("fixture workspace should be created");
+        fs::write(root.join(".binder/workspace.db"), "db").expect("fixture file should be written");
+        let root_string = root.to_string_lossy().to_string();
+
+        assert!(delete_workspace_item_impl(&root_string, ".binder/workspace.db").is_err());
+        assert!(move_workspace_item_impl(&root_string, ".binder/workspace.db", "db").is_err());
+        assert!(rename_workspace_item_impl(&root_string, ".binder/workspace.db", "x").is_err());
+        assert_eq!(
+            fs::read_to_string(root.join(".binder/workspace.db"))
+                .expect("internal db should remain readable"),
+            "db"
+        );
+
+        fs::remove_dir_all(root).expect("fixture workspace should be removed");
+    }
+
+    #[test]
+    fn move_and_rename_return_path_conflict_without_overwriting() {
+        let root = test_workspace_root("move-conflict");
+        fs::create_dir_all(&root).expect("fixture workspace should be created");
+        fs::write(root.join("a.md"), "a").expect("fixture file should be written");
+        fs::write(root.join("b.md"), "b").expect("fixture file should be written");
+        let root_string = root.to_string_lossy().to_string();
+
+        let rename_result = rename_workspace_item_impl(&root_string, "a.md", "b.md")
+            .expect("rename conflict should be returned");
+        let move_result = move_workspace_item_impl(&root_string, "a.md", "b.md")
+            .expect("move conflict should be returned");
+
+        assert!(!rename_result.success);
+        assert_eq!(
+            rename_result
+                .conflict
+                .expect("rename conflict should exist")
+                .code,
+            "PATH_CONFLICT"
+        );
+        assert!(!move_result.success);
+        assert_eq!(
+            fs::read_to_string(root.join("b.md")).expect("b should remain"),
+            "b"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("a.md")).expect("a should remain"),
+            "a"
+        );
+
+        fs::remove_dir_all(root).expect("fixture workspace should be removed");
+    }
 }
 
 pub fn run() {
@@ -672,6 +916,9 @@ pub fn run() {
             list_files,
             create_workspace_file,
             create_workspace_folder,
+            rename_workspace_item,
+            move_workspace_item,
+            delete_workspace_item,
             search_files
         ])
         .run(tauri::generate_context!())
