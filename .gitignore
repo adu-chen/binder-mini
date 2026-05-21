@@ -1,0 +1,15 @@
+node_modules/
+dist/
+target/
+src-tauri/target/
+
+.env
+.env.local
+*.local
+
+.DS_Store
+Thumbs.db
+*.log
+
+.idea/
+.vscode/settings.json
