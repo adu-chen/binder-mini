@@ -1,4 +1,5 @@
 import type { WorkspaceFileTarget } from "./workspace";
+import type { WorkspaceEntry } from "./workspace";
 
 /**
  * @GOV
@@ -29,10 +30,27 @@ export interface InputReference {
   mode: "readonly";
 }
 
+export type ToolName = "read_file" | "list_files" | "search_files";
+
 export interface ToolExecution {
   id: string;
-  toolName: string;
+  toolName: ToolName;
   inputBoundary: string;
   status: "pending" | "running" | "succeeded" | "failed";
+  resultSummary?: string;
   errorMessage?: string;
+}
+
+export interface SearchResult {
+  filePath: string;
+  preview: string;
+}
+
+export interface ToolExecutionResult {
+  execution: ToolExecution;
+  message: AgentMessage;
+}
+
+export interface ListFilesResult {
+  entries: WorkspaceEntry[];
 }

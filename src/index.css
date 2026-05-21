@@ -189,5 +189,33 @@ button {
 .tool-row {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
   justify-content: space-between;
+}
+
+.tool-row p {
+  flex-basis: 100%;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.tool-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+  margin: 12px 0;
+}
+
+.tool-actions button,
+.panel > button:not(.primary-action) {
+  border: 1px solid #ccd3dd;
+  background: #ffffff;
+  cursor: pointer;
+  min-height: 32px;
+}
+
+.tool-actions button:disabled {
+  color: #8a96a8;
+  cursor: default;
 }

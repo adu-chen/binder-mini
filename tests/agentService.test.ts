@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   canRecordAgentMessage,
   canSendAgentMessage,
+  completeToolExecution,
   createPendingToolExecution,
   createUserAgentMessage,
+  failToolExecution,
   isReadonlyInputReference,
   normalizeProviderConfig,
+  summarizeSearchResults,
+  summarizeText,
 } from "../src/services/agentService";
 
 describe("Agent Provider MVP service behavior", () => {
@@ -40,6 +44,8 @@ describe("Agent Provider MVP service behavior", () => {
     expect(execution.toolName).toBe("read_file");
     expect(execution.inputBoundary).toBe("Workspace");
     expect(execution.status).toBe("pending");
+    expect(completeToolExecution(execution, "ok").status).toBe("succeeded");
+    expect(failToolExecution(execution, "nope").errorMessage).toBe("nope");
   });
 
   // covers: BR-AG-DATA-001
@@ -69,5 +75,14 @@ describe("Agent Provider MVP service behavior", () => {
       model: "claude",
       apiKeyConfigured: true,
     });
+  });
+
+  // covers: BR-AG-OBS-001
+  it("summarizes read and search tool results", () => {
+    expect(summarizeText(" hello\nworld ")).toBe("hello world");
+    expect(summarizeSearchResults([])).toBe("No matches");
+    expect(
+      summarizeSearchResults([{ filePath: "notes.md", preview: "match line" }]),
+    ).toBe("notes.md: match line");
   });
 });

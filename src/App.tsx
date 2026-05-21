@@ -8,6 +8,9 @@ import {
   canSendAgentMessage,
   createPendingToolExecution,
   createUserAgentMessage,
+  executeListFilesTool,
+  executeReadFileTool,
+  executeSearchFilesTool,
   normalizeProviderConfig,
 } from "./services/agentService";
 import {
@@ -43,6 +46,7 @@ export default function App() {
     apiKeyConfigured: false,
   });
   const [agentInput, setAgentInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
   const [toolExecutions, setToolExecutions] = useState<ToolExecution[]>([]);
   const [agentError, setAgentError] = useState<string | null>(null);
@@ -117,6 +121,34 @@ export default function App() {
       ...executions,
     ]);
     setAgentInput("");
+  }
+
+  async function runAgentTool(toolName: "read_file" | "list_files" | "search_files") {
+    if (!workspaceSnapshot) {
+      setAgentError("Open a Workspace before running tools.");
+      return;
+    }
+    setAgentError(null);
+    try {
+      const workspaceRoot = workspaceSnapshot.workspace.rootPath;
+      const result =
+        toolName === "read_file"
+          ? await executeReadFileTool(workspaceRoot, editorDocument?.filePath ?? "")
+          : toolName === "list_files"
+            ? await executeListFilesTool(workspaceRoot)
+            : await executeSearchFilesTool(workspaceRoot, searchQuery);
+
+      setToolExecutions((executions) => [result.execution, ...executions]);
+      setAgentMessages((messages) => [...messages, result.message]);
+    } catch (error) {
+      const failedExecution = {
+        ...createPendingToolExecution(toolName),
+        status: "failed" as const,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      };
+      setToolExecutions((executions) => [failedExecution, ...executions]);
+      setAgentError(failedExecution.errorMessage ?? "Tool failed.");
+    }
   }
 
   return (
@@ -250,11 +282,36 @@ export default function App() {
         >
           Send
         </button>
+        <div className="tool-actions">
+          <button
+            type="button"
+            onClick={() => void runAgentTool("read_file")}
+            disabled={!editorDocument}
+          >
+            Read active file
+          </button>
+          <button type="button" onClick={() => void runAgentTool("list_files")}>
+            List files
+          </button>
+        </div>
+        <label className="field">
+          <span>Search</span>
+          <input
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="query"
+          />
+        </label>
+        <button type="button" onClick={() => void runAgentTool("search_files")}>
+          Search files
+        </button>
         <div className="tool-list">
           {toolExecutions.map((execution) => (
             <div className="tool-row" key={execution.id}>
               <span>{execution.toolName}</span>
               <small>{execution.status}</small>
+              {execution.resultSummary ? <p>{execution.resultSummary}</p> : null}
+              {execution.errorMessage ? <p>{execution.errorMessage}</p> : null}
             </div>
           ))}
         </div>

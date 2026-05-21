@@ -35,6 +35,19 @@ struct WorkspaceOpenResult {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ListFilesResult {
+    entries: Vec<WorkspaceEntry>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SearchResult {
+    file_path: String,
+    preview: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct EditorDocument {
     file_path: String,
     workspace_root: String,
@@ -94,7 +107,11 @@ fn read_workspace_entries(root_path: &Path) -> Result<Vec<WorkspaceEntry>, Strin
             continue;
         }
         let file_type = entry.file_type().map_err(|error| error.to_string())?;
-        let kind = if file_type.is_dir() { "directory" } else { "file" };
+        let kind = if file_type.is_dir() {
+            "directory"
+        } else {
+            "file"
+        };
         let name = entry.file_name().to_string_lossy().to_string();
         entries.push(WorkspaceEntry {
             relative_path: name.clone(),
@@ -115,7 +132,10 @@ fn is_direct_child(root_path: &Path, path: &PathBuf) -> bool {
 }
 
 #[tauri::command]
-fn read_workspace_file(workspace_root: String, relative_path: String) -> Result<EditorDocument, String> {
+fn read_workspace_file(
+    workspace_root: String,
+    relative_path: String,
+) -> Result<EditorDocument, String> {
     let file_path = resolve_workspace_file(&workspace_root, &relative_path)?;
     let bytes = fs::read(&file_path).map_err(|error| error.to_string())?;
     let content = String::from_utf8_lossy(&bytes).to_string();
@@ -126,6 +146,37 @@ fn read_workspace_file(workspace_root: String, relative_path: String) -> Result<
         mode: editor_mode_for_path(&relative_path),
         dirty: false,
     })
+}
+
+#[tauri::command]
+fn read_file(workspace_root: String, file_path: String) -> Result<String, String> {
+    let path = resolve_workspace_file(&workspace_root, &file_path)?;
+    fs::read_to_string(path).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_files(workspace_root: String, dir_path: Option<String>) -> Result<ListFilesResult, String> {
+    let dir = resolve_workspace_path(&workspace_root, dir_path.as_deref().unwrap_or(""))?;
+    if !dir.is_dir() {
+        return Err("target is not a directory".to_string());
+    }
+    Ok(ListFilesResult {
+        entries: read_workspace_entries(&dir)?,
+    })
+}
+
+#[tauri::command]
+fn search_files(workspace_root: String, query: String) -> Result<Vec<SearchResult>, String> {
+    let trimmed_query = query.trim().to_lowercase();
+    if trimmed_query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let root = PathBuf::from(&workspace_root)
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let mut results = Vec::new();
+    collect_search_results(&root, &root, &trimmed_query, &mut results)?;
+    Ok(results)
 }
 
 #[tauri::command]
@@ -149,20 +200,36 @@ fn write_workspace_file(
 }
 
 fn resolve_workspace_file(workspace_root: &str, relative_path: &str) -> Result<PathBuf, String> {
-    let root = PathBuf::from(workspace_root);
+    let file_path = resolve_workspace_path(workspace_root, relative_path)?;
+    if !file_path.is_file() {
+        return Err("target is not a file".to_string());
+    }
+    Ok(file_path)
+}
+
+fn resolve_workspace_path(workspace_root: &str, relative_path: &str) -> Result<PathBuf, String> {
+    let root = PathBuf::from(workspace_root)
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
     let relative = Path::new(relative_path);
     if relative.is_absolute()
-        || relative
-            .components()
-            .any(|component| matches!(component, Component::ParentDir | Component::RootDir | Component::Prefix(_)))
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
     {
         return Err("file target is outside Workspace".to_string());
     }
-    let file_path = root.join(relative);
-    if !file_path.starts_with(&root) {
+    let target_path = root.join(relative);
+    let comparable_path = target_path
+        .canonicalize()
+        .unwrap_or_else(|_| target_path.clone());
+    if !comparable_path.starts_with(&root) {
         return Err("file target is outside Workspace".to_string());
     }
-    Ok(file_path)
+    Ok(target_path)
 }
 
 fn editor_mode_for_path(relative_path: &str) -> &'static str {
@@ -174,6 +241,43 @@ fn editor_mode_for_path(relative_path: &str) -> &'static str {
     }
 }
 
+fn collect_search_results(
+    root: &Path,
+    current: &Path,
+    query: &str,
+    results: &mut Vec<SearchResult>,
+) -> Result<(), String> {
+    if results.len() >= 20 {
+        return Ok(());
+    }
+    for entry in fs::read_dir(current).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        let file_type = entry.file_type().map_err(|error| error.to_string())?;
+        if file_type.is_dir() {
+            collect_search_results(root, &path, query, results)?;
+        } else if file_type.is_file() {
+            let Ok(content) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let lower = content.to_lowercase();
+            if let Some(index) = lower.find(query) {
+                let preview = content[index..].chars().take(120).collect::<String>();
+                let file_path = path
+                    .strip_prefix(root)
+                    .map_err(|error| error.to_string())?
+                    .to_string_lossy()
+                    .to_string();
+                results.push(SearchResult { file_path, preview });
+            }
+        }
+        if results.len() >= 20 {
+            break;
+        }
+    }
+    Ok(())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -181,7 +285,10 @@ pub fn run() {
             health_check,
             open_workspace,
             read_workspace_file,
-            write_workspace_file
+            write_workspace_file,
+            read_file,
+            list_files,
+            search_files
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Binder Mini");
