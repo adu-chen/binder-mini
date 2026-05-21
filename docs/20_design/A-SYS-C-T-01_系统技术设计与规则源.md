@@ -5,7 +5,7 @@
 文档职责：   系统规则来源
 上游约束：   CORE-C-P-01、CORE-C-D-01
 直接承接：   全部实现模块、ADUS
-使用边界：   定义首批技术规则，不展开全部实现细节
+使用边界：   定义首批技术规则、状态机入口和需求映射约定
 变更要求：   修改规则、链路、模块或术语后必须刷新 ADUS
 ---
 
@@ -347,8 +347,33 @@ rule_id: BR-CORE-GOV-001
 5. 状态机定义存在性审计覆盖 `BR-SYS-GOV-001`。
 6. @GOV / triage 游离代码块审计覆盖 `BR-CORE-GOV-001`。
 
+## 8. 需求到规则映射约定
+
+需求描述层使用 `REQ-*` 标识产品和功能需求；技术设计层使用 `RULE`、`CHAIN`、`CONSTRAINT`、`TERM` 作为代码实现规则来源。
+
+技术规则到需求的映射由 `SYS-C-T-02` 维护。已注册 `RULE` 可以承接一个或多个 `REQ-*`；实现代码必须映射到已注册技术规则，不能只映射到需求 ID。
+
+新增功能进入代码实现前，必须完成以下链路：
+
+`REQ-* -> SYS-C-T-02 -> SYS-C-T-01 已注册 RULE/CHAIN/CONSTRAINT -> @GOV 注释 -> 测试覆盖`
+
+## 9. Workspace 颗粒度补齐候选规则
+
+以下规则是 `CORE-X-P-12` 和 `WS-M-D-01` 推导出的后续实现候选。它们尚未登记为 RULE 注释块；进入 Phase 8 代码实现前，必须先升级为正式技术规则并补测试覆盖。
+
+| 候选规则 ID | 承接需求 | 建议链路 | 设计意图 |
+|-------------|----------|----------|----------|
+| BR-WS-STATE-002 | REQ-WS-001、REQ-WS-005 | WS-OPEN | Workspace active 前必须完成 `.binder` 和 workspace.db 初始化。 |
+| BR-WS-DATA-002 | REQ-WS-003 | WS-FILE-MANAGE | 文件树必须以 Workspace 根目录为边界递归生成 FileNode。 |
+| BR-WS-PERSIST-001 | REQ-WS-004 | WS-OPEN | 最近 Workspace 是用户级元数据，不属于 Workspace 内容。 |
+| BR-WS-DATA-003 | REQ-WS-006、REQ-WS-007 | WS-FILE-MANAGE | 创建、重命名、移动、删除必须通过 Workspace 边界守卫。 |
+| BR-WS-DATA-004 | REQ-WS-008 | WS-FILE-MANAGE | 目标冲突必须返回 PathConflict，未经确认不得覆盖。 |
+| BR-WS-STATE-003 | REQ-WS-009 | WS-CLOSE | 关闭或切换前必须处理 dirty editor 和 pending diff。 |
+| BR-WS-DATA-005 | REQ-WS-010 | WS-SEARCH | 搜索索引必须可重建，搜索结果必须限制在当前 Workspace。 |
+
 ## 变更记录
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-05-22 | v1.1 | 增加需求到规则映射约定和 Workspace 颗粒度候选规则 |
 | 2026-05-22 | v1.0 | 初始版本，注册首批模块、术语、链路、约束和规则 |
