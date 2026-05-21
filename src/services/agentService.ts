@@ -1,4 +1,9 @@
-import type { InputReference, ProviderConfig, ToolExecution } from "../types/agent";
+import type {
+  AgentMessage,
+  InputReference,
+  ProviderConfig,
+  ToolExecution,
+} from "../types/agent";
 
 /**
  * @GOV
@@ -16,14 +21,37 @@ export function canSendAgentMessage(provider: ProviderConfig): boolean {
   return provider.apiKeyConfigured && provider.model.trim().length > 0;
 }
 
+export function normalizeProviderConfig(
+  provider: ProviderConfig,
+): ProviderConfig {
+  return {
+    provider: provider.provider,
+    model: provider.model.trim(),
+    apiKeyConfigured: provider.apiKeyConfigured,
+  };
+}
+
 export function isReadonlyInputReference(reference: InputReference): boolean {
   return reference.mode === "readonly";
 }
 
 export function createPendingToolExecution(toolName: string): ToolExecution {
   return {
+    id: `tool-${Date.now()}`,
     toolName,
     inputBoundary: "Workspace",
     status: "pending",
   };
+}
+
+export function createUserAgentMessage(content: string): AgentMessage {
+  return {
+    id: `msg-${Date.now()}`,
+    role: "user",
+    content: content.trim(),
+  };
+}
+
+export function canRecordAgentMessage(content: string): boolean {
+  return content.trim().length > 0;
 }

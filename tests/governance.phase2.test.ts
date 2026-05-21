@@ -3,7 +3,12 @@ import { createAgentMachineDefinition } from "../src/machines/agentMachine";
 import { createDiffMachineDefinition } from "../src/machines/diffMachine";
 import { createEditorMachineDefinition } from "../src/machines/editorMachine";
 import { createWorkspaceMachineDefinition } from "../src/machines/workspaceMachine";
-import { canSendAgentMessage, isReadonlyInputReference } from "../src/services/agentService";
+import {
+  canRecordAgentMessage,
+  canSendAgentMessage,
+  createPendingToolExecution,
+  isReadonlyInputReference,
+} from "../src/services/agentService";
 import { canExecutePendingDiff, createTerminalDiffCard } from "../src/services/diffService";
 import { canSaveEditorDocument } from "../src/services/editorService";
 import { isWorkspaceTarget } from "../src/services/workspaceService";
@@ -32,7 +37,9 @@ describe("Phase 2 governance skeleton", () => {
   it("keeps Agent requests behind provider validation and readonly InputReference", () => {
     expect(canSendAgentMessage({ provider: "openai", model: "gpt", apiKeyConfigured: true })).toBe(true);
     expect(canSendAgentMessage({ provider: "openai", model: "", apiKeyConfigured: true })).toBe(false);
+    expect(canRecordAgentMessage("inspect workspace")).toBe(true);
     expect(isReadonlyInputReference({ id: "r1", mode: "readonly", target: { workspaceRoot: "/tmp/ws", relativePath: "a.md" } })).toBe(true);
+    expect(createPendingToolExecution("read_file").status).toBe("pending");
     expect(createAgentMachineDefinition().states.idle.SEND_REQUESTED).toBe("validatingProvider");
   });
 

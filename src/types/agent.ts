@@ -17,6 +17,12 @@ export interface ProviderConfig {
   apiKeyConfigured: boolean;
 }
 
+export interface AgentMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+}
+
 export interface InputReference {
   id: string;
   target: WorkspaceFileTarget;
@@ -24,6 +30,7 @@ export interface InputReference {
 }
 
 export interface ToolExecution {
+  id: string;
   toolName: string;
   inputBoundary: string;
   status: "pending" | "running" | "succeeded" | "failed";

@@ -4,10 +4,18 @@ import { createDiffMachineDefinition } from "./machines/diffMachine";
 import { createEditorMachineDefinition } from "./machines/editorMachine";
 import { createWorkspaceMachineDefinition } from "./machines/workspaceMachine";
 import {
+  canRecordAgentMessage,
+  canSendAgentMessage,
+  createPendingToolExecution,
+  createUserAgentMessage,
+  normalizeProviderConfig,
+} from "./services/agentService";
+import {
   canSaveEditorDocument,
   openEditorDocument,
   saveEditorDocument,
 } from "./services/editorService";
+import type { AgentMessage, ProviderConfig, ToolExecution } from "./types/agent";
 import { openWorkspace, sortWorkspaceEntries } from "./services/workspaceService";
 import type { EditorDocument } from "./types/editor";
 import type { WorkspaceSnapshot } from "./types/workspace";
@@ -29,6 +37,15 @@ export default function App() {
     null,
   );
   const [editorError, setEditorError] = useState<string | null>(null);
+  const [providerConfig, setProviderConfig] = useState<ProviderConfig>({
+    provider: "openai",
+    model: "",
+    apiKeyConfigured: false,
+  });
+  const [agentInput, setAgentInput] = useState("");
+  const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
+  const [toolExecutions, setToolExecutions] = useState<ToolExecution[]>([]);
+  const [agentError, setAgentError] = useState<string | null>(null);
   const machines = [
     createWorkspaceMachineDefinition(),
     createEditorMachineDefinition(),
@@ -75,6 +92,31 @@ export default function App() {
     } catch (error) {
       setEditorError(error instanceof Error ? error.message : String(error));
     }
+  }
+
+  function handleSendAgentMessage() {
+    const normalizedProvider = normalizeProviderConfig(providerConfig);
+    setProviderConfig(normalizedProvider);
+    setAgentError(null);
+
+    if (!canSendAgentMessage(normalizedProvider)) {
+      setAgentError("Provider configuration is required before sending.");
+      return;
+    }
+    if (!canRecordAgentMessage(agentInput)) {
+      setAgentError("Message cannot be empty.");
+      return;
+    }
+
+    setAgentMessages((messages) => [
+      ...messages,
+      createUserAgentMessage(agentInput),
+    ]);
+    setToolExecutions((executions) => [
+      createPendingToolExecution("read_file"),
+      ...executions,
+    ]);
+    setAgentInput("");
   }
 
   return (
@@ -146,7 +188,76 @@ export default function App() {
         )}
       </section>
       <aside className="panel">
-        <p>Agent</p>
+        <h2>Agent</h2>
+        <label className="field">
+          <span>Provider</span>
+          <select
+            value={providerConfig.provider}
+            onChange={(event) =>
+              setProviderConfig({
+                ...providerConfig,
+                provider: event.target.value as ProviderConfig["provider"],
+              })
+            }
+          >
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="deepseek">DeepSeek</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Model</span>
+          <input
+            value={providerConfig.model}
+            onChange={(event) =>
+              setProviderConfig({ ...providerConfig, model: event.target.value })
+            }
+            placeholder="model name"
+          />
+        </label>
+        <label className="checkbox-field">
+          <input
+            checked={providerConfig.apiKeyConfigured}
+            type="checkbox"
+            onChange={(event) =>
+              setProviderConfig({
+                ...providerConfig,
+                apiKeyConfigured: event.target.checked,
+              })
+            }
+          />
+          <span>API key configured</span>
+        </label>
+        <div className="agent-messages">
+          {agentMessages.map((message) => (
+            <div className="message-row" key={message.id}>
+              <strong>{message.role}</strong>
+              <p>{message.content}</p>
+            </div>
+          ))}
+        </div>
+        <textarea
+          className="agent-input"
+          value={agentInput}
+          onChange={(event) => setAgentInput(event.target.value)}
+          placeholder="Ask Agent to inspect the workspace"
+        />
+        {agentError ? <p className="error-text">{agentError}</p> : null}
+        <button
+          className="primary-action"
+          type="button"
+          onClick={handleSendAgentMessage}
+        >
+          Send
+        </button>
+        <div className="tool-list">
+          {toolExecutions.map((execution) => (
+            <div className="tool-row" key={execution.id}>
+              <span>{execution.toolName}</span>
+              <small>{execution.status}</small>
+            </div>
+          ))}
+        </div>
         <small>{machines.length} state machines registered</small>
       </aside>
     </main>

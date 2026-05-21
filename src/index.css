@@ -133,3 +133,61 @@ button {
   resize: none;
   width: 100%;
 }
+
+.field {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.field span,
+.checkbox-field span {
+  color: #5b6777;
+  font-size: 12px;
+}
+
+.field input,
+.field select,
+.agent-input {
+  border: 1px solid #ccd3dd;
+  box-sizing: border-box;
+  font: inherit;
+  min-height: 32px;
+  padding: 6px 8px;
+  width: 100%;
+}
+
+.checkbox-field {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.agent-messages,
+.tool-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.message-row,
+.tool-row {
+  border: 1px solid #d8dee6;
+  padding: 8px;
+}
+
+.message-row p {
+  margin: 4px 0 0;
+}
+
+.agent-input {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.tool-row {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
