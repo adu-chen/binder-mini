@@ -9,7 +9,19 @@
  */
 export interface EditorDocument {
   filePath: string;
+  workspaceRoot: string;
   content: string;
   mode: "editable" | "readonly";
   dirty: boolean;
+}
+
+export interface EditorOpenRequest {
+  workspaceRoot: string;
+  relativePath: string;
+}
+
+export interface EditorSaveRequest {
+  workspaceRoot: string;
+  relativePath: string;
+  content: string;
 }

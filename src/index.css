@@ -38,6 +38,11 @@ button {
   padding: 8px 12px;
 }
 
+.primary-action:disabled {
+  background: #9aa8bb;
+  cursor: default;
+}
+
 .workspace-summary {
   display: grid;
   gap: 4px;
@@ -76,4 +81,55 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.file-button {
+  background: transparent;
+  border: 0;
+  color: #17202a;
+  cursor: pointer;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-toolbar {
+  align-items: center;
+  border-bottom: 1px solid #d8dee6;
+  display: flex;
+  justify-content: space-between;
+  margin: -16px -16px 16px;
+  min-height: 48px;
+  padding: 8px 16px;
+}
+
+.editor-toolbar div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.editor-toolbar strong,
+.editor-toolbar span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-toolbar span {
+  color: #5b6777;
+  font-size: 12px;
+}
+
+.editor-textarea {
+  border: 1px solid #ccd3dd;
+  box-sizing: border-box;
+  font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  min-height: calc(100vh - 98px);
+  padding: 12px;
+  resize: none;
+  width: 100%;
 }

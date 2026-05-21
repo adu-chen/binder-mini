@@ -3,7 +3,13 @@ import { createAgentMachineDefinition } from "./machines/agentMachine";
 import { createDiffMachineDefinition } from "./machines/diffMachine";
 import { createEditorMachineDefinition } from "./machines/editorMachine";
 import { createWorkspaceMachineDefinition } from "./machines/workspaceMachine";
+import {
+  canSaveEditorDocument,
+  openEditorDocument,
+  saveEditorDocument,
+} from "./services/editorService";
 import { openWorkspace, sortWorkspaceEntries } from "./services/workspaceService";
+import type { EditorDocument } from "./types/editor";
 import type { WorkspaceSnapshot } from "./types/workspace";
 
 /**
@@ -19,6 +25,10 @@ export default function App() {
   const [workspaceSnapshot, setWorkspaceSnapshot] =
     useState<WorkspaceSnapshot | null>(null);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [editorDocument, setEditorDocument] = useState<EditorDocument | null>(
+    null,
+  );
+  const [editorError, setEditorError] = useState<string | null>(null);
   const machines = [
     createWorkspaceMachineDefinition(),
     createEditorMachineDefinition(),
@@ -35,9 +45,35 @@ export default function App() {
           ...result.snapshot,
           entries: sortWorkspaceEntries(result.snapshot.entries),
         });
+        setEditorDocument(null);
       }
     } catch (error) {
       setWorkspaceError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function handleOpenFile(relativePath: string) {
+    if (!workspaceSnapshot) return;
+    setEditorError(null);
+    try {
+      setEditorDocument(
+        await openEditorDocument({
+          workspaceRoot: workspaceSnapshot.workspace.rootPath,
+          relativePath,
+        }),
+      );
+    } catch (error) {
+      setEditorError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function handleSaveFile() {
+    if (!editorDocument) return;
+    setEditorError(null);
+    try {
+      setEditorDocument(await saveEditorDocument(editorDocument));
+    } catch (error) {
+      setEditorError(error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -61,13 +97,53 @@ export default function App() {
           {workspaceSnapshot?.entries.map((entry) => (
             <li key={entry.relativePath}>
               <span aria-hidden="true">{entry.kind === "directory" ? "dir" : "file"}</span>
-              <span>{entry.name}</span>
+              {entry.kind === "file" ? (
+                <button
+                  className="file-button"
+                  type="button"
+                  onClick={() => void handleOpenFile(entry.relativePath)}
+                >
+                  {entry.name}
+                </button>
+              ) : (
+                <span>{entry.name}</span>
+              )}
             </li>
           ))}
         </ul>
       </aside>
       <section className="editor-surface">
-        <p>Editor</p>
+        <div className="editor-toolbar">
+          <div>
+            <strong>{editorDocument?.filePath ?? "Editor"}</strong>
+            {editorDocument ? <span>{editorDocument.mode}</span> : null}
+          </div>
+          <button
+            className="primary-action"
+            type="button"
+            disabled={!editorDocument || !canSaveEditorDocument(editorDocument)}
+            onClick={() => void handleSaveFile()}
+          >
+            Save
+          </button>
+        </div>
+        {editorError ? <p className="error-text">{editorError}</p> : null}
+        {editorDocument ? (
+          <textarea
+            className="editor-textarea"
+            readOnly={editorDocument.mode === "readonly"}
+            value={editorDocument.content}
+            onChange={(event) =>
+              setEditorDocument({
+                ...editorDocument,
+                content: event.target.value,
+                dirty: true,
+              })
+            }
+          />
+        ) : (
+          <p className="muted">Open a file from the Workspace.</p>
+        )}
       </section>
       <aside className="panel">
         <p>Agent</p>

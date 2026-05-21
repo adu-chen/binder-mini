@@ -1,6 +1,6 @@
 use serde::Serialize;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use tauri_plugin_dialog::DialogExt;
 
 #[derive(Serialize)]
@@ -31,6 +31,16 @@ struct WorkspaceSnapshot {
 struct WorkspaceOpenResult {
     cancelled: bool,
     snapshot: Option<WorkspaceSnapshot>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EditorDocument {
+    file_path: String,
+    workspace_root: String,
+    content: String,
+    mode: &'static str,
+    dirty: bool,
 }
 
 #[tauri::command]
@@ -104,10 +114,75 @@ fn is_direct_child(root_path: &Path, path: &PathBuf) -> bool {
     path.parent() == Some(root_path)
 }
 
+#[tauri::command]
+fn read_workspace_file(workspace_root: String, relative_path: String) -> Result<EditorDocument, String> {
+    let file_path = resolve_workspace_file(&workspace_root, &relative_path)?;
+    let bytes = fs::read(&file_path).map_err(|error| error.to_string())?;
+    let content = String::from_utf8_lossy(&bytes).to_string();
+    Ok(EditorDocument {
+        file_path: relative_path.clone(),
+        workspace_root,
+        content,
+        mode: editor_mode_for_path(&relative_path),
+        dirty: false,
+    })
+}
+
+#[tauri::command]
+fn write_workspace_file(
+    workspace_root: String,
+    relative_path: String,
+    content: String,
+) -> Result<EditorDocument, String> {
+    if editor_mode_for_path(&relative_path) != "editable" {
+        return Err("readonly file cannot be saved".to_string());
+    }
+    let file_path = resolve_workspace_file(&workspace_root, &relative_path)?;
+    fs::write(&file_path, content.as_bytes()).map_err(|error| error.to_string())?;
+    Ok(EditorDocument {
+        file_path: relative_path.clone(),
+        workspace_root,
+        content,
+        mode: "editable",
+        dirty: false,
+    })
+}
+
+fn resolve_workspace_file(workspace_root: &str, relative_path: &str) -> Result<PathBuf, String> {
+    let root = PathBuf::from(workspace_root);
+    let relative = Path::new(relative_path);
+    if relative.is_absolute()
+        || relative
+            .components()
+            .any(|component| matches!(component, Component::ParentDir | Component::RootDir | Component::Prefix(_)))
+    {
+        return Err("file target is outside Workspace".to_string());
+    }
+    let file_path = root.join(relative);
+    if !file_path.starts_with(&root) {
+        return Err("file target is outside Workspace".to_string());
+    }
+    Ok(file_path)
+}
+
+fn editor_mode_for_path(relative_path: &str) -> &'static str {
+    let lower = relative_path.to_lowercase();
+    if lower.ends_with(".md") || lower.ends_with(".txt") {
+        "editable"
+    } else {
+        "readonly"
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![health_check, open_workspace])
+        .invoke_handler(tauri::generate_handler![
+            health_check,
+            open_workspace,
+            read_workspace_file,
+            write_workspace_file
+        ])
         .run(tauri::generate_context!())
         .expect("failed to run Binder Mini");
 }
