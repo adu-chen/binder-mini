@@ -6,12 +6,14 @@ import { createWorkspaceMachineDefinition } from "./machines/workspaceMachine";
 import {
   canRecordAgentMessage,
   canSendAgentMessage,
+  createAssistantStreamMessage,
   createPendingToolExecution,
   createUserAgentMessage,
   executeListFilesTool,
   executeReadFileTool,
   executeSearchFilesTool,
   normalizeProviderConfig,
+  streamAssistantResponse,
 } from "./services/agentService";
 import {
   canSaveEditorDocument,
@@ -50,6 +52,7 @@ export default function App() {
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
   const [toolExecutions, setToolExecutions] = useState<ToolExecution[]>([]);
   const [agentError, setAgentError] = useState<string | null>(null);
+  const [agentStreaming, setAgentStreaming] = useState(false);
   const machines = [
     createWorkspaceMachineDefinition(),
     createEditorMachineDefinition(),
@@ -98,7 +101,8 @@ export default function App() {
     }
   }
 
-  function handleSendAgentMessage() {
+  async function handleSendAgentMessage() {
+    if (agentStreaming) return;
     const normalizedProvider = normalizeProviderConfig(providerConfig);
     setProviderConfig(normalizedProvider);
     setAgentError(null);
@@ -112,18 +116,50 @@ export default function App() {
       return;
     }
 
-    setAgentMessages((messages) => [
-      ...messages,
-      createUserAgentMessage(agentInput),
-    ]);
-    setToolExecutions((executions) => [
-      createPendingToolExecution("read_file"),
-      ...executions,
-    ]);
+    const userContent = agentInput;
+    const userMessage = createUserAgentMessage(userContent);
+    const assistantMessage = createAssistantStreamMessage();
+    setAgentMessages((messages) => [...messages, userMessage, assistantMessage]);
     setAgentInput("");
+    setAgentStreaming(true);
+
+    try {
+      for await (const chunk of streamAssistantResponse({
+        provider: normalizedProvider,
+        userContent,
+        workspaceName: workspaceSnapshot?.workspace.displayName,
+        activeFilePath: editorDocument?.filePath,
+      })) {
+        setAgentMessages((messages) =>
+          messages.map((message) =>
+            message.id === assistantMessage.id
+              ? {
+                  ...message,
+                  content: message.content + chunk.content,
+                  streamStatus: chunk.done ? "complete" : "streaming",
+                }
+              : message,
+          ),
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setAgentError(message);
+      setAgentMessages((messages) =>
+        messages.map((item) =>
+          item.id === assistantMessage.id
+            ? { ...item, streamStatus: "failed", content: message }
+            : item,
+        ),
+      );
+    } finally {
+      setAgentStreaming(false);
+    }
   }
 
-  async function runAgentTool(toolName: "read_file" | "list_files" | "search_files") {
+  async function runAgentTool(
+    toolName: "read_file" | "list_files" | "search_files",
+  ) {
     if (!workspaceSnapshot) {
       setAgentError("Open a Workspace before running tools.");
       return;
@@ -133,7 +169,10 @@ export default function App() {
       const workspaceRoot = workspaceSnapshot.workspace.rootPath;
       const result =
         toolName === "read_file"
-          ? await executeReadFileTool(workspaceRoot, editorDocument?.filePath ?? "")
+          ? await executeReadFileTool(
+              workspaceRoot,
+              editorDocument?.filePath ?? "",
+            )
           : toolName === "list_files"
             ? await executeListFilesTool(workspaceRoot)
             : await executeSearchFilesTool(workspaceRoot, searchQuery);
@@ -263,7 +302,10 @@ export default function App() {
         <div className="agent-messages">
           {agentMessages.map((message) => (
             <div className="message-row" key={message.id}>
-              <strong>{message.role}</strong>
+              <strong>
+                {message.role}
+                {message.streamStatus ? ` · ${message.streamStatus}` : ""}
+              </strong>
               <p>{message.content}</p>
             </div>
           ))}
@@ -278,9 +320,10 @@ export default function App() {
         <button
           className="primary-action"
           type="button"
-          onClick={handleSendAgentMessage}
+          disabled={agentStreaming}
+          onClick={() => void handleSendAgentMessage()}
         >
-          Send
+          {agentStreaming ? "Streaming" : "Send"}
         </button>
         <div className="tool-actions">
           <button

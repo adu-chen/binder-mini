@@ -22,6 +22,7 @@ export interface AgentMessage {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  streamStatus?: "streaming" | "complete" | "failed";
 }
 
 export interface InputReference {
@@ -53,4 +54,16 @@ export interface ToolExecutionResult {
 
 export interface ListFilesResult {
   entries: WorkspaceEntry[];
+}
+
+export interface AgentStreamRequest {
+  provider: ProviderConfig;
+  userContent: string;
+  workspaceName?: string;
+  activeFilePath?: string;
+}
+
+export interface AgentStreamChunk {
+  content: string;
+  done: boolean;
 }

@@ -3,6 +3,8 @@ import {
   canRecordAgentMessage,
   canSendAgentMessage,
   completeToolExecution,
+  createAssistantStreamChunks,
+  createAssistantStreamMessage,
   createPendingToolExecution,
   createUserAgentMessage,
   failToolExecution,
@@ -84,5 +86,29 @@ describe("Agent Provider MVP service behavior", () => {
     expect(
       summarizeSearchResults([{ filePath: "notes.md", preview: "match line" }]),
     ).toBe("notes.md: match line");
+  });
+
+  // covers: BR-AG-STATE-001
+  it("creates observable assistant stream chunks", () => {
+    const message = createAssistantStreamMessage();
+    expect(message.role).toBe("assistant");
+    expect(message.streamStatus).toBe("streaming");
+
+    const chunks = createAssistantStreamChunks({
+      provider: {
+        provider: "openai",
+        model: "gpt-4.1",
+        apiKeyConfigured: true,
+      },
+      userContent: " inspect workspace ",
+      workspaceName: "demo",
+      activeFilePath: "notes.md",
+    });
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.at(-1)?.done).toBe(true);
+    expect(chunks.map((chunk) => chunk.content).join("")).toContain(
+      "Provider openai/gpt-4.1 accepted",
+    );
   });
 });

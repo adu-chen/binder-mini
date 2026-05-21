@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AgentMessage,
+  AgentStreamChunk,
+  AgentStreamRequest,
   InputReference,
   ListFilesResult,
   ProviderConfig,
@@ -79,8 +81,53 @@ export function createUserAgentMessage(content: string): AgentMessage {
   };
 }
 
+export function createAssistantStreamMessage(): AgentMessage {
+  return {
+    id: `msg-${Date.now()}-assistant`,
+    role: "assistant",
+    content: "",
+    streamStatus: "streaming",
+  };
+}
+
 export function canRecordAgentMessage(content: string): boolean {
   return content.trim().length > 0;
+}
+
+export function createAssistantStreamChunks(
+  request: AgentStreamRequest,
+): AgentStreamChunk[] {
+  const provider = normalizeProviderConfig(request.provider);
+  const prompt = request.userContent.replace(/\s+/g, " ").trim();
+  const context = [
+    request.workspaceName ? `Workspace: ${request.workspaceName}` : null,
+    request.activeFilePath ? `Active file: ${request.activeFilePath}` : null,
+  ]
+    .filter(Boolean)
+    .join(" | ");
+  const response = [
+    `Provider ${provider.provider}/${provider.model} accepted the request.`,
+    context ? `Context ${context}.` : "No active workspace context was attached.",
+    `Request: ${prompt}`,
+    "Binder Mini streamed this local MVP response without executing write tools.",
+  ].join(" ");
+  const parts = response.match(/.{1,48}(\s|$)/g) ?? [response];
+  return parts.map((part, index) => ({
+    content: part,
+    done: index === parts.length - 1,
+  }));
+}
+
+export async function* streamAssistantResponse(
+  request: AgentStreamRequest,
+  delayMs = 24,
+): AsyncGenerator<AgentStreamChunk> {
+  for (const chunk of createAssistantStreamChunks(request)) {
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    yield chunk;
+  }
 }
 
 export async function executeReadFileTool(
