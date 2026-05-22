@@ -196,23 +196,33 @@ button {
   padding: 8px 16px 0;
 }
 
-.editor-tabs button {
+.editor-tab-item {
   align-items: center;
   background: #f6f7f9;
   border: 1px solid #cfd6df;
   border-bottom: 0;
-  cursor: pointer;
   display: inline-flex;
-  gap: 6px;
   max-width: 180px;
   min-height: 34px;
   min-width: 96px;
-  padding: 7px 10px;
 }
 
-.editor-tabs button.active {
+.editor-tab-item.active {
   background: #ffffff;
   color: #1f6feb;
+}
+
+.editor-tab-select {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  flex: 1;
+  gap: 6px;
+  min-width: 0;
+  padding: 7px 4px 7px 10px;
 }
 
 .editor-tabs span {
@@ -223,6 +233,35 @@ button {
 
 .editor-tabs strong {
   color: #b42318;
+}
+
+.editor-tab-close {
+  background: transparent;
+  border: 0;
+  color: #5b6777;
+  cursor: pointer;
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 0 8px;
+}
+
+.editor-status-bar {
+  align-items: center;
+  border-top: 1px solid #d8dee6;
+  color: #5b6777;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 12px;
+  margin-top: 10px;
+  min-height: 32px;
+}
+
+.editor-status-bar span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .editor-toolbar div {

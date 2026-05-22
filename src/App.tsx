@@ -26,7 +26,9 @@ import {
 import {
   activateEditorTab,
   canSaveEditorDocument,
+  closeEditorTab,
   createEmptyEditorSession,
+  createEditorStatusBarModel,
   getActiveEditorDocument,
   hasDirtyEditorTabs,
   openEditorTab,
@@ -101,6 +103,7 @@ export default function App() {
     createDiffMachineDefinition(),
   ];
   const editorDocument = getActiveEditorDocument(editorSession);
+  const editorStatus = createEditorStatusBarModel(editorDocument);
 
   useEffect(() => {
     void listRecentWorkspaces()
@@ -304,6 +307,19 @@ export default function App() {
     ) {
       expirePendingDiff(pendingDiff);
     }
+  }
+
+  function handleCloseEditorTab(tabId: string) {
+    setEditorError(null);
+    const tab = editorSession.tabs.find((item) => item.id === tabId);
+    if (!tab) return;
+    const discardDirty =
+      !tab.dirty || window.confirm(`Discard unsaved changes in ${tab.filePath}?`);
+    const result = closeEditorTab(editorSession, tabId, discardDirty);
+    if (result.blocked) {
+      setEditorError("Dirty editor tab was not closed.");
+    }
+    setEditorSession(result.session);
   }
 
   async function handleSendAgentMessage() {
@@ -567,19 +583,33 @@ export default function App() {
         {editorSession.tabs.length > 0 ? (
           <div className="editor-tabs" role="tablist" aria-label="Open editor files">
             {editorSession.tabs.map((tab) => (
-              <button
+              <div
                 key={tab.id}
-                type="button"
-                role="tab"
-                aria-selected={tab.id === editorSession.activeTabId}
-                className={tab.id === editorSession.activeTabId ? "active" : undefined}
-                onClick={() =>
-                  setEditorSession((session) => activateEditorTab(session, tab.id))
-                }
+                className={`editor-tab-item ${
+                  tab.id === editorSession.activeTabId ? "active" : ""
+                }`}
               >
-                <span>{tab.filePath}</span>
-                {tab.dirty ? <strong>*</strong> : null}
-              </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={tab.id === editorSession.activeTabId}
+                  className="editor-tab-select"
+                  onClick={() =>
+                    setEditorSession((session) => activateEditorTab(session, tab.id))
+                  }
+                >
+                  <span>{tab.filePath}</span>
+                  {tab.dirty ? <strong>*</strong> : null}
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Close ${tab.filePath}`}
+                  className="editor-tab-close"
+                  onClick={() => handleCloseEditorTab(tab.id)}
+                >
+                  x
+                </button>
+              </div>
             ))}
           </div>
         ) : null}
@@ -608,6 +638,14 @@ export default function App() {
         ) : (
           <p className="muted">Open a file from the Workspace.</p>
         )}
+        {editorStatus ? (
+          <footer className="editor-status-bar">
+            <span>{editorStatus.filePath}</span>
+            <span>{editorStatus.stateLabel}</span>
+            <span>{editorStatus.characterCount} chars</span>
+            <span>{editorStatus.wordCount} words</span>
+          </footer>
+        ) : null}
         {pendingDiff ? (
           <section className="diff-card">
             <header>

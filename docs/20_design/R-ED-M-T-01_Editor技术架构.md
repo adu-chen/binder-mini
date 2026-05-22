@@ -133,8 +133,6 @@ DiffDecoration 只负责 ViewState 展示，不拥有 Diff 生命周期。
 
 | 候选规则 | 候选链路 | 来源需求 | 规则意图 |
 |----------|----------|----------|----------|
-| ED-CAND-STATE-003 | ED-SAVE-FILE | REQ-ED-004 | dirty 标签关闭或 Workspace 切换前必须确认或阻断。 |
-| ED-CAND-STATE-005 | ED-OPEN-FILE | REQ-ED-005 | 状态栏必须从 active tab 派生当前文件、保存状态和基础统计信息。 |
 | ED-CAND-DATA-001 | ED-OPEN-FILE | REQ-ED-006 | Markdown 转换失败不得覆盖磁盘内容。 |
 | ED-CAND-DATA-002 | ED-OPEN-FILE | REQ-ED-007 | BlockId / Anchor 必须由 Editor Runtime 生成或校验。 |
 | ED-CAND-STATE-004 | ED-DIFF-RENDER | REQ-ED-008 | DiffDecoration 只能消费已验证 range/anchor。 |
@@ -144,6 +142,8 @@ DiffDecoration 只负责 ViewState 展示，不拥有 Diff 生命周期。
 | 正式规则 | 主链路 | 来源需求 | 规则意图 |
 |----------|--------|----------|----------|
 | BR-ED-STATE-002 | ED-OPEN-FILE | REQ-ED-003 | 多标签必须保留每个打开文件的独立内容、dirty 和状态；重复打开同一文件时复用既有标签。 |
+| BR-ED-STATE-003 | ED-SAVE-FILE | REQ-ED-004 | dirty 标签关闭或 Workspace 切换前必须确认、保存或阻断。 |
+| BR-ED-STATE-004 | ED-OPEN-FILE | REQ-ED-005 | 状态栏必须从 active tab 派生当前文件、保存状态和基础统计信息。 |
 
 ## 7. 验收标准
 
@@ -160,5 +160,6 @@ DiffDecoration 只负责 ViewState 展示，不拥有 Diff 生命周期。
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-05-22 | v1.2 | 将 dirty 关闭保护和状态栏候选规则升级为正式规则 |
 | 2026-05-22 | v1.1 | 将多标签候选规则升级为 BR-ED-STATE-002 |
 | 2026-05-22 | v1.0 | 初始版本，定义 Editor Phase 9 技术架构草稿 |

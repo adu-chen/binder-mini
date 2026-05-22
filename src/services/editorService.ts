@@ -10,12 +10,14 @@ import type {
  * @GOV
  * codes: BR-ED-STATE-001-GUARD-ED-ED-OPEN-FILE-005,
  *        BR-ED-STATE-002-DATA-ED-ED-OPEN-FILE-007,
+ *        BR-ED-STATE-003-GUARD-ED-ED-SAVE-FILE-008,
+ *        BR-ED-STATE-004-DATA-ED-ED-OPEN-FILE-009,
  *        BR-ED-PERSIST-001-RB-ED-ED-SAVE-FILE-003,
  *        BR-CORE-GOV-001-RB-ED-ED-SAVE-FILE-004
  * type: RB
  * chain: ED-OPEN-FILE, ED-SAVE-FILE
- * rules: BR-ED-STATE-001, BR-ED-STATE-002, BR-ED-PERSIST-001, BR-CORE-GOV-001
- * boundary: in=EditorDocument or EditorSession | out=save readiness, active tab, dirty tab, and tab reuse decisions | delegate=file type mode, active tab, and dirty state checks
+ * rules: BR-ED-STATE-001, BR-ED-STATE-002, BR-ED-STATE-003, BR-ED-STATE-004, BR-ED-PERSIST-001, BR-CORE-GOV-001
+ * boundary: in=EditorDocument or EditorSession | out=save readiness, active tab, dirty tab, tab close, status bar, and tab reuse decisions | delegate=file type mode, active tab, dirty state, and status derivation checks
  */
 export function canSaveEditorDocument(document: EditorDocument): boolean {
   return document.mode === "editable" && document.dirty;
@@ -110,6 +112,62 @@ export function hasDirtyEditorTabs(session: EditorSession): boolean {
   return session.tabs.some((tab) => tab.dirty);
 }
 
+export interface CloseEditorTabResult {
+  session: EditorSession;
+  blocked: boolean;
+}
+
+export function closeEditorTab(
+  session: EditorSession,
+  tabId: string,
+  discardDirty: boolean,
+): CloseEditorTabResult {
+  const targetIndex = session.tabs.findIndex((tab) => tab.id === tabId);
+  if (targetIndex === -1) {
+    return { session, blocked: false };
+  }
+  const target = session.tabs[targetIndex];
+  if (target.dirty && !discardDirty) {
+    return { session, blocked: true };
+  }
+  const nextTabs = session.tabs.filter((tab) => tab.id !== tabId);
+  const nextActiveTabId =
+    session.activeTabId === tabId
+      ? nextTabs[Math.min(targetIndex, nextTabs.length - 1)]?.id ?? null
+      : session.activeTabId;
+  return {
+    session: {
+      tabs: nextTabs,
+      activeTabId: nextActiveTabId,
+    },
+    blocked: false,
+  };
+}
+
+export interface EditorStatusBarModel {
+  filePath: string;
+  stateLabel: "saved" | "modified" | "readonly";
+  characterCount: number;
+  wordCount: number;
+}
+
+export function createEditorStatusBarModel(
+  document: EditorDocument | null,
+): EditorStatusBarModel | null {
+  if (!document) return null;
+  return {
+    filePath: document.filePath,
+    stateLabel:
+      document.mode === "readonly"
+        ? "readonly"
+        : document.dirty
+          ? "modified"
+          : "saved",
+    characterCount: document.content.length,
+    wordCount: countWords(document.content),
+  };
+}
+
 /**
  * @GOV
  * codes: BR-ED-STATE-001-QUERY-ED-ED-OPEN-FILE-006,
@@ -167,4 +225,9 @@ function editorDocumentFromTab(tab: EditorTab): EditorDocument {
     mode: tab.mode,
     dirty: tab.dirty,
   };
+}
+
+function countWords(content: string): number {
+  const matches = content.trim().match(/[\p{L}\p{N}_]+/gu);
+  return matches?.length ?? 0;
 }

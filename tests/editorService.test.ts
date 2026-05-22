@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   activateEditorTab,
   canSaveEditorDocument,
+  closeEditorTab,
   createEmptyEditorSession,
+  createEditorStatusBarModel,
   getActiveEditorDocument,
   getEditorModeForPath,
   hasDirtyEditorTabs,
@@ -95,5 +97,71 @@ describe("Editor MVP service behavior", () => {
 
     expect(activateEditorTab(session, "missing")).toBe(session);
     expect(getActiveEditorDocument(session)?.filePath).toBe("notes/a.md");
+  });
+
+  // covers: BR-ED-STATE-003
+  it("blocks dirty tab close until discard is confirmed", () => {
+    const dirtySession = updateActiveEditorContent(
+      openEditorTab(createEmptyEditorSession(), {
+        workspaceRoot: "/tmp/ws",
+        filePath: "notes/a.md",
+        content: "a",
+        mode: "editable",
+        dirty: false,
+      }),
+      "changed",
+    );
+    const tabId = dirtySession.activeTabId ?? "";
+    const blocked = closeEditorTab(dirtySession, tabId, false);
+    const closed = closeEditorTab(dirtySession, tabId, true);
+
+    expect(blocked.blocked).toBe(true);
+    expect(blocked.session.tabs).toHaveLength(1);
+    expect(closed.blocked).toBe(false);
+    expect(closed.session.tabs).toHaveLength(0);
+    expect(closed.session.activeTabId).toBeNull();
+  });
+
+  // covers: BR-ED-STATE-003
+  it("activates a neighboring tab after closing the active tab", () => {
+    const session = openEditorTab(
+      openEditorTab(createEmptyEditorSession(), {
+        workspaceRoot: "/tmp/ws",
+        filePath: "notes/a.md",
+        content: "a",
+        mode: "editable",
+        dirty: false,
+      }),
+      {
+        workspaceRoot: "/tmp/ws",
+        filePath: "notes/b.md",
+        content: "b",
+        mode: "editable",
+        dirty: false,
+      },
+    );
+    const closed = closeEditorTab(session, session.activeTabId ?? "", false);
+
+    expect(closed.session.tabs).toHaveLength(1);
+    expect(getActiveEditorDocument(closed.session)?.filePath).toBe("notes/a.md");
+  });
+
+  // covers: BR-ED-STATE-004
+  it("derives status bar data from the active editor document", () => {
+    expect(
+      createEditorStatusBarModel({
+        workspaceRoot: "/tmp/ws",
+        filePath: "notes/a.md",
+        content: "hello world",
+        mode: "editable",
+        dirty: true,
+      }),
+    ).toEqual({
+      filePath: "notes/a.md",
+      stateLabel: "modified",
+      characterCount: 11,
+      wordCount: 2,
+    });
+    expect(createEditorStatusBarModel(null)).toBeNull();
   });
 });

@@ -377,6 +377,24 @@ rule_id: BR-ED-STATE-002
 Editor 多标签会话必须为每个打开文件保留独立路径、内容快照、dirty 状态和可审计状态；打开已存在文件时必须复用并激活既有标签。
 
 <!-- RULE
+rule_id: BR-ED-STATE-003
+主链路: ED-SAVE-FILE
+域: STATE
+需求映射: REQ-ED-004
+-->
+
+Editor dirty 标签关闭或 Workspace 切换前必须确认、保存或阻断；未经确认不得丢弃未保存内容。
+
+<!-- RULE
+rule_id: BR-ED-STATE-004
+主链路: ED-OPEN-FILE
+域: STATE
+需求映射: REQ-ED-005
+-->
+
+Editor 状态栏必须从当前 active tab 派生文件路径、保存状态和基础内容统计，不得维护独立事实源。
+
+<!-- RULE
 rule_id: BR-ED-PERSIST-001
 主链路: ED-SAVE-FILE
 域: PERSIST
@@ -487,6 +505,7 @@ rule_id: BR-CORE-GOV-001
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-05-22 | v1.8 | 注册 Editor dirty 关闭保护与状态栏规则 |
 | 2026-05-22 | v1.7 | 注册 Editor 多标签正式规则 |
 | 2026-05-22 | v1.6 | 注册 Workspace 搜索索引链路与正式规则 |
 | 2026-05-22 | v1.5 | 注册 Workspace 关闭切换 dirty/pending 门禁规则 |

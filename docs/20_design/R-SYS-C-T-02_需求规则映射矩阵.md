@@ -45,8 +45,8 @@
 | REQ-ED-001 | 打开文件 | BR-ED-STATE-001、BR-ED-STATE-002、X-CONST-001 | ED-OPEN-FILE | 已覆盖 md/txt MVP 打开、readonly 判定和多标签激活 |
 | REQ-ED-002 | 保存文件 | BR-ED-PERSIST-001、X-CONST-001 | ED-SAVE-FILE | 已覆盖当前文件保存 MVP |
 | REQ-ED-003 | 多标签编辑 | BR-ED-STATE-002 | ED-OPEN-FILE | 已覆盖多标签数据结构和 active tab 编辑保存 |
-| REQ-ED-004 | dirty 标记与关闭保护 | 待升级：ED-CAND-STATE-003、BR-WS-STATE-003 | ED-SAVE-FILE、WS-CLOSE | Workspace 关闭切换门禁已覆盖单文件 dirty，多标签待实现 |
-| REQ-ED-005 | 状态栏 | 待升级：ED-CAND-STATE-005 | ED-OPEN-FILE | 待实现 |
+| REQ-ED-004 | dirty 标记与关闭保护 | BR-ED-STATE-003、BR-WS-STATE-003 | ED-SAVE-FILE、WS-CLOSE | 已覆盖 dirty tab 关闭保护和 Workspace 切换阻断 |
+| REQ-ED-005 | 状态栏 | BR-ED-STATE-004 | ED-OPEN-FILE | 已覆盖 active tab 状态栏派生 |
 | REQ-ED-006 | TipTap/Markdown 编辑 | 待升级：ED-CAND-DATA-001 | ED-OPEN-FILE、ED-SAVE-FILE | 技术选型待实现前确认 |
 | REQ-ED-007 | BlockId 定位 | 待升级：ED-CAND-DATA-002 | ED-OPEN-FILE、DE-CREATE-DIFF | 技术草案已补，专项实现前需升级规则 |
 | REQ-ED-008 | DiffDecoration 绿审态 | 待升级：ED-CAND-STATE-004 | ED-DIFF-RENDER、DE-CREATE-DIFF | 技术草案已补，依赖 Diff Review v2 |
@@ -67,6 +67,7 @@ Editor Phase 9 候选规则来源见 `docs/20_design/R-ED-M-T-01_Editor技术架
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-05-22 | v2.0 | 将 Editor dirty 关闭保护和状态栏候选规则升级为正式规则映射 |
 | 2026-05-22 | v1.9 | 将 Editor 多标签候选规则升级为正式规则映射 |
 | 2026-05-22 | v1.7 | 将 Workspace 搜索索引候选规则升级为已注册规则映射 |
 | 2026-05-22 | v1.8 | 新增 Editor Phase 9 需求与候选规则映射 |
