@@ -403,6 +403,15 @@ rule_id: BR-ED-PERSIST-001
 Editor 保存动作只能写入当前打开文件，并必须保持保存后的编辑器状态与磁盘内容一致。
 
 <!-- RULE
+rule_id: BR-ED-PERSIST-002
+主链路: ED-OPEN-FILE,ED-SAVE-FILE
+域: PERSIST
+需求映射: REQ-ED-006
+-->
+
+Editor Markdown 文件必须通过 TipTap/Markdown 运行时维护逻辑 Markdown 文本；转换失败时必须展示错误并阻断保存，不得覆盖磁盘内容。
+
+<!-- RULE
 rule_id: BR-AG-STATE-001
 主链路: AG-SEND-MESSAGE
 域: STATE
@@ -505,6 +514,7 @@ rule_id: BR-CORE-GOV-001
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-05-22 | v1.9 | 注册 Editor Markdown 读取保存转换规则 |
 | 2026-05-22 | v1.8 | 注册 Editor dirty 关闭保护与状态栏规则 |
 | 2026-05-22 | v1.7 | 注册 Editor 多标签正式规则 |
 | 2026-05-22 | v1.6 | 注册 Workspace 搜索索引链路与正式规则 |

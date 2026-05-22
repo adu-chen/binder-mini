@@ -11,6 +11,7 @@ import {
   openEditorTab,
   updateActiveEditorContent,
   upsertEditorTab,
+  usesMarkdownEditor,
 } from "../src/services/editorService";
 
 describe("Editor MVP service behavior", () => {
@@ -19,6 +20,37 @@ describe("Editor MVP service behavior", () => {
     expect(getEditorModeForPath("notes/readme.md")).toBe("editable");
     expect(getEditorModeForPath("notes/plain.TXT")).toBe("editable");
     expect(getEditorModeForPath("assets/image.png")).toBe("readonly");
+  });
+
+  // covers: BR-ED-PERSIST-002
+  it("routes only editable markdown documents to the Markdown editor", () => {
+    expect(
+      usesMarkdownEditor({
+        workspaceRoot: "/tmp/ws",
+        filePath: "notes/readme.md",
+        content: "# Title",
+        mode: "editable",
+        dirty: false,
+      }),
+    ).toBe(true);
+    expect(
+      usesMarkdownEditor({
+        workspaceRoot: "/tmp/ws",
+        filePath: "notes/plain.txt",
+        content: "hello",
+        mode: "editable",
+        dirty: false,
+      }),
+    ).toBe(false);
+    expect(
+      usesMarkdownEditor({
+        workspaceRoot: "/tmp/ws",
+        filePath: "notes/readme.md",
+        content: "# Title",
+        mode: "readonly",
+        dirty: false,
+      }),
+    ).toBe(false);
   });
 
   // covers: BR-ED-PERSIST-001

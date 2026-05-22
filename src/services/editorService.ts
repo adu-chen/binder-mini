@@ -13,14 +13,23 @@ import type {
  *        BR-ED-STATE-003-GUARD-ED-ED-SAVE-FILE-008,
  *        BR-ED-STATE-004-DATA-ED-ED-OPEN-FILE-009,
  *        BR-ED-PERSIST-001-RB-ED-ED-SAVE-FILE-003,
+ *        BR-ED-PERSIST-002-GUARD-ED-ED-SAVE-FILE-013,
  *        BR-CORE-GOV-001-RB-ED-ED-SAVE-FILE-004
  * type: RB
  * chain: ED-OPEN-FILE, ED-SAVE-FILE
- * rules: BR-ED-STATE-001, BR-ED-STATE-002, BR-ED-STATE-003, BR-ED-STATE-004, BR-ED-PERSIST-001, BR-CORE-GOV-001
- * boundary: in=EditorDocument or EditorSession | out=save readiness, active tab, dirty tab, tab close, status bar, and tab reuse decisions | delegate=file type mode, active tab, dirty state, and status derivation checks
+ * rules: BR-ED-STATE-001, BR-ED-STATE-002, BR-ED-STATE-003, BR-ED-STATE-004, BR-ED-PERSIST-001, BR-ED-PERSIST-002, BR-CORE-GOV-001
+ * boundary: in=EditorDocument or EditorSession | out=save readiness, active tab, dirty tab, tab close, status bar, markdown route, and tab reuse decisions | delegate=file type mode, active tab, dirty state, and status derivation checks
  */
 export function canSaveEditorDocument(document: EditorDocument): boolean {
   return document.mode === "editable" && document.dirty;
+}
+
+export function usesMarkdownEditor(document: EditorDocument | null): boolean {
+  return Boolean(
+    document &&
+      document.mode === "editable" &&
+      document.filePath.toLowerCase().endsWith(".md"),
+  );
 }
 
 export function createEmptyEditorSession(): EditorSession {

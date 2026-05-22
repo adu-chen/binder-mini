@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { MarkdownEditor } from "./components/MarkdownEditor";
 import { createAgentMachineDefinition } from "./machines/agentMachine";
 import { createDiffMachineDefinition } from "./machines/diffMachine";
 import { createEditorMachineDefinition } from "./machines/editorMachine";
@@ -36,6 +37,7 @@ import {
   saveEditorDocument,
   updateActiveEditorContent,
   upsertEditorTab,
+  usesMarkdownEditor,
 } from "./services/editorService";
 import type { AgentMessage, ProviderConfig, ToolExecution } from "./types/agent";
 import type { PendingDiff, TerminalDiffCard } from "./types/diff";
@@ -276,6 +278,7 @@ export default function App() {
 
   async function handleSaveFile() {
     if (!editorDocument) return;
+    if (editorError?.startsWith("Markdown conversion failed:")) return;
     setEditorError(null);
     try {
       const savedDocument = await saveEditorDocument(editorDocument);
@@ -621,14 +624,25 @@ export default function App() {
           <button
             className="primary-action"
             type="button"
-            disabled={!editorDocument || !canSaveEditorDocument(editorDocument)}
+            disabled={
+              !editorDocument ||
+              !canSaveEditorDocument(editorDocument) ||
+              editorError?.startsWith("Markdown conversion failed:")
+            }
             onClick={() => void handleSaveFile()}
           >
             Save
           </button>
         </div>
         {editorError ? <p className="error-text">{editorError}</p> : null}
-        {editorDocument ? (
+        {editorDocument && usesMarkdownEditor(editorDocument) ? (
+          <MarkdownEditor
+            content={editorDocument.content}
+            readOnly={editorDocument.mode === "readonly"}
+            onChange={handleEditorChange}
+            onError={setEditorError}
+          />
+        ) : editorDocument ? (
           <textarea
             className="editor-textarea"
             readOnly={editorDocument.mode === "readonly"}
