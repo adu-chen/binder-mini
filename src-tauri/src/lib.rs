@@ -1,5 +1,8 @@
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::DefaultHasher;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Manager;
@@ -85,6 +88,22 @@ struct SearchResult {
     preview: String,
 }
 
+/*
+ * @GOV
+ * codes: BR-WS-DATA-005-DATA-WS-WS-SEARCH-001
+ * type: DATA
+ * chain: WS-SEARCH
+ * rules: BR-WS-DATA-005
+ * boundary: in=Workspace text files and workspace.db FTS5 index | out=current Workspace scoped search results with recursive fallback
+ */
+struct SearchIndexDocument {
+    path: String,
+    content: String,
+    mtime_ms: u64,
+    size_bytes: u64,
+    content_hash: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EditorDocument {
@@ -121,6 +140,7 @@ async fn open_workspace(app: tauri::AppHandle) -> Result<WorkspaceOpenResult, St
     };
 
     let metadata = initialize_workspace_metadata(&root_path)?;
+    rebuild_search_index(&root_path)?;
     let entries = read_workspace_entries(&root_path, &root_path)?;
     let display_name = root_path
         .file_name()
@@ -224,14 +244,160 @@ fn initialize_workspace_metadata(root_path: &Path) -> Result<WorkspaceMetadata, 
     let binder_dir = root_path.join(".binder");
     fs::create_dir_all(&binder_dir).map_err(|error| error.to_string())?;
     let workspace_database_path = binder_dir.join("workspace.db");
-    if !workspace_database_path.exists() {
-        fs::write(&workspace_database_path, b"{\"version\":1}\n")
-            .map_err(|error| error.to_string())?;
-    }
+    open_workspace_database(&workspace_database_path)?;
     Ok(WorkspaceMetadata {
         workspace_database_path: workspace_database_path.to_string_lossy().to_string(),
         workspace_database_initialized: workspace_database_path.is_file(),
     })
+}
+
+fn workspace_database_path(root_path: &Path) -> PathBuf {
+    root_path.join(".binder").join("workspace.db")
+}
+
+fn open_workspace_database(database_path: &Path) -> Result<Connection, String> {
+    if let Some(parent) = database_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+    match initialize_workspace_database_schema(&connection) {
+        Ok(()) => Ok(connection),
+        Err(schema_error) => {
+            drop(connection);
+            if database_path.exists() {
+                let backup_path =
+                    database_path.with_extension(format!("db.bak.{}", current_unix_seconds()));
+                fs::rename(database_path, backup_path).map_err(|error| error.to_string())?;
+            }
+            let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
+            initialize_workspace_database_schema(&connection).map_err(|error| {
+                format!("failed to initialize workspace database after recovery: {schema_error}; {error}")
+            })?;
+            Ok(connection)
+        }
+    }
+}
+
+fn initialize_workspace_database_schema(connection: &Connection) -> Result<(), String> {
+    connection
+        .execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS search_index_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS search_documents (
+                path TEXT PRIMARY KEY,
+                mtime_ms INTEGER NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                content_hash TEXT NOT NULL
+            );
+            CREATE VIRTUAL TABLE IF NOT EXISTS search_documents_fts
+            USING fts5(path UNINDEXED, content, tokenize = 'unicode61');
+            "#,
+        )
+        .map_err(|error| error.to_string())
+}
+
+fn rebuild_search_index(root_path: &Path) -> Result<(), String> {
+    let database_path = workspace_database_path(root_path);
+    let mut connection = open_workspace_database(&database_path)?;
+    let mut documents = Vec::new();
+    collect_search_index_documents(root_path, root_path, &mut documents)?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute("DELETE FROM search_documents_fts", [])
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute("DELETE FROM search_documents", [])
+        .map_err(|error| error.to_string())?;
+    for document in documents {
+        transaction
+            .execute(
+                "INSERT INTO search_documents (path, mtime_ms, size_bytes, content_hash) VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    &document.path,
+                    document.mtime_ms,
+                    document.size_bytes,
+                    &document.content_hash
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "INSERT INTO search_documents_fts (path, content) VALUES (?1, ?2)",
+                params![&document.path, &document.content],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    transaction
+        .execute(
+            "INSERT INTO search_index_meta (key, value) VALUES ('index_version', '1')
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "INSERT INTO search_index_meta (key, value) VALUES ('last_rebuild_at_ms', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![current_unix_seconds().saturating_mul(1000).to_string()],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+fn collect_search_index_documents(
+    root: &Path,
+    current: &Path,
+    documents: &mut Vec<SearchIndexDocument>,
+) -> Result<(), String> {
+    for entry in fs::read_dir(current).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        if should_skip_workspace_internal(root, &path) {
+            continue;
+        }
+        let file_type = entry.file_type().map_err(|error| error.to_string())?;
+        if file_type.is_dir() {
+            collect_search_index_documents(root, &path, documents)?;
+        } else if file_type.is_file() {
+            let Ok(content) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let metadata = entry.metadata().map_err(|error| error.to_string())?;
+            let relative_path = path
+                .strip_prefix(root)
+                .map_err(|error| error.to_string())?
+                .to_string_lossy()
+                .to_string();
+            documents.push(SearchIndexDocument {
+                path: relative_path,
+                content_hash: content_hash(&content),
+                content,
+                mtime_ms: file_mtime_ms(&metadata),
+                size_bytes: metadata.len(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn file_mtime_ms(metadata: &fs::Metadata) -> u64 {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn content_hash(content: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    content.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 fn read_workspace_entries(
@@ -396,6 +562,7 @@ fn create_workspace_item(
     } else {
         fs::write(&target, b"").map_err(|error| error.to_string())?;
     }
+    rebuild_search_index(&root)?;
     Ok(WorkspaceMutationResult {
         success: true,
         entries: read_workspace_entries(&root, &root)?,
@@ -427,6 +594,7 @@ fn rename_workspace_item_impl(
         });
     }
     fs::rename(&source, &target).map_err(|error| error.to_string())?;
+    rebuild_search_index(&root)?;
     Ok(WorkspaceMutationResult {
         success: true,
         entries: read_workspace_entries(&root, &root)?,
@@ -460,6 +628,7 @@ fn move_workspace_item_impl(
         return Err("target parent is not a directory".to_string());
     }
     fs::rename(&source, &target).map_err(|error| error.to_string())?;
+    rebuild_search_index(&root)?;
     Ok(WorkspaceMutationResult {
         success: true,
         entries: read_workspace_entries(&root, &root)?,
@@ -481,6 +650,7 @@ fn delete_workspace_item_impl(
     } else {
         fs::remove_file(&target).map_err(|error| error.to_string())?;
     }
+    rebuild_search_index(&root)?;
     Ok(WorkspaceMutationResult {
         success: true,
         entries: read_workspace_entries(&root, &root)?,
@@ -558,16 +728,78 @@ fn path_conflict(target: &Path, relative_path: &str) -> PathConflict {
 
 #[tauri::command]
 fn search_files(workspace_root: String, query: String) -> Result<Vec<SearchResult>, String> {
-    let trimmed_query = query.trim().to_lowercase();
+    let trimmed_query = query.trim().to_string();
     if trimmed_query.is_empty() {
         return Ok(Vec::new());
     }
     let root = PathBuf::from(&workspace_root)
         .canonicalize()
         .map_err(|error| error.to_string())?;
+    if let Ok(results) = search_files_with_index(&root, &trimmed_query) {
+        return Ok(results);
+    }
     let mut results = Vec::new();
-    collect_search_results(&root, &root, &trimmed_query, &mut results)?;
+    collect_search_results(&root, &root, &trimmed_query.to_lowercase(), &mut results)?;
     Ok(results)
+}
+
+fn search_files_with_index(root: &Path, query: &str) -> Result<Vec<SearchResult>, String> {
+    let database_path = workspace_database_path(root);
+    let connection = open_workspace_database(&database_path)?;
+    if search_index_needs_rebuild(&connection)? {
+        drop(connection);
+        rebuild_search_index(root)?;
+    }
+    let connection = open_workspace_database(&database_path)?;
+    let fts_query = build_fts_query(query);
+    if fts_query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut statement = connection
+        .prepare(
+            "SELECT path, snippet(search_documents_fts, 1, '', '', '...', 18)
+             FROM search_documents_fts
+             WHERE search_documents_fts MATCH ?1
+             LIMIT 20",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![fts_query], |row| {
+            Ok(SearchResult {
+                file_path: row.get(0)?,
+                preview: row.get(1)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    let root_string = root.to_string_lossy().to_string();
+    let mut results = Vec::new();
+    for row in rows {
+        let result = row.map_err(|error| error.to_string())?;
+        if resolve_workspace_path(&root_string, &result.file_path).is_ok() {
+            results.push(result);
+        }
+    }
+    Ok(results)
+}
+
+fn search_index_needs_rebuild(connection: &Connection) -> Result<bool, String> {
+    let last_rebuild_at_ms = connection
+        .query_row(
+            "SELECT value FROM search_index_meta WHERE key = 'last_rebuild_at_ms'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    Ok(last_rebuild_at_ms.is_none())
+}
+
+fn build_fts_query(query: &str) -> String {
+    query
+        .split_whitespace()
+        .map(|token| format!("\"{}\"", token.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(" AND ")
 }
 
 #[tauri::command]
@@ -581,6 +813,10 @@ fn write_workspace_file(
     }
     let file_path = resolve_workspace_file(&workspace_root, &relative_path)?;
     fs::write(&file_path, content.as_bytes()).map_err(|error| error.to_string())?;
+    let root = PathBuf::from(&workspace_root)
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    rebuild_search_index(&root)?;
     Ok(EditorDocument {
         file_path: relative_path.clone(),
         workspace_root,
@@ -691,10 +927,20 @@ mod tests {
         fs::create_dir_all(root.join("docs")).expect("fixture workspace should be created");
 
         let metadata = initialize_workspace_metadata(&root).expect("metadata should initialize");
+        let connection = Connection::open(&metadata.workspace_database_path)
+            .expect("workspace database should open as sqlite");
+        let table_count: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name = 'search_documents_fts'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("fts table should be queryable");
         let entries = read_workspace_entries(&root, &root).expect("entries should load");
 
         assert!(metadata.workspace_database_initialized);
         assert!(PathBuf::from(metadata.workspace_database_path).is_file());
+        assert_eq!(table_count, 1);
         assert!(entries.iter().all(|entry| entry.name != ".binder"));
 
         fs::remove_dir_all(root).expect("fixture workspace should be removed");
@@ -898,6 +1144,78 @@ mod tests {
             fs::read_to_string(root.join("a.md")).expect("a should remain"),
             "a"
         );
+
+        fs::remove_dir_all(root).expect("fixture workspace should be removed");
+    }
+
+    #[test]
+    fn rebuilds_search_index_without_indexing_internal_data() {
+        let root = test_workspace_root("search-index");
+        fs::create_dir_all(root.join("docs")).expect("fixture workspace should be created");
+        fs::create_dir_all(root.join(".binder")).expect("internal dir should be created");
+        fs::write(root.join("docs/readme.md"), "Findable needle content")
+            .expect("fixture file should be written");
+        fs::write(root.join(".binder/secret.md"), "needle internal")
+            .expect("internal file should be written");
+        initialize_workspace_metadata(&root).expect("metadata should initialize");
+        rebuild_search_index(&root).expect("search index should rebuild");
+
+        let root_string = root.to_string_lossy().to_string();
+        let results = search_files(root_string, "needle".to_string()).expect("search should run");
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].file_path, "docs/readme.md");
+        assert!(results[0].preview.contains("needle"));
+
+        fs::remove_dir_all(root).expect("fixture workspace should be removed");
+    }
+
+    #[test]
+    fn write_workspace_file_rebuilds_search_index() {
+        let root = test_workspace_root("search-write");
+        fs::create_dir_all(&root).expect("fixture workspace should be created");
+        fs::write(root.join("notes.md"), "old content").expect("fixture file should be written");
+        initialize_workspace_metadata(&root).expect("metadata should initialize");
+        rebuild_search_index(&root).expect("search index should rebuild");
+        let root_string = root.to_string_lossy().to_string();
+
+        write_workspace_file(
+            root_string.clone(),
+            "notes.md".to_string(),
+            "fresh indexed phrase".to_string(),
+        )
+        .expect("workspace file should be written");
+        let results =
+            search_files(root_string, "fresh".to_string()).expect("updated search should run");
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].file_path, "notes.md");
+
+        fs::remove_dir_all(root).expect("fixture workspace should be removed");
+    }
+
+    #[test]
+    fn structure_mutations_refresh_search_index() {
+        let root = test_workspace_root("search-structure");
+        fs::create_dir_all(&root).expect("fixture workspace should be created");
+        let root_string = root.to_string_lossy().to_string();
+        initialize_workspace_metadata(&root).expect("metadata should initialize");
+        create_workspace_item(&root_string, "draft.md", "file").expect("file should be created");
+        write_workspace_file(
+            root_string.clone(),
+            "draft.md".to_string(),
+            "structure searchable".to_string(),
+        )
+        .expect("workspace file should be written");
+
+        let renamed = rename_workspace_item_impl(&root_string, "draft.md", "final.md")
+            .expect("file should be renamed");
+        let results = search_files(root_string, "structure".to_string())
+            .expect("search should run after rename");
+
+        assert!(renamed.success);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].file_path, "final.md");
 
         fs::remove_dir_all(root).expect("fixture workspace should be removed");
     }

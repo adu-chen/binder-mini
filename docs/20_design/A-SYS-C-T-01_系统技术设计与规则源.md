@@ -158,6 +158,14 @@ status: active
 `WS-CLOSE` 描述关闭或切换 Workspace 前的 dirty editor 和 pending diff 门禁流程。
 
 <!-- CHAIN
+chain_id: WS-SEARCH
+主责模块: WS
+status: active
+-->
+
+`WS-SEARCH` 描述 Workspace 搜索索引重建、查询和降级搜索流程。
+
+<!-- CHAIN
 chain_id: ED-OPEN-FILE
 主责模块: ED
 status: active
@@ -343,6 +351,15 @@ rule_id: BR-WS-STATE-003
 关闭或切换 Workspace 前必须处理 dirty editor 和 pending diff；存在未处理状态时不得清空或替换当前 Workspace。
 
 <!-- RULE
+rule_id: BR-WS-DATA-005
+主链路: WS-SEARCH
+域: DATA
+需求映射: REQ-WS-010
+-->
+
+Workspace 搜索索引必须可重建，搜索结果必须限制在当前 Workspace；索引不可用时必须降级或返回可审计错误。
+
+<!-- RULE
 rule_id: BR-ED-STATE-001
 主链路: ED-OPEN-FILE
 域: STATE
@@ -457,12 +474,11 @@ rule_id: BR-CORE-GOV-001
 
 | 候选规则 ID | 承接需求 | 建议链路 | 设计意图 |
 |-------------|----------|----------|----------|
-| BR-WS-DATA-005 | REQ-WS-010 | WS-SEARCH | 搜索索引必须可重建，搜索结果必须限制在当前 Workspace。 |
-
 ## 变更记录
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-05-22 | v1.6 | 注册 Workspace 搜索索引链路与正式规则 |
 | 2026-05-22 | v1.5 | 注册 Workspace 关闭切换 dirty/pending 门禁规则 |
 | 2026-05-22 | v1.4 | 注册 Workspace 创建结构操作与 PathConflict 规则 |
 | 2026-05-22 | v1.3 | 注册最近 Workspace 用户级持久化规则 |

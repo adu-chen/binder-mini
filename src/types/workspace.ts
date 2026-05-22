@@ -6,11 +6,12 @@
  *        BR-WS-DATA-001-DATA-WS-WS-FILE-MANAGE-001,
  *        BR-WS-DATA-002-DATA-WS-WS-FILE-MANAGE-001,
  *        BR-WS-DATA-003-DATA-WS-WS-FILE-MANAGE-001,
- *        BR-WS-DATA-004-DATA-WS-WS-FILE-MANAGE-001
+ *        BR-WS-DATA-004-DATA-WS-WS-FILE-MANAGE-001,
+ *        BR-WS-DATA-005-DATA-WS-WS-SEARCH-001
  * type: DATA
- * chain: WS-OPEN, WS-FILE-MANAGE
- * rules: BR-WS-STATE-001, BR-WS-STATE-002, BR-WS-PERSIST-001, BR-WS-DATA-001, BR-WS-DATA-002, BR-WS-DATA-003, BR-WS-DATA-004
- * boundary: in=Workspace selection and file operation target | out=Workspace boundary, metadata, recent records, recursive FileNode structure, and PathConflict results
+ * chain: WS-OPEN, WS-FILE-MANAGE, WS-SEARCH
+ * rules: BR-WS-STATE-001, BR-WS-STATE-002, BR-WS-PERSIST-001, BR-WS-DATA-001, BR-WS-DATA-002, BR-WS-DATA-003, BR-WS-DATA-004, BR-WS-DATA-005
+ * boundary: in=Workspace selection, file operation target, and search request | out=Workspace boundary, metadata, recent records, recursive FileNode structure, PathConflict results, and scoped search results
  * term_ref: TERM-WS-001
  */
 export interface Workspace {

@@ -32,15 +32,11 @@
 | REQ-WS-007 | 重命名、移动和删除 | BR-WS-DATA-001、BR-WS-DATA-003、BR-WS-DATA-004、X-CONST-001 | WS-FILE-MANAGE | 已覆盖结构操作与冲突协议 |
 | REQ-WS-008 | 路径冲突协议 | BR-WS-DATA-001、BR-WS-DATA-004、X-CONST-001 | WS-FILE-MANAGE | 已覆盖 PathConflict 规则 |
 | REQ-WS-009 | 关闭和切换 Workspace | BR-WS-STATE-001、BR-WS-STATE-003、X-CONST-003 | WS-OPEN、WS-CLOSE | 已覆盖 dirty/pending 门禁 |
-| REQ-WS-010 | 搜索索引 | BR-WS-DATA-001、X-CONST-001 | WS-FILE-MANAGE | FTS5 方案已设计，正式规则和实现待补 |
+| REQ-WS-010 | 搜索索引 | BR-WS-DATA-001、BR-WS-DATA-005、X-CONST-001 | WS-FILE-MANAGE、WS-SEARCH | 已覆盖 FTS5 索引主路径和递归降级 |
 
 ## 3. Workspace 候选规则映射
 
-以下候选规则尚未登记为 RULE 注释块。进入实现前，必须先在 `SYS-C-T-01` 注册为正式规则，并补测试覆盖。
-
-| 候选规则 ID | 承接需求 | 建议主链路 | 规则意图 |
-|-------------|----------|------------|----------|
-| BR-WS-DATA-005 | REQ-WS-010 | WS-SEARCH | 搜索索引必须可重建，搜索结果必须限制在当前 Workspace。 |
+当前 Workspace Phase 8 候选规则已全部升级或完成方案化，后续新增候选规则必须先写入本节。
 
 ## 4. 实现追踪方式
 
@@ -54,6 +50,7 @@
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-05-22 | v1.7 | 将 Workspace 搜索索引候选规则升级为已注册规则映射 |
 | 2026-05-22 | v1.6 | 补充 Workspace 搜索索引 FTS5 方案状态 |
 | 2026-05-22 | v1.5 | 将 Workspace 关闭切换门禁候选规则升级为已注册规则映射 |
 | 2026-05-22 | v1.4 | 标记 Workspace rename/move/delete 结构操作实现完成 |

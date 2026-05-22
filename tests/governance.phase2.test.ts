@@ -22,6 +22,7 @@ describe("Phase 2 governance skeleton", () => {
   // covers: BR-WS-DATA-002
   // covers: BR-WS-DATA-003
   // covers: BR-WS-DATA-004
+  // covers: BR-WS-DATA-005
   it("keeps Workspace targets inside the active Workspace", () => {
     const workspace = { rootPath: "/tmp/ws", displayName: "ws", status: "active" as const };
     expect(isWorkspaceTarget(workspace, { workspaceRoot: "/tmp/ws", relativePath: "a.md" })).toBe(true);
