@@ -83,11 +83,15 @@ interface EditorSession {
 
 ## 3. TipTap/Markdown 方案
 
-候选依赖：
+TipTap/Markdown 选型以 `ED-M-T-02` 为准。
+
+已确认依赖候选：
 
 1. `@tiptap/react`
 2. `@tiptap/starter-kit`
-3. Markdown 序列化可先使用轻量转换层；若引入第三方 Markdown 扩展，必须另开依赖 Issue Trace。
+3. `@tiptap/extension-placeholder`
+4. `@tiptap/pm`
+5. `tiptap-markdown`
 
 技术边界：
 
@@ -160,6 +164,7 @@ DiffDecoration 只负责 ViewState 展示，不拥有 Diff 生命周期。
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-05-22 | v1.3 | 引用 ED-M-T-02，确认 TipTap/Markdown 选型候选 |
 | 2026-05-22 | v1.2 | 将 dirty 关闭保护和状态栏候选规则升级为正式规则 |
 | 2026-05-22 | v1.1 | 将多标签候选规则升级为 BR-ED-STATE-002 |
 | 2026-05-22 | v1.0 | 初始版本，定义 Editor Phase 9 技术架构草稿 |
