@@ -368,6 +368,15 @@ rule_id: BR-ED-STATE-001
 Editor 打开文件时必须根据文件类型进入 editable 或 readonly 状态；md/txt 可编辑，其他文件只读。
 
 <!-- RULE
+rule_id: BR-ED-STATE-002
+主链路: ED-OPEN-FILE
+域: STATE
+需求映射: REQ-ED-003
+-->
+
+Editor 多标签会话必须为每个打开文件保留独立路径、内容快照、dirty 状态和可审计状态；打开已存在文件时必须复用并激活既有标签。
+
+<!-- RULE
 rule_id: BR-ED-PERSIST-001
 主链路: ED-SAVE-FILE
 域: PERSIST
@@ -478,6 +487,7 @@ rule_id: BR-CORE-GOV-001
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-05-22 | v1.7 | 注册 Editor 多标签正式规则 |
 | 2026-05-22 | v1.6 | 注册 Workspace 搜索索引链路与正式规则 |
 | 2026-05-22 | v1.5 | 注册 Workspace 关闭切换 dirty/pending 门禁规则 |
 | 2026-05-22 | v1.4 | 注册 Workspace 创建结构操作与 PathConflict 规则 |

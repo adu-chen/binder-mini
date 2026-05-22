@@ -55,6 +55,7 @@ describe("Phase 2 governance skeleton", () => {
   });
 
   // covers: BR-ED-STATE-001
+  // covers: BR-ED-STATE-002
   // covers: BR-ED-PERSIST-001
   it("keeps Editor save readiness tied to editable dirty documents", () => {
     expect(canSaveEditorDocument({ workspaceRoot: "/tmp/ws", filePath: "a.md", content: "x", mode: "editable", dirty: true })).toBe(true);

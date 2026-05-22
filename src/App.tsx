@@ -24,9 +24,16 @@ import {
   shouldExpirePendingDiff,
 } from "./services/diffService";
 import {
+  activateEditorTab,
   canSaveEditorDocument,
+  createEmptyEditorSession,
+  getActiveEditorDocument,
+  hasDirtyEditorTabs,
+  openEditorTab,
   openEditorDocument,
   saveEditorDocument,
+  updateActiveEditorContent,
+  upsertEditorTab,
 } from "./services/editorService";
 import type { AgentMessage, ProviderConfig, ToolExecution } from "./types/agent";
 import type { PendingDiff, TerminalDiffCard } from "./types/diff";
@@ -43,7 +50,7 @@ import {
   renameWorkspaceItem,
   sortWorkspaceEntries,
 } from "./services/workspaceService";
-import type { EditorDocument } from "./types/editor";
+import type { EditorSession } from "./types/editor";
 import type {
   RecentWorkspace,
   WorkspaceEntry,
@@ -68,8 +75,8 @@ export default function App() {
   const [newWorkspaceItemPath, setNewWorkspaceItemPath] = useState("");
   const [structureSourcePath, setStructureSourcePath] = useState("");
   const [structureTargetPath, setStructureTargetPath] = useState("");
-  const [editorDocument, setEditorDocument] = useState<EditorDocument | null>(
-    null,
+  const [editorSession, setEditorSession] = useState<EditorSession>(() =>
+    createEmptyEditorSession(),
   );
   const [editorError, setEditorError] = useState<string | null>(null);
   const [providerConfig, setProviderConfig] = useState<ProviderConfig>({
@@ -93,6 +100,7 @@ export default function App() {
     createAgentMachineDefinition(),
     createDiffMachineDefinition(),
   ];
+  const editorDocument = getActiveEditorDocument(editorSession);
 
   useEffect(() => {
     void listRecentWorkspaces()
@@ -102,13 +110,13 @@ export default function App() {
 
   function canLeaveCurrentWorkspace(): boolean {
     return canChangeWorkspace({
-      editorDirty: Boolean(editorDocument?.dirty),
+      editorDirty: hasDirtyEditorTabs(editorSession),
       hasPendingDiff: Boolean(pendingDiff),
     });
   }
 
   function workspaceBlockedMessage(): string {
-    if (editorDocument?.dirty) return "Save or discard the dirty editor before changing Workspace.";
+    if (hasDirtyEditorTabs(editorSession)) return "Save or discard dirty editor tabs before changing Workspace.";
     if (pendingDiff) return "Accept or reject the pending diff before changing Workspace.";
     return "Workspace cannot be changed yet.";
   }
@@ -127,7 +135,7 @@ export default function App() {
           entries: sortWorkspaceEntries(result.snapshot.entries),
         });
         setRecentWorkspaces(normalizeRecentWorkspaces(result.recentWorkspaces ?? []));
-        setEditorDocument(null);
+        setEditorSession(createEmptyEditorSession());
         setPendingDiff(null);
       }
     } catch (error) {
@@ -143,7 +151,7 @@ export default function App() {
       return;
     }
     setWorkspaceSnapshot(null);
-    setEditorDocument(null);
+    setEditorSession(createEmptyEditorSession());
     setEditorError(null);
     setPendingDiff(null);
     setNewWorkspaceItemPath("");
@@ -254,7 +262,7 @@ export default function App() {
           workspaceRoot: workspaceSnapshot.workspace.rootPath,
           relativePath,
         });
-      setEditorDocument(openedDocument);
+      setEditorSession((session) => openEditorTab(session, openedDocument));
       if (pendingDiff && pendingDiff.filePath !== openedDocument.filePath) {
         expirePendingDiff(pendingDiff);
       }
@@ -267,7 +275,8 @@ export default function App() {
     if (!editorDocument) return;
     setEditorError(null);
     try {
-      setEditorDocument(await saveEditorDocument(editorDocument));
+      const savedDocument = await saveEditorDocument(editorDocument);
+      setEditorSession((session) => upsertEditorTab(session, savedDocument));
     } catch (error) {
       setEditorError(error instanceof Error ? error.message : String(error));
     }
@@ -288,7 +297,7 @@ export default function App() {
       content,
       dirty: true,
     };
-    setEditorDocument(nextDocument);
+    setEditorSession((session) => updateActiveEditorContent(session, content));
     if (
       pendingDiff &&
       shouldExpirePendingDiff(pendingDiff, nextDocument.filePath, content)
@@ -457,7 +466,7 @@ export default function App() {
         content: result.content,
         dirty: true,
       });
-      setEditorDocument(savedDocument);
+      setEditorSession((session) => upsertEditorTab(session, savedDocument));
       setTerminalDiffCards((cards) => [result.terminalCard, ...cards]);
       setPendingDiff(null);
     } catch (error) {
@@ -555,6 +564,25 @@ export default function App() {
         ) : null}
       </aside>
       <section className="editor-surface">
+        {editorSession.tabs.length > 0 ? (
+          <div className="editor-tabs" role="tablist" aria-label="Open editor files">
+            {editorSession.tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={tab.id === editorSession.activeTabId}
+                className={tab.id === editorSession.activeTabId ? "active" : undefined}
+                onClick={() =>
+                  setEditorSession((session) => activateEditorTab(session, tab.id))
+                }
+              >
+                <span>{tab.filePath}</span>
+                {tab.dirty ? <strong>*</strong> : null}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <div className="editor-toolbar">
           <div>
             <strong>{editorDocument?.filePath ?? "Editor"}</strong>
