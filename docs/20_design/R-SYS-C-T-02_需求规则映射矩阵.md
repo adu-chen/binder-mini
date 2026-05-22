@@ -1,9 +1,9 @@
 ---
 文档编号：   SYS-C-T-02
 文档状态：   R
-负责模块：   SYS,WS,CORE
+负责模块：   SYS,WS,ED,CORE
 文档职责：   需求到技术规则映射矩阵
-上游约束：   CORE-C-P-01、CORE-C-D-01、WS-M-D-01、SYS-C-T-01
+上游约束：   CORE-C-P-01、CORE-C-D-01、WS-M-D-01、ED-M-D-01、SYS-C-T-01
 直接承接：   CORE-X-P-02、CORE-X-P-12
 使用边界：   记录需求与已注册技术规则的追踪关系，不替代技术规则正文
 变更要求：   新增或修改需求、规则、链路、状态机后必须同步本矩阵
@@ -38,7 +38,24 @@
 
 当前 Workspace Phase 8 候选规则已全部升级或完成方案化，后续新增候选规则必须先写入本节。
 
-## 4. 实现追踪方式
+## 4. 当前 Editor 映射
+
+| 需求 ID | 需求名称 | 已注册规则 / 约束 | 主链路 | 当前状态 |
+|---------|----------|-------------------|--------|----------|
+| REQ-ED-001 | 打开文件 | BR-ED-STATE-001、X-CONST-001 | ED-OPEN-FILE | 已覆盖 md/txt MVP 打开与 readonly 判定 |
+| REQ-ED-002 | 保存文件 | BR-ED-PERSIST-001、X-CONST-001 | ED-SAVE-FILE | 已覆盖当前文件保存 MVP |
+| REQ-ED-003 | 多标签编辑 | 待升级：ED-CAND-STATE-002 | ED-OPEN-FILE | 需求与技术草案已补，运行时待实现 |
+| REQ-ED-004 | dirty 标记与关闭保护 | 待升级：ED-CAND-STATE-003、BR-WS-STATE-003 | ED-SAVE-FILE、WS-CLOSE | Workspace 关闭切换门禁已覆盖单文件 dirty，多标签待实现 |
+| REQ-ED-005 | 状态栏 | 待升级：ED-CAND-STATE-002 | ED-OPEN-FILE | 待实现 |
+| REQ-ED-006 | TipTap/Markdown 编辑 | 待升级：ED-CAND-DATA-001 | ED-OPEN-FILE、ED-SAVE-FILE | 技术选型待实现前确认 |
+| REQ-ED-007 | BlockId 定位 | 待升级：ED-CAND-DATA-002 | ED-OPEN-FILE、DE-CREATE-DIFF | 技术草案已补，专项实现前需升级规则 |
+| REQ-ED-008 | DiffDecoration 绿审态 | 待升级：ED-CAND-STATE-004 | ED-DIFF-RENDER、DE-CREATE-DIFF | 技术草案已补，依赖 Diff Review v2 |
+
+## 5. Editor 候选规则映射
+
+Editor Phase 9 候选规则来源见 `docs/20_design/R-ED-M-T-01_Editor技术架构.md` §6。进入运行时代码前，必须将候选规则升级为 `SYS-C-T-01` 正式 RULE，并补测试覆盖。
+
+## 6. 实现追踪方式
 
 运行时代码进入实现时，追踪链路为：
 
@@ -51,6 +68,7 @@
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
 | 2026-05-22 | v1.7 | 将 Workspace 搜索索引候选规则升级为已注册规则映射 |
+| 2026-05-22 | v1.8 | 新增 Editor Phase 9 需求与候选规则映射 |
 | 2026-05-22 | v1.6 | 补充 Workspace 搜索索引 FTS5 方案状态 |
 | 2026-05-22 | v1.5 | 将 Workspace 关闭切换门禁候选规则升级为已注册规则映射 |
 | 2026-05-22 | v1.4 | 标记 Workspace rename/move/delete 结构操作实现完成 |
