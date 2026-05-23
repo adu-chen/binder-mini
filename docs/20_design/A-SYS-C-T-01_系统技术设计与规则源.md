@@ -504,16 +504,53 @@ rule_id: BR-CORE-GOV-001
 
 `REQ-* -> SYS-C-T-02 -> SYS-C-T-01 已注册 RULE/CHAIN/CONSTRAINT -> @GOV 注释 -> 测试覆盖`
 
-## 9. Workspace 颗粒度补齐候选规则
+## 9. Agent 候选规则（Phase 10-12，进入实现前升级为正式规则）
 
-以下规则是 `CORE-X-P-12` 和 `WS-M-D-01` 推导出的后续实现候选。它们尚未登记为 RULE 注释块；进入 Phase 8 代码实现前，必须先升级为正式技术规则并补测试覆盖。
+以下候选规则来自 `AG-M-T-01`，进入 Phase 10-12 代码实现前必须升级为正式 RULE 块、补充 `@GOV` 标注和测试覆盖。
 
 | 候选规则 ID | 承接需求 | 建议链路 | 设计意图 |
 |-------------|----------|----------|----------|
+| AG-CAND-STATE-002 | REQ-AG-002 | AG-SEND-MESSAGE | 真实 Provider SSE 流必须在错误时终止并向 UI 返回可识别失败状态。 |
+| AG-CAND-DATA-002 | REQ-AG-003 | AG-TOOL-CALL | 工具结果必须在同一对话轮次内以 tool_result 形式回流，不得注入为 user message。 |
+| AG-CAND-DATA-003 | REQ-AG-007 | AG-SEND-MESSAGE | Provider API key 不得在前端持有、传递或出现在日志中；由后端安全存储读取。 |
+| AG-CAND-STATE-003 | REQ-AG-007 | AG-SEND-MESSAGE | Agent 只能向 Provider 暴露 allowedTools 中的工具，不得暴露全部已注册工具。 |
+| AG-CAND-DATA-004 | REQ-AG-006 | AG-TOOL-CALL | InputReference 只注入 Provider 请求上下文，不触发任何文件副作用。 |
+
+## 10. Diff Review 候选规则（Phase 13，进入实现前升级为正式规则）
+
+以下候选规则来自 `DE-M-T-01`，进入 Phase 13 代码实现前必须升级为正式 RULE 块、补充 `@GOV` 标注和测试覆盖。
+
+| 候选规则 ID | 承接需求 | 建议链路 | 设计意图 |
+|-------------|----------|----------|----------|
+| DE-CAND-DATA-001 | REQ-DE-006 | DE-CREATE-DIFF | PendingDiff 必须携带 sourceToolId，可追溯到生成它的 ToolExecution。 |
+| DE-CAND-STATE-004 | REQ-DE-002 | DE-ACCEPT-DIFF | Accept 前必须校验当前磁盘内容与 originalText 一致；不一致时转 expired，不执行写入。 |
+| DE-CAND-STATE-005 | REQ-DE-001 | DE-CREATE-DIFF、DE-ACCEPT-DIFF | mounted_pending 状态只适用于已打开文件链路；未打开文件直接从 pending 接受写入。 |
+| DE-CAND-PERSIST-002 | REQ-DE-007 | DE-ACCEPT-DIFF、DE-REJECT-DIFF | PendingDiff 状态必须持久化到 workspace.db，应用重启后可恢复或转 expired。 |
+| DE-CAND-STATE-006 | REQ-DE-007 | DE-EXPIRE-DIFF | Workspace 关闭时，所有非终态 PendingDiff 必须转 expired 并写入持久化存储。 |
+
+## 11. Editor 候选规则（Phase 9 剩余项，进入实现前升级为正式规则）
+
+以下候选规则来自 `ED-M-T-01`，进入 Phase 9 步骤 5-6 代码实现前必须升级为正式 RULE 块，且须先完成 DE-M-T-01 Phase 13-A 数据结构。
+
+| 候选规则 ID | 承接需求 | 建议链路 | 设计意图 |
+|-------------|----------|----------|----------|
+| ED-CAND-DATA-002 | REQ-ED-007 | ED-OPEN-FILE | BlockId / Anchor 必须由 Editor Runtime 生成或校验，不由模型输出直接决定执行位置。 |
+| ED-CAND-STATE-004 | REQ-ED-008 | ED-DIFF-RENDER | DiffDecoration 只能消费已验证 range/anchor；无法解析时不渲染伪高亮。 |
+
 ## 变更记录
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-05-22 | v1.9 | 注册 Editor Markdown 读取保存转换规则 |
+| 2026-05-22 | v1.8 | 注册 Editor dirty 关闭保护与状态栏规则 |
+| 2026-05-22 | v1.7 | 注册 Editor 多标签正式规则 |
+| 2026-05-22 | v1.6 | 注册 Workspace 搜索索引链路与正式规则 |
+| 2026-05-22 | v1.5 | 注册 Workspace 关闭切换 dirty/pending 门禁规则 |
+| 2026-05-22 | v1.4 | 注册 Workspace 创建结构操作与 PathConflict 规则 |
+| 2026-05-22 | v1.3 | 注册最近 Workspace 用户级持久化规则 |
+| 2026-05-22 | v1.2 | 注册 Workspace 初始化与递归 FileNode 正式规则 |
+| 2026-05-22 | v1.1 | 增加需求到规则映射约定和 Workspace 颗粒度候选规则 |
+| 2026-05-23 | v2.0 | 注册 AG Phase 10-12 和 DE Phase 13 候选规则；补充 ED Phase 9 剩余候选规则；原 §9 候选规则表补全为 §9-11 分模块候选规则表 |
 | 2026-05-22 | v1.9 | 注册 Editor Markdown 读取保存转换规则 |
 | 2026-05-22 | v1.8 | 注册 Editor dirty 关闭保护与状态栏规则 |
 | 2026-05-22 | v1.7 | 注册 Editor 多标签正式规则 |
