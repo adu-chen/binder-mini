@@ -40,7 +40,7 @@
 
 <!-- 自动生成。禁止人工编辑。-->
 <!-- 运行：npm run governance:generate -->
-<!-- 最后生成时间：2026-05-22T07:37:01.177Z -->
+<!-- 最后生成时间：2026-05-23T20:01:12.595Z -->
 
 ### 模块编码表
 
@@ -109,6 +109,16 @@
 | BR-DE-STATE-003   | STATE   | DE-EXPIRE-DIFF                                      | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md | registered      | tests/diffService.test.ts::rejects PendingDiff without producing write content, tests/governance.phase2.test.ts::keeps Agent requests behind provider validation and readonly InputReference                                                                                                                                  |
 | BR-SYS-GOV-001    | GOV     | WS-OPEN,ED-OPEN-FILE,AG-SEND-MESSAGE,DE-CREATE-DIFF | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md | registered      | tests/governance.phase2.test.ts::keeps PendingDiff execution and terminal cards explicit                                                                                                                                                                                                                                      |
 | BR-CORE-GOV-001   | GOV     | WS-OPEN,ED-OPEN-FILE,AG-SEND-MESSAGE,DE-CREATE-DIFF | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md | registered      | tests/governance.phase2.test.ts::keeps PendingDiff execution and terminal cards explicit                                                                                                                                                                                                                                      |
+| BR-DE-STATE-010   | STATE   | DE-ACCEPT-DIFF,ED-SAVE-FILE                         | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md | registered      | MISSING                                                                                                                                                                                                                                                                                                                       |
+| BR-DE-STATE-011   | STATE   | DE-ACCEPT-DIFF                                      | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md | registered      | MISSING                                                                                                                                                                                                                                                                                                                       |
+| BR-DE-STATE-012   | STATE   | DE-EXPIRE-DIFF                                      | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md | registered      | MISSING                                                                                                                                                                                                                                                                                                                       |
+| BR-ED-STATE-005   | STATE   | ED-OPEN-FILE,ED-DIFF-RENDER                         | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md | registered      | MISSING                                                                                                                                                                                                                                                                                                                       |
+| BR-AG-SEC-001     | SEC     | AG-SEND-MESSAGE                                     | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md | registered      | MISSING                                                                                                                                                                                                                                                                                                                       |
+| BR-AG-STATE-002   | STATE   | AG-SEND-MESSAGE                                     | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md | registered      | MISSING                                                                                                                                                                                                                                                                                                                       |
+| BR-AG-DATA-002    | DATA    | AG-TOOL-CALL                                        | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md | registered      | MISSING                                                                                                                                                                                                                                                                                                                       |
+| BR-DE-DATA-001    | DATA    | DE-CREATE-DIFF                                      | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md | registered      | MISSING                                                                                                                                                                                                                                                                                                                       |
+| BR-DE-STATE-004   | STATE   | DE-ACCEPT-DIFF                                      | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md | registered      | MISSING                                                                                                                                                                                                                                                                                                                       |
+| BR-DE-STATE-005   | STATE   | DE-CREATE-DIFF,DE-ACCEPT-DIFF                       | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md | registered      | MISSING                                                                                                                                                                                                                                                                                                                       |
 
 ### 跨模块约束表（X-INDEX）
 
@@ -121,17 +131,28 @@
 
 ### 术语注册表
 
-| term_id       | 所属链路                                                        | 正式中文名  | 正式英文名             | 禁用别名                   | 来源文档                                      |
-| ------------- | ----------------------------------------------------------- | ------ | ----------------- | ---------------------- | ----------------------------------------- |
-| TERM-CORE-001 | WS-OPEN,AG-SEND-MESSAGE,DE-CREATE-DIFF                      | 工作区    | Workspace         | 项目目录, 当前目录, 工作目录       | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
-| TERM-DE-001   | DE-CREATE-DIFF,DE-ACCEPT-DIFF,DE-REJECT-DIFF,DE-EXPIRE-DIFF | 待审差异   | PendingDiff       | 修改候选, diff候选, 待处理修改    | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
-| TERM-DE-002   | DE-ACCEPT-DIFF,DE-REJECT-DIFF,DE-EXPIRE-DIFF                | 终态差异卡  | TerminalDiffCard  | 结果卡, 结束卡, 历史卡          | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
-| TERM-AG-001   | AG-TOOL-CALL                                                | 工具执行   | ToolExecution     | 工具调用过程, 执行动作, tool run | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
-| TERM-AG-002   | AG-SEND-MESSAGE,AG-TOOL-CALL                                | 输入引用   | InputReference    | 附件, 知识库引用, @引用         | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
-| TERM-WS-001   | WS-FILE-MANAGE                                              | 文件节点   | FileNode          | 文件项, 文件记录, tree item   | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
-| TERM-WS-002   | WS-OPEN                                                     | 工作区数据库 | WorkspaceDatabase | 项目数据库, 本地库, db文件       | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
-| TERM-WS-003   | WS-OPEN                                                     | 最近工作区  | RecentWorkspace   | 最近项目, 最近目录, 历史工作区      | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
-| TERM-WS-004   | WS-FILE-MANAGE                                              | 路径冲突   | PathConflict      | 覆盖提示, 文件冲突, 已存在错误      | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| term_id       | 所属链路                                                                   | 正式中文名     | 正式英文名             | 禁用别名                             | 来源文档                                      |
+| ------------- | ---------------------------------------------------------------------- | --------- | ----------------- | -------------------------------- | ----------------------------------------- |
+| TERM-CORE-001 | WS-OPEN,AG-SEND-MESSAGE,DE-CREATE-DIFF                                 | 工作区       | Workspace         | 项目目录, 当前目录, 工作目录                 | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-DE-001   | DE-CREATE-DIFF,DE-ACCEPT-DIFF,DE-REJECT-DIFF,DE-EXPIRE-DIFF            | 待审差异      | PendingDiff       | 修改候选, diff候选, 待处理修改              | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-DE-002   | DE-ACCEPT-DIFF,DE-REJECT-DIFF,DE-EXPIRE-DIFF                           | 终态差异卡     | TerminalDiffCard  | 结果卡, 结束卡, 历史卡                    | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-AG-001   | AG-TOOL-CALL                                                           | 工具执行      | ToolExecution     | 工具调用过程, 执行动作, tool run           | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-AG-002   | AG-SEND-MESSAGE,AG-TOOL-CALL                                           | 输入引用      | InputReference    | 附件, 知识库引用, @引用                   | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-WS-001   | WS-FILE-MANAGE                                                         | 文件节点      | FileNode          | 文件项, 文件记录, tree item             | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-WS-002   | WS-OPEN                                                                | 工作区数据库    | WorkspaceDatabase | 项目数据库, 本地库, db文件                 | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-WS-003   | WS-OPEN                                                                | 最近工作区     | RecentWorkspace   | 最近项目, 最近目录, 历史工作区                | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-WS-004   | WS-FILE-MANAGE                                                         | 路径冲突      | PathConflict      | 覆盖提示, 文件冲突, 已存在错误                | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-DE-003   | DE-CREATE-DIFF,DE-ACCEPT-DIFF,DE-REJECT-DIFF                           | 差异定位引用    | DiffAnchorRef     | diff锚点, 定位锚, anchor              | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-AG-003   | AG-SEND-MESSAGE                                                        | Prompt运行时 | PromptRuntime     | prompt组装, prompt结构, 提示词组装        | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-AG-004   | AG-SEND-MESSAGE,AG-TOOL-CALL                                           | 对话状态机     | chatMachine       | agentMachine, agent状态机, 聊天机器     | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-ED-001   | ED-OPEN-FILE,ED-SAVE-FILE                                              | 编辑器标签页    | EditorTab         | 编辑标签, tab页, 编辑器tab               | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-DOC-001  | DE-CREATE-DIFF,DE-ACCEPT-DIFF,DE-EXPIRE-DIFF,ED-SAVE-FILE              | 磁盘状态      | DiskState         | 文件状态, 存储状态, 持久化内容                | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-DOC-002  | DE-CREATE-DIFF,DE-ACCEPT-DIFF,DE-REJECT-DIFF,ED-OPEN-FILE,ED-SAVE-FILE | 逻辑状态      | LogicalState      | 编辑器缓冲区内容, 内存内容, buffer内容         | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-DOC-003  | ED-OPEN-FILE,ED-DIFF-RENDER                                            | 显示状态      | DisplayState      | 渲染状态, 视图内容, 展示内容                 | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-DE-004   | DE-CREATE-DIFF,DE-ACCEPT-DIFF,ED-DIFF-RENDER                           | 绿增        | GreenAddition     | 绿审, 绿审态, 绿审态骨架, DiffDecoration高亮 | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-DE-005   | DE-CREATE-DIFF,DE-EXPIRE-DIFF                                          | 基准版本      | baseRevision      | 原始版本, 基础版本, 内容快照hash             | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-AG-005   | AG-TOOL-CALL                                                           | 工具调用标识    | callId            | toolId, requestId, executionId   | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-ED-002   | ED-OPEN-FILE,ED-SAVE-FILE,AG-SEND-MESSAGE,AG-TOOL-CALL                 | 激活文件      | ActiveFile        | 当前文件, active file, 当前打开文件        | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
 
 ### 链路视图
 
