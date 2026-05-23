@@ -54,8 +54,183 @@ Workspace 需求必须满足以下原则：
 
 本项目以 binder-core 作为需求颗粒度参考，但不直接继承 binder-core 代码规则。binder-core 中更细的文件树、最近项目、workspace.db、索引和文件操作协议，在 Binder Mini 中必须先转化为本项目需求 ID 与技术规则，再进入实现。
 
+## 6. 需求标注块
+
+<!-- REQ
+req_id: REQ-WS-001
+name: 打开 Workspace
+module: WS
+chains: WS-OPEN
+priority: P0
+status: active
+-->
+
+<!-- REQ
+req_id: REQ-WS-002
+name: Workspace 边界
+module: WS
+chains: WS-FILE-MANAGE
+priority: P0
+status: active
+-->
+
+<!-- REQ
+req_id: REQ-WS-003
+name: 递归文件树
+module: WS
+chains: WS-OPEN
+priority: P1
+status: active
+-->
+
+<!-- REQ
+req_id: REQ-WS-004
+name: 最近 Workspace
+module: WS
+chains: WS-OPEN
+priority: P1
+status: active
+-->
+
+<!-- REQ
+req_id: REQ-WS-005
+name: workspace.db 初始化
+module: WS
+chains: WS-OPEN
+priority: P0
+status: active
+-->
+
+<!-- REQ
+req_id: REQ-WS-006
+name: 创建文件与目录
+module: WS
+chains: WS-FILE-MANAGE
+priority: P1
+status: active
+-->
+
+<!-- REQ
+req_id: REQ-WS-007
+name: 重命名、移动和删除
+module: WS
+chains: WS-FILE-MANAGE
+priority: P1
+status: active
+-->
+
+<!-- REQ
+req_id: REQ-WS-008
+name: 路径冲突协议
+module: WS
+chains: WS-FILE-MANAGE
+priority: P1
+status: active
+-->
+
+<!-- REQ
+req_id: REQ-WS-009
+name: 关闭和切换 Workspace
+module: WS
+chains: WS-OPEN, WS-CLOSE
+priority: P0
+status: active
+-->
+
+<!-- REQ
+req_id: REQ-WS-010
+name: 搜索索引
+module: WS
+chains: WS-FILE-MANAGE, WS-SEARCH
+priority: P1
+status: active
+-->
+
+## 7. 功能流程表
+
+### REQ-WS-001 WS-OPEN-FLOW
+
+| step_id | actor | input | action | output | next_step | exception |
+|---------|-------|-------|--------|--------|-----------|-----------|
+| S01 | User | — | 点击"打开 Workspace" | 本地目录选择对话框 | S02 | 用户取消 → END |
+| S02 | SYS | 目录路径 | 校验目录是否合法存在 | 校验结果 | S03 | 路径无效 → ERR-01（返回 error 状态） |
+| S03 | WS | 合法目录路径 | 初始化 `.binder` 目录 | `.binder` 目录 | S04 | 权限不足 → ERR-02 |
+| S04 | DB | `.binder` 目录 | 初始化 workspace.db（创建表或打开已有） | workspace.db 连接 | S05 | DB 初始化失败 → ERR-03（返回可恢复错误） |
+| S05 | WS | workspace.db | 构建递归 FileNode 树 | FileNode[] | S06 | 权限不足 → ERR-04（部分树） |
+| S06 | WS | FileNode[] | 激活 Workspace（workspaceMachine → active） | active 状态 | DONE | — |
+
+### REQ-WS-002 WS-BOUNDARY-FLOW
+
+任意文件路径在被 WS/AG/DE 读写前，必须经过边界校验（路径是否在 workspaceRoot 内）；越界路径直接返回 PathConflict 或拒绝执行，不产生磁盘副作用。
+
+### REQ-WS-003
+
+文件树在 WS 进入 active 后通过递归扫描构建，返回目录和文件的 FileNode 层级结构；用户触发刷新时重新扫描并更新树结构。
+
+### REQ-WS-004
+
+打开 Workspace 时将当前目录路径写入最近记录（存储于 workspace.db 或 app 本地配置）；应用重启后读取并展示最近列表，支持直接重新打开。
+
+### REQ-WS-005 WS-DB-INIT-FLOW
+
+| step_id | actor | input | action | output | next_step | exception |
+|---------|-------|-------|--------|--------|-----------|-----------|
+| S01 | WS | 合法目录路径 | 检查 `.binder` 目录是否存在 | 是/否 | S02 | — |
+| S02 | SYS | `.binder` 是否存在 | 创建目录（如不存在） | `.binder` 目录 | S03 | 创建失败 → ERR-01（权限） |
+| S03 | DB | `.binder/workspace.db` 路径 | 打开或创建 SQLite 数据库 | DB 连接 | S04 | 无法创建 → ERR-02（磁盘空间/权限） |
+| S04 | DB | DB 连接 | 执行建表 DDL（files、pending_diffs、settings 等） | 表已就绪 | DONE | DDL 失败 → ERR-03（迁移冲突） |
+
+### REQ-WS-006
+
+用户或 AG 工具在 WS 边界内发起创建请求；SYS 先做边界校验和存在性检查，通过后写入磁盘并触发文件树刷新；目标路径已存在时返回 PathConflict，不产生副作用。
+
+### REQ-WS-007
+
+用户或 AG 工具发起重命名/移动/删除请求；SYS 先校验路径合法性和操作可行性（边界、存在、冲突），通过后执行磁盘操作并刷新文件树；任何校验失败均提前返回错误，不执行磁盘写入。
+
+### REQ-WS-008
+
+结构操作（创建、移动、重命名、导入）检测到目标路径已存在时，返回明确的 PathConflict 结果；调用方（User 或 AG）必须显式确认覆盖意图后才能重新发起操作，原路径内容不得被静默覆盖。
+
+### REQ-WS-009 WS-CLOSE-FLOW
+
+| step_id | actor | input | action | output | next_step | exception |
+|---------|-------|-------|--------|--------|-----------|-----------|
+| S01 | User | — | 触发关闭/切换 Workspace | 关闭请求 | S02 | — |
+| S02 | WS | 当前 ED 状态 | 检查是否有 dirty 标签 | dirty 列表 | S03（有 dirty） | S05（无 dirty） |
+| S03 | WS | 当前 DE 状态 | 检查是否有 pending diff | pending diff 列表 | S04（有） | S05（无） |
+| S04 | User | 阻断提示 | 用户确认保存/丢弃/取消 | 用户决定 | S05（确认） | END（取消） |
+| S05 | DE | 非终态 diff 列表 | 将所有非终态 PendingDiff 转 expired | expired 记录 | S06 | — |
+| S06 | WS | — | 清空当前 Workspace 状态（workspaceMachine → idle） | idle 状态 | DONE | — |
+
+### REQ-WS-010
+
+用户在当前 WS 内发起文件搜索；WS 优先使用 FTS5 搜索索引返回结果；索引不可用时降级到递归全文扫描；搜索结果路径必须全部在 workspaceRoot 边界内。
+
+## 8. 问题暴露清单
+
+| 类别 | 描述 |
+|------|------|
+| NEEDS_HUMAN_DECISION | **workspace.db 版本迁移策略** — 当 DB schema 升级时（新增表/列），已有 workspace.db 的迁移方式尚未决策。选项：自动迁移（运行 DDL ALTER）、备份后重建、拒绝打开要求用户手动处理。 |
+| NEEDS_HUMAN_DECISION | **`.binder` 目录在 git 中的处理方式** — 是否应在 `.gitignore` 中排除？若排除，则搜索索引和 pending_diffs 不会被同步；若提交，则不同用户可能有冲突 workspace.db。 |
+| BOUNDARY_OPEN | **搜索索引初始化失败时的用户可见错误格式** — 当前设计为降级到递归搜索，但用户无法感知当前是否在使用索引或降级路径。需要明确错误通知格式。 |
+| REQ_GAP | **文件系统变化的实时监听** — 当前 WS 文件树只在打开时和用户刷新时更新，不实时监听外部文件系统变化（外部编辑、新建、删除）。这影响 DE 的失效检测。 |
+| DESIGN_RISK | **workspace.db 并发访问** — 多个 Tauri command 可能同时访问 workspace.db。当前未明确是否启用 WAL 模式或加锁机制。 |
+
+## 9. 跨模块交互声明
+
+| 方向 | 触发场景 | 数据边界 | 约束 |
+|------|----------|----------|------|
+| WS → ED | WS 进入 active 后，ED 可访问 FileNode 树和文件内容路径 | workspaceRoot 内的文件路径 | ED 不得在 WS idle 时访问文件 |
+| WS → ED | WS 关闭时，ED 必须收到通知关闭所有标签 | workspaceMachine 状态 | 通过 workspaceMachine 状态传播，ED 监听 idle 事件 |
+| WS → AG | WS active 时，AG 的只读工具可在 WS 边界内执行 | workspaceRoot 作为隔离边界 | AG 工具调用必须经过 WS 边界校验，不得直接访问文件系统 |
+| WS → AG | WS 关闭时，AG 必须终止当前流式响应 | — | AG 监听 WS idle 事件，主动中断流 |
+| WS → DE | WS 关闭时，DE 必须将所有非终态 PendingDiff 转 expired 并写入 workspace.db | pending_diffs 表 | 转换必须在 WS 状态切换为 idle 之前完成 |
+| WS → DE | WS active 时，DE 可读写 workspace.db 中的 pending_diffs 表 | workspace.db/pending_diffs | DE 不得在 WS idle 时写入 pending_diffs |
+
 ## 变更记录
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
 | 2026-05-22 | v1.0 | 初始版本，定义 Workspace 需求颗粒度和需求 ID |
+| 2026-05-23 | v1.1 | 新增 §6 需求标注块、§7 功能流程表、§8 问题暴露清单、§9 跨模块交互声明（G1 合规修复）|
