@@ -21,6 +21,8 @@
 
 （基于 DE-M-T-01 §3.1，不重复技术设计内容，只做接口层声明）
 
+（字段定义以 DE-M-T-01 §3.1 为权威源，本节为接口层声明，保持与权威源一致）
+
 ```typescript
 interface PendingDiff {
   id: string;
@@ -29,10 +31,12 @@ interface PendingDiff {
   proposedText: string;      // AI 建议的完整内容
   status: PendingDiffStatus;
   summary: string;
-  sourceToolId: string;      // Phase 13-A：生成此 diff 的 ToolExecution.id
-  baseRevision?: string;     // Phase 13-A：文件内容 hash（快速变化检测）
+  sourceToolId: string;      // Phase 13-A：生成此 diff 的 ToolExecution.id（callId）
+  baseRevision: string;      // Phase 13-A：DiskState 内容 hash（Inherit 流程校验用，必填）
   createdAt: number;         // Phase 13-A：Unix timestamp
-  anchorRef?: DiffAnchorRef; // Phase 13-B：Editor 定位引用
+  effectivePath: "open-file" | "closed-file"; // accept 路径语义路由
+                             // INHERIT_APPLIED 后从 "closed-file" 升级为 "open-file"
+  anchorRef?: DiffAnchorRef; // Phase 13-B：Editor 定位引用（可选）
 }
 ```
 
@@ -51,10 +55,12 @@ DiffStore 是所有 PendingDiff 生命周期操作的唯一收口网关。各工
 
 | 方法 | 语义 | 输入 | 持久化 |
 |------|------|------|--------|
-| createDiff | 新建 PendingDiff（status=pending）| AG 工具参数 + sourceToolId | 应写入 workspace.db |
-| acceptDiff | pending → accepting → terminal(accepted) | diffId | 必须写入磁盘后再更新 DB |
-| rejectDiff | pending → rejecting → terminal(rejected) | diffId | 应写入 DB |
-| expireDiff | pending → expired → terminal | diffId | 应写入 DB |
+| createDiff | 新建 PendingDiff；已打开文件：立即修改 LogicalState → preapplied；未打开文件：status=pending | AG 工具参数 + sourceToolId | 应写入 workspace.db |
+| acceptDiff（已打开文件）| preapplied → accepting → terminal(accepted)；只移除绿增效果；LogicalState 不变；DiskState 不写 | diffId | 更新 DB（终态） |
+| acceptDiff（未打开文件）| pending → accepting → terminal(accepted)；写入 DiskState（磁盘） | diffId | 写磁盘成功后更新 DB |
+| rejectDiff（已打开文件）| preapplied → rejecting → terminal(rejected)；LogicalState 回滚到 originalText | diffId | 应写入 DB |
+| rejectDiff（未打开文件）| pending → rejecting → terminal(rejected)；DiskState 不变 | diffId | 应写入 DB |
+| expireDiff | pending/preapplied → expired → terminal | diffId | 应写入 DB |
 | loadDiffsFromWorkspace | Workspace 打开时从 DB 恢复 pending diff | workspaceRoot | 只读 |
 | expireAllOnClose | Workspace 关闭时将所有非终态 diff 转 expired | — | 批量写入 DB |
 
@@ -64,7 +70,7 @@ DiffStore 是所有 PendingDiff 生命周期操作的唯一收口网关。各工
 
 关键约束：
 
-1. DiffStore.pendingDiffs 只存 pending/mounted_pending/preapplied 状态的记录（非终态）
+1. DiffStore.pendingDiffs 只存 pending/preapplied 状态的记录（非终态）
 2. 终态记录转移到 terminalCards（TerminalDiffCard）
 3. 任何状态变化必须先更新 diffStore，再写入 workspace.db，不能只更新内存
 
@@ -101,11 +107,11 @@ CREATE TABLE terminal_diff_cards (
 
 Workspace 重新打开时（loadDiffsFromWorkspace）：
 
-1. 从 pending_diffs 加载 status 为 pending/mounted_pending/preapplied 的记录
-2. 对每条记录：读取磁盘当前内容，与 originalText 比对（或与 baseRevision hash 比对）
-3. 内容一致 → 恢复为 pending 状态（mounted_pending/preapplied 降级为 pending，因为编辑器状态不可恢复）
+1. 从 pending_diffs 加载 status 为 pending/preapplied 的记录
+2. 对每条记录：读取磁盘当前 DiskState 内容，与 baseRevision hash 比对
+3. 内容一致 → 恢复为 pending 状态（preapplied 降级为 pending，因为 LogicalState 跨会话不可恢复）
 4. 内容不一致 → 自动转 expired，写入 terminal_diff_cards
-5. accepting/rejecting 状态（中断执行）→ 转 error，写入 terminal_diff_cards
+5. accepting/rejecting 状态（中断执行，不持久化，crash 后理论上不存在 DB 记录）→ 如发现则转 error，写入 terminal_diff_cards
 
 ### 5.3 Workspace 关闭时
 
@@ -119,10 +125,11 @@ expireAllOnClose 在 Workspace 关闭时执行：
 
 1. UI 不维护独立 diff 副本，统一读取 diffStore
 2. accepted/rejected/expired/error 终态不可回退到 pending
-3. 内容写操作不得绕过 diffStore 直接写磁盘
-4. accept 前必须校验当前磁盘内容与 originalText 一致；不一致时转 expired，不执行写入（承接 DE-CAND-STATE-004）
-5. mounted_pending/preapplied 状态只适用于已打开文件；未打开文件的 diff 直接从 pending 接受或拒绝（承接 DE-CAND-STATE-005）
-6. preapplied → reject 必须触发编辑器缓冲区回滚，不得只记录终态留下游离内容
+3. DiskState 写操作不得绕过 diffStore，未打开文件路径的 acceptDiff 是唯一触发 DiskState 修改的路径（已打开文件 accept 不写磁盘）
+4. 未打开文件 accept 前必须校验当前 DiskState hash 与 baseRevision 一致；不一致时转 expired，不执行写入（BR-DE-STATE-004）
+5. preapplied 状态只适用于已打开文件（diff 创建时即修改 LogicalState）；未打开文件的 diff 保持 pending 直到用户决策（BR-DE-STATE-005）
+6. preapplied → reject 必须触发 LogicalState 回滚，不得只记录终态留下游离内容
+7. Accept（已打开文件）不修改 DiskState；DiskState 仅在 Cmd+S 保存时由 editorMachine 写入
 
 ## 7. 跨模块协作
 
@@ -133,9 +140,11 @@ expireAllOnClose 在 Workspace 关闭时执行：
 
 ### 7.2 与 ED
 
-- accept 时：DE 写磁盘前读取 ED 当前编辑器内容做一致性校验
-- preapplied → reject 时：DE 调用 ED 的缓冲区回滚接口（协议待 Phase 13-B 确认）
-- Workspace 打开时：ED 可查询 diffStore 当前文件的 pending diff 展示绿审态骨架（Phase 9-F）
+- createDiff（已打开文件）：DE 推送 proposedText 给 ED → ED 修改 LogicalState → diff → preapplied；ED 展示绿增效果
+- acceptDiff（已打开文件）：DE 通知 ED 移除绿增 Decoration；LogicalState 不变；不写磁盘
+- acceptDiff（未打开文件）：DE 读取磁盘 DiskState，校验 baseRevision 后写入 proposedText
+- preapplied → rejectDiff：diffMachine 向 editorMachine 发送 `ROLLBACK_LOGICAL_STATE { diffId, targetContent: originalText }` 事件；editorMachine 将对应文件 LogicalState 回写为 originalText（详见 DE-M-T-01 §4.4）
+- Workspace 打开时：ED 可查询 diffStore 当前文件的 preapplied diff 展示绿增效果（Phase 9-F）
 
 ### 7.3 与 WS
 
@@ -148,3 +157,5 @@ expireAllOnClose 在 Workspace 关闭时执行：
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
 | 2026-05-23 | v1.0 | 初始版本，定义 binder-mini DiffStore 接口协议和持久化策略（参考 binder-core DE-M-P-01 适配简化架构）|
+| 2026-05-24 | v1.1 | 三态模型重构：§3 acceptDiff 按两路径拆分（已打开：移除绿增不写磁盘；未打开：写 DiskState）；§4 约束 1 移除 mounted_pending；§5.2 恢复策略更新（preapplied 降级为 pending；去除 mounted_pending）；§6 不变量重写（新增条目 7：accept 不写 DiskState）；§7.2 DE→ED 协作更新（createDiff 即推送 proposedText；accept 移除绿增）|
+| 2026-05-24 | v1.2 | §2.1 PendingDiff 接口补充 effectivePath 字段（与 DE-M-T-01 §3.1 权威源对齐）；baseRevision 改为必填；§6 不变量 4/5 规则引用从候选（CAND）改为正式规则（BR-DE-STATE-004/005）；§7.2 reject 协议注释更新（ROLLBACK_LOGICAL_STATE 事件已确认，去除"待 Phase 13-B 确认"） |

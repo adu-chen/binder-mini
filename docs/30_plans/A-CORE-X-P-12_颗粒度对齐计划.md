@@ -64,7 +64,7 @@
 1. 升级 ED-CAND-DATA-002 为正式规则 `BR-ED-DATA-001`（BlockId 由 Editor Runtime 生成或校验）。
 2. 实现 BlockId 生成（workspace.db 映射表方案）。
 3. 升级 ED-CAND-STATE-004 为正式规则 `BR-ED-STATE-005`（DiffDecoration 只消费已验证 anchor）。
-4. 实现 DiffDecoration 绿审态骨架。
+4. 实现 DiffDecoration 绿增（编辑器只显示绿增，完整 diff 在聊天流）。
 
 关键门禁：BlockId 不由模型输出直接决定执行位置；无验证 anchor 时不渲染伪高亮。
 
@@ -120,7 +120,7 @@
 实施顺序：
 
 1. **Phase 13-A**：升级 DE-CAND-DATA-001 为正式规则，扩展 PendingDiff 数据结构（sourceToolId、baseRevision、createdAt）。
-2. **Phase 13-B**：升级 DE-CAND-STATE-005 为正式规则，引入 mounted_pending / preapplied 状态。
+2. **Phase 13-B**：升级 DE-CAND-STATE-005 为正式规则，引入 preapplied 状态（三态模型；diff 创建即修改 LogicalState；Accept 不写磁盘）。
 3. **Phase 13-C**：升级 DE-CAND-STATE-004 为正式规则，升级 diffMachine 状态机。
 4. **Phase 13-D**：升级 DE-CAND-PERSIST-002 / DE-CAND-STATE-006 为正式规则，实现持久化协议。
 5. **Phase 13-E**：已打开文件 vs 未打开文件分链路（update_file 依赖 Phase 11）。

@@ -11,30 +11,57 @@
 
 ## 1. 本文职责
 
-InputReference 是用户主动拖拽或粘贴到聊天输入框的只读上下文引用，本文定义其数据结构、入口规则、Prompt 注入格式、生命周期和门禁约束。
+InputReference 是用户主动拖拽或粘贴到聊天输入框的结构化内容引用，本文定义其数据结构、入口规则、Prompt 注入格式、生命周期和门禁约束。
 
 ## 2. 核心原则
 
-1. InputReference 是只读上下文，不是执行目标
-2. InputReference 不触发文件写入、移动或 diff 接受
+1. InputReference 是结构化内容载体，携带引用标签、内容快照和精确坐标；Agent 根据上下文自行判断引用是编辑对象还是背景参考
+2. InputReference 不直接触发文件写入或 diff 接受；若 Agent 将其作为编辑对象，须经 Diff Review 写入
 3. InputReference 不声明对 Workspace 文件的写权威
 4. 引用内容只注入 system prompt L1 层（见 AG-M-P-02 §3.1），不拼入 user message content
 5. Workspace 切换后引用自动失效（不跨 Workspace 保留引用）
 
 ## 3. 数据结构
 
+InputReference 为判别联合类型（discriminated union），以 `kind` 为判别字段：
+
 ```typescript
-interface InputReference {
-  id: string;
-  type: "workspace_file" | "editor_content" | "plain_text" | "url";
-  filePath?: string;      // workspace_file / editor_content 的相对路径（仅内部使用）
-  content: string;        // 文本内容快照（注入时按截断规则处理）
-  displayName: string;    // UI chip 展示名称
-  createdAt: number;      // Unix timestamp (ms)
+type InputReference =
+  | {
+      id: string;
+      kind: "file";
+      filePath: string;              // Workspace 相对路径（仅内部使用，不进入 prompt）
+      content: string;               // 文件内容快照（创建时拍快照）
+      displayName: string;           // UI chip 展示名称（文件名）
+      createdAt: number;             // Unix timestamp (ms)
+      anchor?: DocumentAnchorTarget; // 精确坐标（可选，用于定位引用区域）
+    }
+  | {
+      id: string;
+      kind: "text";
+      content: string;               // 粘贴的文本内容快照
+      displayName: string;           // UI chip 展示名称（内容摘要）
+      createdAt: number;
+    }
+  | {
+      id: string;
+      kind: "url";
+      url: string;                   // 粘贴的 URL 字符串（不抓取正文）
+      displayName: string;
+      createdAt: number;
+    };
+
+interface DocumentAnchorTarget {
+  blockId?: string;       // TipTap/ProseMirror 块 ID
+  nodeId?: string;        // 节点 ID（降级定位）
+  startOffset?: number;   // 文本偏移起点
+  endOffset?: number;     // 文本偏移终点
+  offsetKind?: "character" | "utf16";
 }
 ```
 
 字段说明：
+- `kind: "file"` 涵盖 workspace_file 和 editor_content 两类来源
 - `filePath`：只用于内部查找和失效检测，不进入 provider prompt
 - `content`：内容快照（不是实时读取），创建引用时拍快照
 - `displayName`：文件名或粘贴内容摘要，用于 UI chip 显示
@@ -43,11 +70,11 @@ interface InputReference {
 
 ### 4.1 类型定义
 
-| 类型 | 来源 | UI 入口（Phase 12 范围）|
+| kind | 来源 | UI 入口（Phase 12 范围）|
 |------|------|------------------------|
-| workspace_file | Workspace 文件树节点或 Editor 标签拖入 ChatInput | 拖拽文件节点、拖拽 Editor Tab |
-| editor_content | 当前 Editor active 文件快照 | 专用"引用当前文件"按钮（Phase 12）|
-| plain_text | 粘贴的文本内容 | 粘贴（Cmd+V）|
+| file（workspace_file）| Workspace 文件树节点拖入 ChatInput | 拖拽文件节点 |
+| file（editor_content）| 当前 Editor active 文件快照 | 专用"引用当前文件"按钮（Phase 12）或拖拽 Editor Tab |
+| text | 粘贴的文本内容 | 粘贴（Cmd+V）|
 | url | 粘贴的单一 http(s) URL | 粘贴（识别为 URL）|
 
 **当前阶段（Phase 12）不支持**：
@@ -72,20 +99,20 @@ interface InputReference {
 InputReference 以 XML 块注入 system prompt L1 层（承接 AG-M-P-02 §3.1）：
 
 ```xml
-<input_references readonly="true">
-<reference type="workspace_file" name="notes.md">
+<input_references>
+<reference kind="file" name="notes.md">
 <![CDATA[
 {截断后的文件内容}
 ]]>
 </reference>
 
-<reference type="plain_text" name="粘贴文本">
+<reference kind="text" name="粘贴文本">
 <![CDATA[
 {截断后的文本内容}
 ]]>
 </reference>
 
-<reference type="url" name="链接">
+<reference kind="url" name="链接">
 https://example.com
 </reference>
 </input_references>
@@ -111,7 +138,7 @@ https://example.com
 
 | 约束 | 规则 |
 |------|------|
-| 只读上下文 | InputReference 不声明写权威，不触发工具调用 |
+| 不直接触发写操作 | InputReference 不声明写权威；Agent 判断引用是编辑对象时须经 Diff Review，不由引用直接触发 |
 | 不拼入 user message | 引用内容只在 system prompt L1 层注入（AG-M-P-02 §3.1），不拼入 user 的自然语言消息 |
 | filePath 不作工具参数 | `filePath` 不得当作 read_file / update_file 的 `file_path` 参数 |
 | content 不作执行锚点 | `content` 快照不得用于生成 diff 的 originalText 或工具定位锚点 |
@@ -148,3 +175,4 @@ https://example.com
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
 | 2026-05-23 | v1.0 | 初始版本，定义 binder-mini InputReference 数据结构、入口规则、注入格式和门禁约束 |
+| 2026-05-23 | v1.1 | §1/§2 调整"只读上下文"表述为结构化内容载体，Agent 自行判断是否触发 Diff Review；§3 数据结构改为判别联合类型（kind: file|text|url），补充 DocumentAnchorTarget；§4.1 类型表改用 kind 字段；§5 XML 格式 type 属性改为 kind，去除 readonly 属性；§7 门禁约束对齐新语义 |

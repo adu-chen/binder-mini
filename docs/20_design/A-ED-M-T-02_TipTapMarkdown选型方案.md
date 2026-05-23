@@ -1,6 +1,6 @@
 ---
 文档编号：   ED-M-T-02
-文档状态：   R
+文档状态：   A
 负责模块：   ED
 文档职责：   TipTap/Markdown 技术选型方案
 上游约束：   CORE-C-P-01、ED-M-D-01、ED-M-T-01、SYS-C-T-02、binder-core/A-ED-M-D-01
@@ -114,7 +114,7 @@ TipTap/Markdown 选型只解决编辑器渲染和 Markdown 保存问题，不解
 
 本方案承接候选规则：
 
-`ED-CAND-DATA-001`
+`ED-CAND-DATA-002`
 
 候选规则意图：
 
@@ -131,3 +131,4 @@ Markdown 转换失败不得覆盖磁盘内容。
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
 | 2026-05-22 | v1.0 | 初始版本，确认 TipTap/Markdown 技术选型 |
+| 2026-05-23 | v1.1 | 文档状态 R→A；§8 候选规则 ED-CAND-DATA-001→ED-CAND-DATA-002（对齐 SYS-C-T-01/T-02 注册编号） |

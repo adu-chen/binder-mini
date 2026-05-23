@@ -39,8 +39,8 @@ Editor 需求必须满足以下原则：
 | REQ-ED-004 | dirty 标记与关闭保护 | 用户修改内容后标签进入 dirty；关闭 dirty 标签或切换 Workspace 前必须处理未保存状态。 | 未确认时不得丢弃 dirty 内容；非 dirty 标签可直接关闭。 |
 | REQ-ED-005 | 状态栏 | Editor 展示当前文件、保存状态和基础统计信息。 | 当前标签切换或内容变化后状态栏同步更新。 |
 | REQ-ED-006 | TipTap/Markdown 编辑 | md 文件使用 TipTap/ProseMirror 承载编辑体验，并能稳定转换为 Markdown 文本保存。 | Markdown 读写往返不破坏主流程文本语义；txt 可继续按纯文本路径保存。 |
-| REQ-ED-007 | BlockId 定位 | Editor 为可定位文档块生成稳定 BlockId 或等价 anchor。 | BlockId 不由模型提供执行权威；缺失或冲突时由 Editor Runtime 修复或拒绝执行。 |
-| REQ-ED-008 | DiffDecoration 绿审态 | Editor 可展示当前文件 pending diff 的绿审态高亮骨架。 | 高亮只消费已验证 range/anchor；不得用全文搜索伪造执行位置。 |
+| REQ-ED-007 | BlockId 定位 | Editor 在文件打开时为可定位文档块生成稳定 BlockId；校验 AI 工具输出的 BlockId 是否有效。 | BlockId 不由模型提供执行权威；缺失或冲突时由 Editor Runtime 修复或拒绝执行；文件打开即可用，不依赖保存动作。 |
+| REQ-ED-008 | DiffDecoration 绿增 | Editor 在 pending diff 进入 preapplied 状态时，在已验证 anchor 范围内渲染绿色新增（绿增）效果；不渲染红色删除。 | 绿增只消费已验证 anchor（blockId 或 lineRange）；anchor 无效时不渲染并通知 DE；聊天流显示完整红删绿增；终态后绿增自动移除。 |
 
 ## 4. 非功能要求
 
@@ -119,20 +119,18 @@ req_id: REQ-ED-007
 name: BlockId 定位
 module: ED
 chains: ED-OPEN-FILE, DE-CREATE-DIFF
-priority: P2
-status: blocked
+priority: P1
+status: active
 -->
-<!-- 前置: DE-M-T-01 Phase 13-A -->
 
 <!-- REQ
 req_id: REQ-ED-008
-name: DiffDecoration 绿审态
+name: DiffDecoration 绿增
 module: ED
 chains: ED-DIFF-RENDER, DE-CREATE-DIFF
-priority: P2
-status: blocked
+priority: P1
+status: active
 -->
-<!-- 前置: BlockId + anchor 协议 -->
 
 ## 7. 功能流程表
 
@@ -188,30 +186,50 @@ status: blocked
 | S05 | ED | TipTap 文档 | 序列化 TipTap → Markdown 文本（tiptap-markdown） | Markdown 文本 | S06 | ERR-03（序列化失败 → 阻断保存） |
 | S06 | SYS | Markdown 文本 + 路径 | 写入磁盘 | 写入结果 | DONE | ERR-04（写入失败） |
 
-### REQ-ED-007 BlockId 定位
+### REQ-ED-007 BlockId 定位（ED-BLOCKID-FLOW）
 
-前置 DE-M-T-01 Phase 13-A 完成后实现。Editor Runtime 在打开或保存时为可定位块生成 BlockId，并校验 AI 工具输出的 BlockId 是否有效。
+| step_id | actor | input | action | output | next_step | exception |
+|---------|-------|-------|--------|--------|-----------|-----------|
+| S01 | ED | .md 文件打开事件 | TipTap 解析 Markdown，创建 ProseMirror 文档节点树 | 节点树 | S02 | ERR-01（解析失败 → 只读降级）|
+| S02 | ED | ProseMirror 节点树 | BlockIdExtension 为每个块级节点（paragraph、heading、listItem 等）分配唯一 BlockId | 节点携带 blockId 属性 | S03 | — |
+| S03 | ED | blockId 集合 | 维护文档级 blockId 注册表，检测并消除重复 | 注册表就绪 | DONE | ERR-02（冲突 → 重新生成，不阻断打开）|
+| S04 | AG | AI 工具返回的 blockId | 校验 blockId 是否在当前文档注册表中存在 | 校验结果 | DONE（有效 → 允许工具执行）| ERR-03（blockId 无效/不存在 → 工具拒绝执行，返回明确错误）|
 
-### REQ-ED-008 DiffDecoration 绿审态
+注：BlockId 由 Editor Runtime 生成，不接受模型直接声明。S04 在 AG 工具调用时触发，不在文件打开流程中。
 
-前置 BlockId 策略和 DE anchor 协议确认后实现。Editor 从 diffStore 读取当前文件的 pending diff，在已验证 anchor 范围内渲染绿色高亮骨架。
+### REQ-ED-008 DiffDecoration 绿增（ED-DIFFDECORATION-FLOW）
 
-## 8. 问题暴露清单
+| step_id | actor | input | action | output | next_step | exception |
+|---------|-------|-------|--------|--------|-----------|-----------|
+| S01 | DE | PendingDiff（filePath、diffId、anchor：blockId 或 lineRange）| diff 进入 preapplied（LogicalState 已修改为 proposedText），通知 ED 渲染绿增效果 | diffId + anchor | S02 | — |
+| S02 | ED | diffId + anchor | 校验 anchor 对应的 ProseMirror 节点在当前文档中是否存在 | 校验结果 | S03（有效）| ERR-01（anchor 无效 → 不渲染，通知 DE 失效此 diff）|
+| S03 | ED | 有效 anchor 范围 | DiffDecorationExtension 在对应节点范围内渲染绿增效果（ProseMirror Decoration，只显示新增内容绿色覆盖，不显示红删）| 绿增效果可见 | DONE | — |
+| S04 | DE | 终态通知（diffId → accepted/rejected/expired）| DE 通知 ED 移除对应绿增 Decoration | — | ED 移除绿增，恢复正常编辑态 | — |
 
-- **NEEDS_HUMAN_DECISION**: BlockId 生成时机 — 在文件打开时生成还是保存时生成？打开时生成可立即为 Diff Review 提供 anchor，但可能与磁盘内容不一致；保存时生成更可靠但 Agent 请求的 BlockId 需要先保存才有效。
-- **BOUNDARY_OPEN**: Markdown 转换语义损失边界 — tiptap-markdown 不保证所有 Markdown 语法的往返一致（例如自定义 HTML、复杂表格、GFM 扩展语法）。当前不明确哪些格式在保存后会被规范化或丢失。
-- **REQ_GAP**: readonly 文件的编辑尝试 — 当用户尝试编辑 readonly 文件（非 md/txt）时，应展示只读提示还是直接拒绝编辑光标？当前只定义了 readonly 标记，未定义 UI 交互行为。
-- **DESIGN_RISK**: TipTap 实例与多标签的生命周期 — 每个标签是否有独立 TipTap 实例？切换标签时销毁/重建 TipTap 还是保持挂载？不同策略影响内存和初始化性能。
-- **FLOW_INCOMPLETE**: 保存失败恢复路径 — 当磁盘写入失败时（ERR-02），dirty 标记应保持还是清除？用户是否可以重试？当前需求未定义保存失败后的用户交互和状态恢复。
+注：编辑器内永远不显示红色删除效果；完整红删绿增 diff 视图只在聊天消息流中展示。Accept（已打开文件）只是移除绿增视觉效果，LogicalState 不变（已是 proposedText），DiskState 不触碰。
+
+## 8. 已决策约束
+
+以下问题已决策，作为设计约束固化到实现中。
+
+| 类别 | 决策 |
+|------|------|
+| **BlockId 生成时机** | 文件打开时生成。TipTap 解析文件创建 ProseMirror 节点时即分配 BlockId，不依赖用户操作或保存。打开即可用，可立即为 Diff Review 提供 anchor。对齐 binder-core。 |
+| **Markdown 往返一致性损失边界** | 暂不处理。不定义 tiptap-markdown 往返损失的可接受边界，不做往返测试矩阵。已知为底层库特性，用户遭遇格式规范化时视为预期行为。 |
+| **readonly 文件编辑尝试** | 拒绝光标。readonly 模式（非 md/txt 文件）下编辑器不渲染可交互光标，禁止文字输入，UI 表现为纯文本展示区，无任何编辑反馈。 |
+| **TipTap 实例与多标签生命周期** | 每个 EditorTab 拥有独立 TipTap 实例（每标签一个 editorMachine actor）。标签切换时不销毁实例，保持挂载状态以保留编辑器状态（滚动位置、undo 历史）。对齐 binder-core。 |
+| **保存失败恢复路径** | 保持 dirty 标记 + 显示错误提示，editorMachine 回到 editing 状态。用户再次触发 Cmd+S 可重试。不自动重试，不清除 dirty 标记。对齐 binder-core。 |
+| **txt 文件与 TipTap 实例** | txt 与 md 使用同一 TipTap 实例和纯文本序列化路径（无 Markdown 格式转换）；BlockId 生成逻辑同样适用于 txt 文件中的块级节点。对齐 binder-core EditorArea.tsx。 |
 
 ## 9. 跨模块交互声明
 
 | 方向 | 触发场景 | 数据边界 | 约束 |
 |------|----------|----------|------|
 | ED → WS | 打开文件时请求文件内容 | filePath（WS 边界内）→ 文件内容 | 路径必须在 workspaceRoot 内；WS 未 active 时 ED 不可打开文件 |
-| ED → DE | 当前文件有 pending diff 时展示绿审态 | diffId、filePath → DiffAnchorRef | ED 只消费 DE 的 pending diff 展示；不直接修改 diff 状态 |
+| ED → DE | 当前文件有 pending diff 时展示绿增 | diffId、filePath → DiffAnchorRef | ED 只消费 DE 的 preapplied diff 展示绿增效果；不直接修改 diff 状态 |
 | WS → ED | WS 关闭或切换时通知 ED | workspaceMachine 状态变化 → ED 关闭所有标签 | dirty 标签必须先处理再允许 WS 切换（反向依赖） |
-| DE → ED | accept preapplied diff 时回滚编辑器缓冲区 | diffId、originalText → 编辑器缓冲区内容 | preapplied → reject 时 ED 必须回滚；不得只记录终态而留游离内容 |
+| DE → ED | diff 创建时立即推送 proposedText（已打开文件）| CONTENT_UPDATE 事件（diffId、proposedText）→ ED LogicalState | ED 立即将 LogicalState 修改为 proposedText，diff 进入 preapplied；绿增效果展示；用户接受时仅移除绿增，LogicalState 不变，不写磁盘；用户拒绝时触发 LogicalState 回滚 |
+| DE → ED | preapplied diff 被拒绝时回滚编辑器缓冲区 | diffId、originalText → 编辑器缓冲区内容 | reject 时 ED 必须回滚到 originalText；不得只记录终态而留游离内容 |
 
 ## 变更记录
 
@@ -219,3 +237,7 @@ status: blocked
 |------|------|---------|
 | 2026-05-22 | v1.0 | 初始版本，定义 Editor Phase 9 需求颗粒度和需求 ID |
 | 2026-05-23 | v1.1 | 新增 §6 需求标注块、§7 功能流程表、§8 问题暴露清单、§9 跨模块交互声明（G1 合规修复）|
+| 2026-05-23 | v1.2 | §8 将全部问题项替换为已决策约束；对齐 binder-core（BlockId 打开时生成、拒绝光标、每标签独立实例、保持 dirty+提示）；明确 Markdown 往返边界暂不处理 |
+| 2026-05-23 | v1.3 | REQ-ED-007/008 从 blocked/P2 升为 active/P1（当前阶段即应实现）；§7 补充 BlockId 生成流程表（ED-BLOCKID-FLOW）和 DiffDecoration 渲染流程表（ED-DIFFDECORATION-FLOW），替换"前置...完成后实现"占位描述 |
+| 2026-05-23 | v1.4 | §9 拆分 DE→ED 交互为两行：mounted_pending 推送 proposedText（CONTENT_UPDATE）+ reject 回滚；§8 补充 txt/TipTap 实例决策约束（txt 与 md 同实例，BlockId 同样适用） |
+| 2026-05-24 | v1.5 | REQ-ED-008 名称"绿审态"改为"绿增"；ED-DIFFDECORATION-FLOW 修订：触发点从 mounted_pending 改为 preapplied（LogicalState 已修改）；绿增只显示新增不显示红删；Accept 只移除绿增不写磁盘；§9 DE→ED 交互更新（diff 创建即推送 proposedText；accept 不写磁盘） |

@@ -85,6 +85,98 @@ en: PathConflict
 forbidden: 覆盖提示, 文件冲突, 已存在错误
 -->
 
+<!-- TERM
+term_id: TERM-DE-003
+chains: DE-CREATE-DIFF,DE-ACCEPT-DIFF,DE-REJECT-DIFF
+zh: 差异定位引用
+en: DiffAnchorRef
+forbidden: diff锚点, 定位锚, anchor
+-->
+
+<!-- TERM
+term_id: TERM-AG-003
+chains: AG-SEND-MESSAGE
+zh: Prompt运行时
+en: PromptRuntime
+forbidden: prompt组装, prompt结构, 提示词组装
+-->
+
+<!-- TERM
+term_id: TERM-AG-004
+chains: AG-SEND-MESSAGE,AG-TOOL-CALL
+zh: 对话状态机
+en: chatMachine
+forbidden: agentMachine, agent状态机, 聊天机器
+-->
+
+<!-- TERM
+term_id: TERM-ED-001
+chains: ED-OPEN-FILE,ED-SAVE-FILE
+zh: 编辑器标签页
+en: EditorTab
+forbidden: 编辑标签, tab页, 编辑器tab
+-->
+
+<!-- TERM
+term_id: TERM-DOC-001
+chains: DE-CREATE-DIFF,DE-ACCEPT-DIFF,DE-EXPIRE-DIFF,ED-SAVE-FILE
+zh: 磁盘状态
+en: DiskState
+forbidden: 文件状态, 存储状态, 持久化内容
+-->
+
+<!-- TERM
+term_id: TERM-DOC-002
+chains: DE-CREATE-DIFF,DE-ACCEPT-DIFF,DE-REJECT-DIFF,ED-OPEN-FILE,ED-SAVE-FILE
+zh: 逻辑状态
+en: LogicalState
+forbidden: 编辑器缓冲区内容, 内存内容, buffer内容
+-->
+
+<!-- TERM
+term_id: TERM-DOC-003
+chains: ED-OPEN-FILE,ED-DIFF-RENDER
+zh: 显示状态
+en: DisplayState
+forbidden: 渲染状态, 视图内容, 展示内容
+-->
+
+<!-- TERM
+term_id: TERM-DE-004
+chains: DE-CREATE-DIFF,DE-ACCEPT-DIFF,ED-DIFF-RENDER
+zh: 绿增
+en: GreenAddition
+forbidden: 绿审, 绿审态, 绿审态骨架, DiffDecoration高亮
+code_identifier: 渲染层 React 组件命名为 GreenAdditionOverlay；TipTap 扩展命名为 GreenAdditionDecoration
+-->
+
+<!-- TERM
+term_id: TERM-DE-005
+chains: DE-CREATE-DIFF,DE-EXPIRE-DIFF
+zh: 基准版本
+en: baseRevision
+definition: diff 创建时记录的 originalText 内容 hash，用于 Inherit 流程中校验文件打开时的 DiskState 是否与创建时一致；校验失败时 diff 降级为 expired。
+forbidden: 原始版本, 基础版本, 内容快照hash
+-->
+
+<!-- TERM
+term_id: TERM-AG-005
+chains: AG-TOOL-CALL
+zh: 工具调用标识
+en: callId
+definition: 单次工具调用的唯一标识，由后端在组装 Provider payload 时生成；ToolExecution 和 ToolResult 通过 callId 关联；同一轮次内 callId 唯一，跨轮次不保证。
+forbidden: toolId, requestId, executionId
+-->
+
+<!-- TERM
+term_id: TERM-ED-002
+chains: ED-OPEN-FILE,ED-SAVE-FILE,AG-SEND-MESSAGE,AG-TOOL-CALL
+zh: 激活文件
+en: ActiveFile
+definition: 当前 editorSession 中处于 focus 状态的 tab 所对应的文件；由 editorMachine 通过 activeTabId 标识，PromptRuntime 以 activeFilePath 字段注入 Provider payload；两者指向同一概念。
+forbidden: 当前文件, active file, 当前打开文件
+-->
+
 ## 1. 模块注册
 
 <!-- MODULE
@@ -235,9 +327,9 @@ status: active
 
 | 状态机 | 主责模块 | 覆盖链路 | 最小状态 |
 |--------|----------|----------|----------|
-| workspaceMachine | WS | WS-OPEN、WS-FILE-MANAGE | noWorkspace、opening、active、refreshing、error |
-| editorMachine | ED | ED-OPEN-FILE、ED-SAVE-FILE | closed、loading、editing、saving、readonly、error |
-| agentMachine | AG | AG-SEND-MESSAGE、AG-TOOL-CALL | idle、validatingProvider、sending、streaming、toolCalling、error |
+| workspaceMachine | WS | WS-OPEN、WS-FILE-MANAGE、WS-CLOSE | NoWorkspace、Loading、Active、Closing、Error |
+| editorMachine | ED | ED-OPEN-FILE、ED-SAVE-FILE | closed、loading、editing、dirty、saving、readonly、error |
+| chatMachine | AG | AG-SEND-MESSAGE、AG-TOOL-CALL | noWorkspace、ready、validatingProvider、sending、streaming、toolCalling、cancelling、error |
 | diffMachine | DE | DE-CREATE-DIFF、DE-ACCEPT-DIFF、DE-REJECT-DIFF、DE-EXPIRE-DIFF | none、pending、accepting、rejecting、expired、terminal、error |
 
 ## 5. 跨模块约束
@@ -483,6 +575,96 @@ rule_id: BR-CORE-GOV-001
 
 代码实现不得存在游离代码块；所有代码块必须能追溯到技术设计文档已注册规则体系。
 
+<!-- RULE
+rule_id: BR-DE-STATE-010
+主链路: DE-ACCEPT-DIFF,ED-SAVE-FILE
+域: STATE
+需求映射: REQ-DE-002,REQ-ED-002
+-->
+
+DiskState 唯一写入路径：仅用户执行 Cmd+S 保存（已打开文件路径）或 accepted（未打开文件路径接受时）才能修改 DiskState；任何其他路径（包括 Accept 已打开文件、reject、expire、preapply）不得修改 DiskState。
+
+<!-- RULE
+rule_id: BR-DE-STATE-011
+主链路: DE-ACCEPT-DIFF
+域: STATE
+需求映射: REQ-DE-002
+-->
+
+Accept（已打开文件路径）不写 DiskState：接受操作仅移除编辑器绿增 overlay，LogicalState 保持 proposedText 不变，DiskState 不触碰，文件保持 dirty 状态；DiskState 只在用户后续 Cmd+S 时更新。
+
+<!-- RULE
+rule_id: BR-DE-STATE-012
+主链路: DE-EXPIRE-DIFF
+域: STATE
+需求映射: REQ-DE-004,REQ-DE-011
+-->
+
+统一失效规则：diff 所在文本区域 LogicalState 发生任何变化（用户编辑命中 diff 区域、新 diff 覆盖同区域、reject 回滚），或 DiskState 被外部写入，该 diff 自动进入 expired 状态（发出 EXPIRE_REQUESTED）；diff-on-diff 场景属于此规则自然覆盖的子场景，不返回冲突错误。
+
+<!-- RULE
+rule_id: BR-ED-STATE-005
+主链路: ED-OPEN-FILE,ED-DIFF-RENDER
+域: STATE
+需求映射: REQ-ED-008
+-->
+
+DisplayState 只读派生规则：DisplayState 派生自 LogicalState 加绿增 overlay，无独立存储路径；任何对 DisplayState 的写入必须转为修改 LogicalState 或注册 overlay；不得绕过此规则直接向渲染层注入内容。
+
+<!-- RULE
+rule_id: BR-AG-SEC-001
+主链路: AG-SEND-MESSAGE
+域: SEC
+需求映射: REQ-AG-007
+-->
+
+Provider API key 不得在前端持有、传递或出现在前端日志中；由后端安全存储读取，前端只感知 apiKeyConfigured 布尔状态；forbidden provider fields（apiKey 等）必须在后端组装 Provider payload 时过滤，不得透传给模型。
+
+<!-- RULE
+rule_id: BR-AG-STATE-002
+主链路: AG-SEND-MESSAGE
+域: STATE
+需求映射: REQ-AG-002
+-->
+
+真实 Provider SSE 流发生网络错误、超时或 Provider 错误时，必须终止流、向 chatMachine 发出 FAILED 事件，并在 UI 显示可识别失败状态（error.message 包含可读原因）；不得静默丢弃错误或保留 streaming 状态。
+
+<!-- RULE
+rule_id: BR-AG-DATA-002
+主链路: AG-TOOL-CALL
+域: DATA
+需求映射: REQ-AG-003
+-->
+
+工具结果必须在同一对话轮次内以 tool_result 事件形式通过 chat-stream-event 通道回流；不得作为独立 user message 注入对话历史；ToolResult 必须携带 callId 与对应 ToolExecution 关联。
+
+<!-- RULE
+rule_id: BR-DE-DATA-001
+主链路: DE-CREATE-DIFF
+域: DATA
+需求映射: REQ-DE-006
+-->
+
+PendingDiff 创建时必须携带 sourceToolId（生成它的 ToolExecution.id）、baseRevision（原始内容 hash）、createdAt（Unix timestamp）和 effectivePath（"open-file" 或 "closed-file"）；缺少可溯源字段的 diff 不得进入 pending 状态。
+
+<!-- RULE
+rule_id: BR-DE-STATE-004
+主链路: DE-ACCEPT-DIFF
+域: STATE
+需求映射: REQ-DE-002
+-->
+
+Accept（未打开文件路径）写入 DiskState 前，必须校验当前 DiskState hash 与 PendingDiff.baseRevision 一致；不一致时 diff 转 expired，不执行写入。
+
+<!-- RULE
+rule_id: BR-DE-STATE-005
+主链路: DE-CREATE-DIFF,DE-ACCEPT-DIFF
+域: STATE
+需求映射: REQ-DE-001
+-->
+
+preapplied 状态只适用于已打开文件链路：diff 创建时立即修改 LogicalState 为 proposedText（pending 为短暂过渡态，立即触发 LOGICAL_STATE_APPLIED）；未打开文件保持 pending 直到用户决策；Accept（已打开文件）只移除绿增，不写 DiskState。
+
 ## 7. 验收与测试入口
 
 首批测试方案：
@@ -508,34 +690,35 @@ rule_id: BR-CORE-GOV-001
 
 以下候选规则来自 `AG-M-T-01`，进入 Phase 10-12 代码实现前必须升级为正式 RULE 块、补充 `@GOV` 标注和测试覆盖。
 
-| 候选规则 ID | 承接需求 | 建议链路 | 设计意图 |
-|-------------|----------|----------|----------|
-| AG-CAND-STATE-002 | REQ-AG-002 | AG-SEND-MESSAGE | 真实 Provider SSE 流必须在错误时终止并向 UI 返回可识别失败状态。 |
-| AG-CAND-DATA-002 | REQ-AG-003 | AG-TOOL-CALL | 工具结果必须在同一对话轮次内以 tool_result 形式回流，不得注入为 user message。 |
-| AG-CAND-DATA-003 | REQ-AG-007 | AG-SEND-MESSAGE | Provider API key 不得在前端持有、传递或出现在日志中；由后端安全存储读取。 |
-| AG-CAND-STATE-003 | REQ-AG-007 | AG-SEND-MESSAGE | Agent 只能向 Provider 暴露 allowedTools 中的工具，不得暴露全部已注册工具。 |
-| AG-CAND-DATA-004 | REQ-AG-006 | AG-TOOL-CALL | InputReference 只注入 Provider 请求上下文，不触发任何文件副作用。 |
+| 候选规则 ID | 承接需求 | 建议链路 | 设计意图 | 状态 |
+|-------------|----------|----------|----------|------|
+| ~~AG-CAND-STATE-002~~ | REQ-AG-002 | AG-SEND-MESSAGE | 真实 Provider SSE 流必须在错误时终止并向 UI 返回可识别失败状态。 | **已升级 → BR-AG-STATE-002** |
+| ~~AG-CAND-DATA-002~~ | REQ-AG-003 | AG-TOOL-CALL | 工具结果必须在同一对话轮次内以 tool_result 形式回流，不得注入为 user message。 | **已升级 → BR-AG-DATA-002** |
+| ~~AG-CAND-DATA-003~~ | REQ-AG-007 | AG-SEND-MESSAGE | Provider API key 不得在前端持有、传递或出现在日志中；由后端安全存储读取。 | **已升级 → BR-AG-SEC-001** |
+| AG-CAND-STATE-003 | REQ-AG-007 | AG-SEND-MESSAGE | Agent 只能向 Provider 暴露 allowedTools 中的工具，不得暴露全部已注册工具。 | 待升级（Phase 12）|
+| AG-CAND-DATA-004 | REQ-AG-006 | AG-TOOL-CALL | InputReference 只注入 Provider 请求上下文，不触发任何文件副作用。 | 待升级（Phase 12）|
+| AG-CAND-PERSIST-001 | REQ-AG-010 | AG-SEND-MESSAGE | 聊天消息必须在 WORKSPACE_CLOSED 时持久化到 workspace.db，WORKSPACE_OPENED 时读取恢复；不得在切换 Workspace 时直接清空内存 messages 而不落盘。 | 待升级（Phase 12）|
 
 ## 10. Diff Review 候选规则（Phase 13，进入实现前升级为正式规则）
 
 以下候选规则来自 `DE-M-T-01`，进入 Phase 13 代码实现前必须升级为正式 RULE 块、补充 `@GOV` 标注和测试覆盖。
 
-| 候选规则 ID | 承接需求 | 建议链路 | 设计意图 |
-|-------------|----------|----------|----------|
-| DE-CAND-DATA-001 | REQ-DE-006 | DE-CREATE-DIFF | PendingDiff 必须携带 sourceToolId，可追溯到生成它的 ToolExecution。 |
-| DE-CAND-STATE-004 | REQ-DE-002 | DE-ACCEPT-DIFF | Accept 前必须校验当前磁盘内容与 originalText 一致；不一致时转 expired，不执行写入。 |
-| DE-CAND-STATE-005 | REQ-DE-001 | DE-CREATE-DIFF、DE-ACCEPT-DIFF | mounted_pending 状态只适用于已打开文件链路；未打开文件直接从 pending 接受写入。 |
-| DE-CAND-PERSIST-002 | REQ-DE-007 | DE-ACCEPT-DIFF、DE-REJECT-DIFF | PendingDiff 状态必须持久化到 workspace.db，应用重启后可恢复或转 expired。 |
-| DE-CAND-STATE-006 | REQ-DE-007 | DE-EXPIRE-DIFF | Workspace 关闭时，所有非终态 PendingDiff 必须转 expired 并写入持久化存储。 |
+| 候选规则 ID | 承接需求 | 建议链路 | 设计意图 | 状态 |
+|-------------|----------|----------|----------|------|
+| ~~DE-CAND-DATA-001~~ | REQ-DE-006 | DE-CREATE-DIFF | PendingDiff 必须携带 sourceToolId、baseRevision、createdAt、effectivePath，可追溯到生成它的 ToolExecution。 | **已升级 → BR-DE-DATA-001** |
+| ~~DE-CAND-STATE-004~~ | REQ-DE-002 | DE-ACCEPT-DIFF | Accept（未打开文件路径）前必须校验 DiskState hash 与 baseRevision 一致；不一致时转 expired，不执行写入。 | **已升级 → BR-DE-STATE-004** |
+| ~~DE-CAND-STATE-005~~ | REQ-DE-001 | DE-CREATE-DIFF、DE-ACCEPT-DIFF | preapplied 状态只适用于已打开文件链路；diff 创建时立即修改 LogicalState；Accept（已打开文件）不写 DiskState。 | **已升级 → BR-DE-STATE-005** |
+| DE-CAND-PERSIST-002 | REQ-DE-007 | DE-ACCEPT-DIFF、DE-REJECT-DIFF | PendingDiff 状态必须持久化到 workspace.db，应用重启后可恢复或转 expired。 | 待升级（Phase 13-D）|
+| DE-CAND-STATE-006 | REQ-DE-007 | DE-EXPIRE-DIFF | Workspace 关闭时，所有非终态 PendingDiff 必须转 expired 并写入持久化存储。 | 待升级（Phase 13-D）|
 
 ## 11. Editor 候选规则（Phase 9 剩余项，进入实现前升级为正式规则）
 
 以下候选规则来自 `ED-M-T-01`，进入 Phase 9 步骤 5-6 代码实现前必须升级为正式 RULE 块，且须先完成 DE-M-T-01 Phase 13-A 数据结构。
 
-| 候选规则 ID | 承接需求 | 建议链路 | 设计意图 |
-|-------------|----------|----------|----------|
-| ED-CAND-DATA-002 | REQ-ED-007 | ED-OPEN-FILE | BlockId / Anchor 必须由 Editor Runtime 生成或校验，不由模型输出直接决定执行位置。 |
-| ED-CAND-STATE-004 | REQ-ED-008 | ED-DIFF-RENDER | DiffDecoration 只能消费已验证 range/anchor；无法解析时不渲染伪高亮。 |
+| 候选规则 ID | 承接需求 | 建议链路 | 设计意图 | 状态 |
+|-------------|----------|----------|----------|------|
+| ED-CAND-DATA-002 | REQ-ED-007 | ED-OPEN-FILE | BlockId / Anchor 必须由 Editor Runtime 生成或校验，不由模型输出直接决定执行位置。 | 待升级（Phase 9-E）|
+| ED-CAND-STATE-004 | REQ-ED-008 | ED-DIFF-RENDER | DiffDecoration 只能消费已验证 range/anchor；无法解析时不渲染伪高亮。 | 待升级（Phase 9-F）|
 
 ## 变更记录
 
@@ -551,13 +734,6 @@ rule_id: BR-CORE-GOV-001
 | 2026-05-22 | v1.2 | 注册 Workspace 初始化与递归 FileNode 正式规则 |
 | 2026-05-22 | v1.1 | 增加需求到规则映射约定和 Workspace 颗粒度候选规则 |
 | 2026-05-23 | v2.0 | 注册 AG Phase 10-12 和 DE Phase 13 候选规则；补充 ED Phase 9 剩余候选规则；原 §9 候选规则表补全为 §9-11 分模块候选规则表 |
-| 2026-05-22 | v1.9 | 注册 Editor Markdown 读取保存转换规则 |
-| 2026-05-22 | v1.8 | 注册 Editor dirty 关闭保护与状态栏规则 |
-| 2026-05-22 | v1.7 | 注册 Editor 多标签正式规则 |
-| 2026-05-22 | v1.6 | 注册 Workspace 搜索索引链路与正式规则 |
-| 2026-05-22 | v1.5 | 注册 Workspace 关闭切换 dirty/pending 门禁规则 |
-| 2026-05-22 | v1.4 | 注册 Workspace 创建结构操作与 PathConflict 规则 |
-| 2026-05-22 | v1.3 | 注册最近 Workspace 用户级持久化规则 |
-| 2026-05-22 | v1.2 | 注册 Workspace 初始化与递归 FileNode 正式规则 |
-| 2026-05-22 | v1.1 | 增加需求到规则映射约定和 Workspace 颗粒度候选规则 |
-| 2026-05-22 | v1.0 | 初始版本，注册首批模块、术语、链路、约束和规则 |
+| 2026-05-23 | v2.1 | §0 补充 TERM 块：DiffAnchorRef、PromptRuntime、chatMachine、EditorTab；§4 工作流机：workspaceMachine 状态改为 PascalCase 并加 Closing；editorMachine 补充 dirty 状态；agentMachine 改名 chatMachine 并更新状态列表；删除变更记录重复条目 |
+| 2026-05-24 | v2.2 | §0 新增 TERM 块：DiskState（TERM-DOC-001）、LogicalState（TERM-DOC-002）、DisplayState（TERM-DOC-003）、GreenAddition/绿增（TERM-DE-004，forbidden: 绿审/绿审态）；§10 DE-CAND-STATE-005 描述移除 mounted_pending，改为 preapplied 仅适用已打开文件链路 |
+| 2026-05-24 | v2.3 | §0 TERM-DE-004 补充 code_identifier（GreenAdditionOverlay/GreenAdditionDecoration）；新增 TERM-DE-005（baseRevision）、TERM-AG-005（callId）、TERM-ED-002（ActiveFile）；§6 注册 BR-DE-STATE-010/011/012（DiskState 写入边界、accept 不写盘、统一 expire）、BR-ED-STATE-005（DisplayState 只读派生）、BR-AG-SEC-001（API key 安全）、BR-AG-STATE-002（SSE 错误终止）、BR-AG-DATA-002（工具结果回流）、BR-DE-DATA-001（PendingDiff 可溯源字段）、BR-DE-STATE-004（accept 前校验）、BR-DE-STATE-005（preapplied 三态）共 10 条正式规则；§9 升级 AG-CAND-STATE-002/DATA-002/DATA-003 为正式规则，新增 AG-CAND-PERSIST-001；§10 升级 DE-CAND-DATA-001/STATE-004/STATE-005 为正式规则；§11 候选表增加状态列 |

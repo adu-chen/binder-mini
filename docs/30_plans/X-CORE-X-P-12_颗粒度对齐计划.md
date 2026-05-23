@@ -1,6 +1,6 @@
 ---
 文档编号：   CORE-X-P-12
-文档状态：   R
+文档状态：   X
 负责模块：   CORE
 文档职责：   binder-core 需求颗粒度对齐计划
 上游约束：   CORE-C-P-01、CORE-C-D-01、SYS-C-T-01、CORE-X-P-02

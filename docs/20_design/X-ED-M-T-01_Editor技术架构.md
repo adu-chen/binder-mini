@@ -1,6 +1,6 @@
 ---
 文档编号：   ED-M-T-01
-文档状态：   R
+文档状态：   X
 负责模块：   ED
 文档职责：   Editor 技术架构与 Phase 9 方案
 上游约束：   CORE-C-P-01、ED-M-D-01、SYS-C-T-01、SYS-C-T-02、binder-core/A-ED-M-T-01

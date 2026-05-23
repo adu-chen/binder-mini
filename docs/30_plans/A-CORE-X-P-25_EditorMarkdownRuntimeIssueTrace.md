@@ -60,7 +60,7 @@
 ## 2. 不做范围
 
 1. 不实现 BlockId / DocumentAnchor。
-2. 不实现 DiffDecoration 绿审态。
+2. 不实现 DiffDecoration 绿增。
 3. 不把 `.txt` 迁移到 TipTap。
 4. 不把 BlockId 写入 Markdown 源文。
 5. 不自研完整 Markdown parser / serializer。

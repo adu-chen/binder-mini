@@ -78,22 +78,27 @@ Active file: {activeFilePath}
 
 ## 4. allowedTools 过滤规则
 
-### 4.1 全局白名单
+### 4.1 已注册工具全集
 
-在 Phase 10-11 实现的工具：read_file、list_files、search_files、edit_current_editor_document（已有）、create_file、create_folder、rename_file、move_file、delete_file、update_file（Phase 11）。
+Phase 10-11 范围内实现的工具：`read_file`、`list_files`、`search_files`（只读工具，已有）、`edit_current_editor_document`（已有）、`create_file`、`create_folder`、`rename_file`、`move_file`、`delete_file`、`update_file`（Phase 11）。
 
-### 4.2 过滤策略
+### 4.2 过滤策略（场景动态）
 
-allowedTools 在后端组装 PromptRuntime 时确定，前端不干预工具可见性。
+allowedTools 采用**场景动态过滤**策略，在后端组装 PromptRuntime 时根据当前 Workspace 状态和操作上下文决定（对齐 binder-core，REQ-AG-007）：
 
-当前策略（Phase 10-12 范围）：
-- 所有已实现工具默认进入 allowedTools（全局白名单策略）
-- 未实现工具绝不进入 allowedTools
+决策依据（Phase 12 实现，Phase 10-11 暂用默认集）：
+
+| 场景 | allowedTools 规则 |
+|------|-----------------|
+| 默认（有活跃 Workspace）| 所有已实现工具 |
+| 只读 Workspace（未来）| 仅 read_file、list_files、search_files |
+| 无活跃文件 | 排除 edit_current_editor_document |
+| 未实现的工具 | 绝不进入 allowedTools，无论场景如何 |
+
+过滤不变量：
+- allowedTools 只在后端确定，前端不干预工具可见性
 - 模型不可调用未在 allowedTools 中的工具（Rust guard 校验 tool call name）
-
-未来扩展点（NEEDS_HUMAN_DECISION）：
-- 按 Workspace 场景动态过滤（如只读模式禁用写工具）
-- 按用户权限级别过滤
+- Phase 10-11 阶段未实现场景动态时，以"所有已实现工具"为默认集
 
 ### 4.3 Provider Payload 中的工具暴露
 
@@ -159,3 +164,4 @@ Rust guard 必须在组装 payload 时扫描并移除上述字段（如果模型
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
 | 2026-05-23 | v1.0 | 初始版本，定义 binder-mini Prompt Runtime 四层结构、allowedTools 策略和 forbidden fields 清单 |
+| 2026-05-23 | v1.1 | §4 allowedTools 过滤策略从全局白名单改为场景动态（对齐 binder-core REQ-AG-007）；补充场景决策表和过滤不变量 |

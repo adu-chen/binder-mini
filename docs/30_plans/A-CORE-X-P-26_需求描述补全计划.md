@@ -157,9 +157,10 @@ DE 模块需要 DiffStore 设计和 Diff 链路协议，这是 Phase 13 状态�
 - [ ] 补充跨模块交互声明表（DE → AG、DE → ED、DE → WS 的边界声明）
 
 关键流程需覆盖：
-- REQ-DE-001（已打开文件）：工具调用 → DE.createDiff → mounted_pending → preapplied → 绿审展示
-- REQ-DE-001（未打开文件）：工具调用 → DE.createDiff → mounted_pending（不进编辑器）
-- REQ-DE-002：接受 → 校验 originalText → 写磁盘 → terminal
+- REQ-DE-001（已打开文件）：工具调用 → DE.createDiff → LOGICAL_STATE_APPLIED → preapplied → 绿增展示（已执行）
+- REQ-DE-001（未打开文件）：工具调用 → DE.createDiff → pending（不修改 LogicalState，等待用户决策或文件打开后继承）
+- REQ-DE-002（已打开文件）：接受 → 移除绿增 Decoration → terminal（LogicalState 不变；DiskState 不写）
+- REQ-DE-002（未打开文件）：接受 → 校验 DiskState hash → 写磁盘 → terminal
 - REQ-DE-004：文件被外部编辑 → 内容变化检测 → 自动 expire
 
 开放问题（需暴露）：
@@ -245,8 +246,8 @@ DE 模块需要 DiffStore 设计和 Diff 链路协议，这是 Phase 13 状态�
 
 覆盖内容：
 
-- 已打开文件链路：edit_current_editor_document → PreAppliedPending → 绿审 → accept/reject
-- 未打开文件链路：update_file → MountedPending → 打开后 preapply → accept/reject
+- 已打开文件链路：edit_current_editor_document → LOGICAL_STATE_APPLIED → preapplied（绿增）→ accept（移除绿增；不写磁盘）/ reject（LogicalState 回滚）
+- 未打开文件链路：update_file → pending → accept（写 DiskState）/ reject；文件打开时继承流 → preapplied
 - 失效触发条件：外部编辑检测、文件删除、Workspace 关闭
 - accept 前校验：blockId + originalText 一致性验证
 - 批量操作协议：batch_accept / batch_reject 原子语义

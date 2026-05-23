@@ -1,6 +1,6 @@
 ---
 文档编号：   SYS-C-T-02
-文档状态：   R
+文档状态：   X
 负责模块：   SYS,WS,ED,CORE
 文档职责：   需求到技术规则映射矩阵
 上游约束：   CORE-C-P-01、CORE-C-D-01、WS-M-D-01、ED-M-D-01、SYS-C-T-01
