@@ -1,6 +1,6 @@
 ---
 文档编号：   CORE-X-P-06
-文档状态：   R
+文档状态：   A
 负责模块：   AG
 文档职责：   AgentProviderMVP范围
 上游约束：   ADP.md、SYS-C-T-01、CORE-X-P-02
@@ -48,7 +48,7 @@ task_type: CODE_CHANGE
 
 allowed_files:
 
-- `docs/30_plans/R-CORE-X-P-06_AgentProviderMvpIssueTrace.md` # 本 Issue Trace
+- `docs/30_plans/A-CORE-X-P-06_AgentProviderMvpIssueTrace.md` # 本 Issue Trace
 - `src/types/agent.ts` # Agent 数据结构扩展
 - `src/services/agentService.ts` # Agent 服务逻辑
 - `src/App.tsx` # Agent UI 接入
@@ -72,7 +72,7 @@ scope_reason: Phase 4 当前先实现 Provider 配置、消息输入和 ToolExec
 
 ## Allowed Files
 
-- docs/30_plans/R-CORE-X-P-06_AgentProviderMvpIssueTrace.md
+- docs/30_plans/A-CORE-X-P-06_AgentProviderMvpIssueTrace.md
 - src/types/agent.ts
 - src/services/agentService.ts
 - src/App.tsx
@@ -97,7 +97,7 @@ Agent Provider MVP 完成后，Provider 配置有效时用户消息进入本地�
 ## Validation Commands
 
 - npm run governance:generate
-- npm run governance:audit -- --issue docs/30_plans/R-CORE-X-P-06_AgentProviderMvpIssueTrace.md
+- npm run governance:audit -- --issue docs/30_plans/A-CORE-X-P-06_AgentProviderMvpIssueTrace.md
 - npm run check:ts
 - npm run test
 - npm run check:rust
@@ -108,3 +108,4 @@ Agent Provider MVP 完成后，Provider 配置有效时用户消息进入本地�
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
 | 2026-05-22 | v1.0 | 初始版本，记录 Agent Provider MVP Scope Lock |
+| 2026-05-22 | v1.1 | 文档状态由 R 更正为 A（符合 ADU.md §6.3 Issue Trace 状态规则） |

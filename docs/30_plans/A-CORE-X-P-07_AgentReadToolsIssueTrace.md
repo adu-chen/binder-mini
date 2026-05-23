@@ -1,6 +1,6 @@
 ---
 文档编号：   CORE-X-P-07
-文档状态：   R
+文档状态：   A
 负责模块：   AG
 文档职责：   Agent只读工具范围
 上游约束：   ADP.md、SYS-C-T-01、CORE-X-P-02
@@ -48,7 +48,7 @@ task_type: CODE_CHANGE
 
 allowed_files:
 
-- `docs/30_plans/R-CORE-X-P-07_AgentReadToolsIssueTrace.md` # 本 Issue Trace
+- `docs/30_plans/A-CORE-X-P-07_AgentReadToolsIssueTrace.md` # 本 Issue Trace
 - `src/types/agent.ts` # 工具类型扩展
 - `src/services/agentService.ts` # 只读工具服务
 - `src/App.tsx` # Agent 工具 UI 接入
@@ -72,7 +72,7 @@ scope_reason: Phase 4 当前步骤为 read_file/list_files/search_files，只读
 
 ## Allowed Files
 
-- docs/30_plans/R-CORE-X-P-07_AgentReadToolsIssueTrace.md
+- docs/30_plans/A-CORE-X-P-07_AgentReadToolsIssueTrace.md
 - src/types/agent.ts
 - src/services/agentService.ts
 - src/App.tsx
@@ -97,7 +97,7 @@ Agent 面板可以对当前 Workspace 执行只读文件读取、目录列出和
 ## Validation Commands
 
 - npm run governance:generate
-- npm run governance:audit -- --issue docs/30_plans/R-CORE-X-P-07_AgentReadToolsIssueTrace.md
+- npm run governance:audit -- --issue docs/30_plans/A-CORE-X-P-07_AgentReadToolsIssueTrace.md
 - npm run check:ts
 - npm run test
 - npm run check:rust
@@ -108,3 +108,4 @@ Agent 面板可以对当前 Workspace 执行只读文件读取、目录列出和
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
 | 2026-05-22 | v1.0 | 初始版本，记录 Agent 只读工具 Scope Lock |
+| 2026-05-22 | v1.1 | 文档状态由 R 更正为 A（符合 ADU.md §6.3 Issue Trace 状态规则） |

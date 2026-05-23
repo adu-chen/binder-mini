@@ -1,6 +1,6 @@
 ---
 文档编号：   CORE-X-P-03
-文档状态：   R
+文档状态：   A
 负责模块：   CORE
 文档职责：   Phase2范围锁定
 上游约束：   ADP.md、SYS-C-T-01、CORE-X-P-02
@@ -69,7 +69,7 @@ allowed_files:
 - `src-tauri/icons/icon.png` # Tauri 编译所需占位图标
 - `src-tauri/src/main.rs` # Tauri 入口
 - `src-tauri/src/lib.rs` # Tauri 命令骨架
-- `docs/30_plans/R-CORE-X-P-03_Phase2工程骨架IssueTrace.md` # 本 Issue Trace
+- `docs/30_plans/A-CORE-X-P-03_Phase2工程骨架IssueTrace.md` # 本 Issue Trace
 - `docs/00_core/A-CORE-C-R-01_ADUS.md` # 自动生成索引
 
 forbidden_files:
@@ -122,7 +122,7 @@ scope_reason: 用户要求继续下一步开发，Phase 2 计划已定义工程�
 - src-tauri/icons/icon.png
 - src-tauri/src/main.rs
 - src-tauri/src/lib.rs
-- docs/30_plans/R-CORE-X-P-03_Phase2工程骨架IssueTrace.md
+- docs/30_plans/A-CORE-X-P-03_Phase2工程骨架IssueTrace.md
 - docs/00_core/A-CORE-C-R-01_ADUS.md
 
 ## Forbidden Files
@@ -139,7 +139,7 @@ scope_reason: 用户要求继续下一步开发，Phase 2 计划已定义工程�
 ## Validation Commands
 
 - npm run governance:generate
-- npm run governance:audit -- --issue docs/30_plans/R-CORE-X-P-03_Phase2工程骨架IssueTrace.md
+- npm run governance:audit -- --issue docs/30_plans/A-CORE-X-P-03_Phase2工程骨架IssueTrace.md
 - npm run check:ts
 - npm run test
 
@@ -148,3 +148,4 @@ scope_reason: 用户要求继续下一步开发，Phase 2 计划已定义工程�
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
 | 2026-05-22 | v1.0 | 初始版本，记录 Phase 2 工程骨架 Scope Lock |
+| 2026-05-22 | v1.1 | 文档状态由 R 更正为 A（符合 ADU.md §6.3 Issue Trace 状态规则） |

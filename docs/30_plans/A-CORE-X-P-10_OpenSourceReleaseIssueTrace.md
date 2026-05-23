@@ -1,6 +1,6 @@
 ---
 文档编号：   CORE-X-P-10
-文档状态：   R
+文档状态：   A
 负责模块：   CORE
 文档职责：   开源发布准备范围
 上游约束：   ADP.md、CORE-X-P-02
@@ -40,12 +40,12 @@ task_type: CODE_CHANGE
 
 allowed_files:
 
-- `docs/30_plans/R-CORE-X-P-10_OpenSourceReleaseIssueTrace.md` # 本 Issue Trace
+- `docs/30_plans/A-CORE-X-P-10_OpenSourceReleaseIssueTrace.md` # 本 Issue Trace
 - `README.md` # 开源项目说明
 - `LICENSE` # 开源许可
 - `CONTRIBUTING.md` # 贡献说明
 - `CHANGELOG.md` # 版本说明
-- `docs/30_plans/R-CORE-X-P-11_ReleaseChecklist.md` # 发布部署检查
+- `docs/30_plans/A-CORE-X-P-11_ReleaseChecklist.md` # 发布部署检查
 - `.github/` # GitHub Actions 配置目录
 - `.github/workflows/ci.yml` # GitHub Actions 基础检查
 - `package.json` # 开源元数据
@@ -68,12 +68,12 @@ scope_reason: Phase 6 当前步骤为开源发布准备，不修改运行时代�
 
 ## Allowed Files
 
-- docs/30_plans/R-CORE-X-P-10_OpenSourceReleaseIssueTrace.md
+- docs/30_plans/A-CORE-X-P-10_OpenSourceReleaseIssueTrace.md
 - README.md
 - LICENSE
 - CONTRIBUTING.md
 - CHANGELOG.md
-- docs/30_plans/R-CORE-X-P-11_ReleaseChecklist.md
+- docs/30_plans/A-CORE-X-P-11_ReleaseChecklist.md
 - .github/
 - .github/workflows/ci.yml
 - package.json
@@ -97,7 +97,7 @@ scope_reason: Phase 6 当前步骤为开源发布准备，不修改运行时代�
 ## Validation Commands
 
 - npm run governance:generate
-- npm run governance:audit -- --issue docs/30_plans/R-CORE-X-P-10_OpenSourceReleaseIssueTrace.md
+- npm run governance:audit -- --issue docs/30_plans/A-CORE-X-P-10_OpenSourceReleaseIssueTrace.md
 - npm run check:ts
 - npm run test
 - npm run check:rust
@@ -108,3 +108,4 @@ scope_reason: Phase 6 当前步骤为开源发布准备，不修改运行时代�
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
 | 2026-05-22 | v1.0 | 初始版本，记录开源发布准备 Scope Lock |
+| 2026-05-22 | v1.1 | 文档状态由 R 更正为 A（符合 ADU.md §6.3 Issue Trace 状态规则） |

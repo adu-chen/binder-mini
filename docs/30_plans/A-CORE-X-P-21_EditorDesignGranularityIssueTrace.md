@@ -1,6 +1,6 @@
 ---
 文档编号：   CORE-X-P-21
-文档状态：   R
+文档状态：   A
 负责模块：   CORE,ED,SYS
 文档职责：   Editor 颗粒度补齐 Issue Trace
 上游约束：   CORE-C-P-01、CORE-X-P-12、binder-core/A-ED-M-D-01、binder-core/A-ED-M-T-01
@@ -19,7 +19,7 @@
 
 ## Allowed Files
 
-- docs/30_plans/R-CORE-X-P-21_EditorDesignGranularityIssueTrace.md
+- docs/30_plans/A-CORE-X-P-21_EditorDesignGranularityIssueTrace.md
 - docs/10_requirements/A-ED-M-D-01_Editor功能主控.md
 - docs/20_design/R-ED-M-T-01_Editor技术架构.md
 - docs/20_design/R-SYS-C-T-02_需求规则映射矩阵.md
@@ -54,10 +54,11 @@
 ## Validation Commands
 
 - npm run governance:generate
-- npm run governance:audit -- --issue docs/30_plans/R-CORE-X-P-21_EditorDesignGranularityIssueTrace.md
+- npm run governance:audit -- --issue docs/30_plans/A-CORE-X-P-21_EditorDesignGranularityIssueTrace.md
 
 ## 变更记录
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
 | 2026-05-22 | v1.0 | 初始版本，锁定 Phase 9-A Editor 设计颗粒度补齐范围 |
+| 2026-05-22 | v1.1 | 文档状态由 R 更正为 A（符合 ADU.md §6.3 Issue Trace 状态规则） |

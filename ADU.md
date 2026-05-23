@@ -140,7 +140,7 @@ ADUS.md 中已有的规则和链路，用于后续治理时的重复性校验，
    TERM 为可选，不是每份文档都需要。
 
 5. 运行脚本生成索引：
-   `node scripts/generate_adus.mjs`
+   `npm run governance:generate`
 
 **步骤三：确认 governance.config.json 配置**
 
@@ -247,6 +247,8 @@ boundary 字段只描述代码块实际做了什么，不评价是否正确。
 时机：实现开始前，设计和规划期间。
 目标：定义系统应该做什么，建立规则、约束、架构决策。
 信息权威：设计文档和规则注册表。
+项目 APC 可以在阶段一内部进一步定义需求、设计、计划等子阶段门禁。
+ADU 不规定项目必须采用何种文档子阶段。
 AI 角色：生成规则标注块、执行一致性检查、自动组合映射ID。
          规则由脚本自动登记（registered）。
 产出：
@@ -279,7 +281,7 @@ AI 角色：生成 @GOV 标注、执行 triage 分类、
   所有 rules:[] 块已有 triage 分类
   无未解决的 NEEDS_HUMAN_DECISION 条目
   无阻断模块治理完成的 RULE_MISSING 条目
-  扫描脚本无 P0/P1 违规
+  audit 无 CHAIN_ENTRY_UNANNOTATED error、BLOCK_UNANNOTATED error 或其他 error 级违规
 
 ### 1.3 阶段冲突解决规则
 
@@ -362,9 +364,9 @@ ADU.md、ADP.md、CLAUDE.md 为根级治理文档，不使用文档头，引用�
 格式：[状态前缀]-[文档编号]_[简短名称].md
 
 文档状态三种：
-  A（Active）    生效，当前权威版本，约束实现
-  R（Reference） 参考，包含草稿和被取代的文档，不具权威性
-  X（eXpired）   失效，已废弃，不再参考
+  A（Active）    约束实现，无论是否仍在活跃修改中
+  R（Reference） 不约束实现，仅供参考
+  X（eXpired）   已废弃，不再参考
 
 示例：A-DE-M-T-01_差异生命周期设计.md
 
@@ -398,6 +400,24 @@ ADU.md、ADP.md、CLAUDE.md 为根级治理文档，不使用文档头，引用�
   AI 输出需要审查的规则清单
   无冲突：AI 直接执行规则迁移或标记 superseded
   有冲突：AI 输出冲突报告，等待人类裁决后继续
+
+### 2.6 APC 项目覆盖机制
+
+ADU 定义通用治理最低结构和标注格式。
+APC 定义项目级治理策略、阶段门禁、文档完整性标准和实现约束。
+
+APC 可以收紧 ADU 标准，但不能放宽 ADU 的通用死线。
+
+以下内容由 APC 决定：
+  是否启用需求、设计、计划子阶段门禁
+  是否要求每个功能提供流程图或等价流程表
+  是否强制特定功能使用状态机
+  是否声明项目级 SSOT
+  是否要求代码规则真实性语义验证
+  阶段晋级是否必须人类确认
+
+APC 若启用上述约束，ADP 在运行时按 APC 执行阶段门禁；
+ADU 只提供可复用的标注结构和静态引用标准。
 
 ---
 
@@ -639,7 +659,129 @@ term_id 规则：
 |------|------|---------|
 | TERM_UNREGISTERED | 硬错误 | @GOV 的 term_ref 指向不存在的 TERM ID |
 | TERM_DUPLICATE | 硬错误 | chains 有交集的两个 TERM，zh 或 en 相同但 term_id 不同 |
-| TERM_ORPHAN | warning | TERM 已注册但无任何 @GOV 的 term_ref 引用 |
+| TERM_ORPHAN | warning | TERM 已注册但无任何 @GOV 的 term_ref 引用（豁免：term_ref 是可选字段，历史代码和未标注块不纳入统计；仅当项目已全量完成 @GOV 标注时此 warning 有意义） |
+
+**REQ 标注块（需求层规则）：**
+
+REQ 用于表达需求层规则和需求来源，不是代码实现规则来源。
+代码 @GOV 不得直接引用 REQ。
+REQ 必须通过 REQ_MAP 或项目 APC 声明的等价映射关系连接到 RULE / CHAIN / CONSTRAINT 后，
+才能进入代码治理链。
+
+```
+<!-- REQ
+req_id: REQ-[MODULE]-[SEQ]
+title: [需求标题]
+owner_module: [MODULE]
+status: active | candidate | deferred | blocked | superseded
+summary: [一句话需求意图]
+-->
+```
+
+REQ 必填字段不超过五个：
+  req_id
+  title
+  owner_module
+  status
+  summary
+
+REQ 可选字段：
+  source_doc
+  priority
+  acceptance
+  open_issues
+  related_terms
+  notes
+
+req_id 规则：
+  格式：REQ-[MODULE]-[三位序号]
+  MODULE 使用已注册模块编码
+  序号三位零填充，从 001 开始
+  一旦分配不可复用
+  废弃需求保留原 req_id，status 改为 superseded
+
+REQ 与 ADUS 协同：
+  generate_adus 可从 `<!-- REQ -->` 标注块生成需求注册表。
+  需求注册表记录 req_id、owner_module、status 和 source_doc。
+  REQ 注册表只提供需求追踪，不直接参与代码 @GOV rules 校验。
+
+**REQ_MAP 标注块（需求到技术规则映射）：**
+
+REQ_MAP 用于声明需求到技术规则的追踪关系。
+技术实现规则来源仍然是 RULE / CHAIN / CONSTRAINT，不是 REQ。
+
+```
+<!-- REQ_MAP
+req_id: REQ-[MODULE]-[SEQ]
+target_type: RULE | CHAIN | CONSTRAINT
+target_id: [BR-* | CHAIN-ID | X-*]
+status: mapped | candidate | deferred | blocked | superseded
+-->
+```
+
+REQ_MAP 必填字段不超过五个：
+  req_id
+  target_type
+  target_id
+  status
+
+REQ_MAP 可选字段：
+  reason
+  source_doc
+  notes
+
+status 语义：
+  mapped：已映射到正式技术规则
+  candidate：候选映射，不得驱动运行时代码
+  deferred：显式延期
+  blocked：映射受阻
+  superseded：已被新映射替代
+
+REQ_MAP 与 ADUS 协同：
+  generate_adus 可从 `<!-- REQ_MAP -->` 标注块生成需求映射表。
+  audit 可检查 target_id 是否存在于已注册 RULE / CHAIN / CONSTRAINT。
+  候选映射不得被运行时代码 @GOV 引用。
+
+**STATE_MACHINE 标注块（可选状态机索引）：**
+
+ADU 不强制项目必须使用状态机。
+当 APC、设计文档或规则声明某功能受状态机约束时，
+STATE_MACHINE 标注块可作为 ADUS 状态机索引来源。
+代码是否必须承接状态机，由 APC 和具体技术设计文档决定。
+
+```
+<!-- STATE_MACHINE
+machine_id: SM-[MODULE]-[SEQ]
+owner_module: [MODULE]
+status: active | candidate | deferred | superseded
+summary: [一句话说明控制范围]
+source_type: design | reference | migration
+-->
+```
+
+STATE_MACHINE 必填字段不超过五个：
+  machine_id
+  owner_module
+  status
+  summary
+  source_type
+
+STATE_MACHINE 可选字段：
+  chain
+  rules
+  initial_state
+  terminal_states
+  context
+  events
+  states
+  transition_table
+  test_matrix
+  notes
+
+STATE_MACHINE 与 ADUS 协同：
+  generate_adus 可从 `<!-- STATE_MACHINE -->` 标注块生成状态机注册表。
+  @GOV 可通过可选字段引用 machine_id。
+  若 APC 或技术设计文档未声明状态机为强约束，缺少 STATE_MACHINE 不应阻断审计。
 
 ### 3.2.1 链路创建流程
 
@@ -807,9 +949,11 @@ UTIL块例外：codes只有代码块ID，无规则ID前缀。
   一旦分配不可复用
   废弃块保留原codes，在triage报告中标记
   代码块ID是稳定坐标，不因规则变化而重命名
-  规则ID部分必须已在规则注册表中登记（registry_status=registered）
-  注：codes 字段规则ID只允许引用 registered 状态的规则；
-      rules 字段允许引用 generated 或 registered 状态的规则。
+  规则ID部分必须处于 generated 或 registered 状态
+  注：codes 和 rules 字段均允许引用 generated 或 registered 状态的规则。
+      registry_status=superseded 的规则不得出现在 codes 或 rules 字段中。
+      若引用的规则仍为 generated 状态，应在标注完成后尽快运行
+      `npm run governance:generate` 将其推进到 registered。
 
 **type 字段**
 
@@ -938,7 +1082,7 @@ term_ref: TERM-[链路缩写]-[三位序号]
        GUARD 类型单独从 001 顺序编号，两者互不影响。
 
 映射ID生成时机：
-  规则ID来自规则注册表中已登记的规则（registry_status=registered）
+  规则ID来自 generated 或 registered 状态的规则
   代码块ID在阶段二代码实现时生成
   两者由AI自动组合形成映射ID，写入 codes 字段
 
@@ -947,6 +1091,16 @@ term_ref: TERM-[链路缩写]-[三位序号]
 **核心原则：**
   每条规则有且只有一个主责块（primary owner）。
   主责块是直接实现或强制执行该规则核心约束的块。
+
+**主责块判定标准（多个块都涉及同一规则时）：**
+  取调用链中最内层、最直接执行约束的块，而非上层协调者。
+  判断顺序：
+    1. GUARD 块直接定义判断条件 → 该 GUARD 是主责块
+    2. EFFECT 块直接执行副作用约束 → 该 EFFECT 是主责块
+    3. DATA 块直接定义字段存在性或语义 → 该 DATA 是主责块
+    4. 若以上均无，RB 块作为最近协调者 → 该 RB 是主责块
+  上层 RB 调用已有主责块时，不得再次声明自己是同一规则的主责块。
+  无法唯一确定时，输出 MODULE_AMBIGUOUS 等待人类裁决。
 
 同一条规则可以出现在非主责块中，当该块是：
   规则输出的消费者（consumer）
@@ -1012,6 +1166,16 @@ UTIL：   0 条（永远）
 判断模糊时：
   检查链路注册表：若存在对应的 CHAIN，按情况一处理。
   若无对应 CHAIN，按情况二处理。
+
+**链路入口强制标注规则（CHAIN_ENTRY_UNANNOTATED）：**
+
+ADUS 链路注册表中每条 CHAIN 的入口函数，必须有 `@GOV` 且 `chain=` 字段引用该链路 ID。
+
+audit 脚本交叉比对 ADUS 链路条目与代码 @GOV 标注：
+  若链路入口函数存在于代码中但无 `@GOV`，报 `CHAIN_ENTRY_UNANNOTATED` error。
+  若链路入口函数存在但 @GOV 中无 `chain=` 引用该链路，报 `CHAIN_ENTRY_UNANNOTATED` warning。
+
+豁免：链路注册表中标注为 `status: planned` 的链路不纳入检测。
 
 ### 4.6 boundary 字段规范
 
@@ -1096,6 +1260,13 @@ BOUNDARY_ABSTRACT 说明：
   audit 脚本检测 boundary 中 `in=` 或 `out=` 后紧跟纯抽象词，发现则报 BOUNDARY_ABSTRACT。
   正确示例：`in=ValidatedPatchRange | out=DiffCardState`
   错误示例：`in=data | out=result`（触发 BOUNDARY_ABSTRACT）
+
+DELEGATE_ABSTRACT 说明：
+  `delegate=` 必须是当前块实际调用的直接下游标识符（函数名、服务名、状态机实例名）。
+  不得填写架构层描述词（如状态机类型名、模块名、概念名）。
+  audit 脚本检测 delegate= 值是否为已知业务标识符，无法验证时报 DELEGATE_ABSTRACT warning。
+  正确示例：`delegate=agentService.sendMessage | delegate=editorMachine`（实例引用）
+  错误示例：`delegate=四个状态机`、`delegate=state machines`（触发 DELEGATE_ABSTRACT）
 
 禁词匹配规则：按完整独立词匹配，不匹配子串。
 `ValidatedRange`、`invalidated` 是技术标识符，不受限制。
@@ -1218,6 +1389,19 @@ BOUNDARY_ABSTRACT 说明：
 `rules: []` 允许存在。
 无法解释的 `rules: []` 不允许存在。
 
+**audit 两种必须执行的扫描模式：**
+
+正空间扫描（declaration-driven）：
+  对已有 @GOV 块逐一验证合规性（字段格式、boundary 规范、rules 引用有效性等）。
+
+负空间扫描（coverage-driven）：
+  从代码出发，扫描导出符号（exported function / exported component）和 ADUS 链路注册表中登记的入口函数。
+  对在扫描范围内但既无 @GOV 又无 triage 记录的代码块，报 `BLOCK_UNANNOTATED` warning。
+  对 ADUS 链路入口函数缺失 @GOV 或 @GOV 中无 `chain=` 引用的，报 `CHAIN_ENTRY_UNANNOTATED` error/warning（规则见 §4.5）。
+
+两种模式都是 `governance:audit` 的必须执行项，不是可选项。
+仅执行正空间扫描的 audit 不满足本规范。
+
 每个 `rules: []` 块必须在 triage 报告中有分类记录。
 分类信息不写入 @GOV 代码头。
 
@@ -1281,6 +1465,23 @@ BOUNDARY_ABSTRACT 说明：
     输出提示：等待人类裁决
   不得跨两个治理周期持续存在。
 
+**BLOCK_UNANNOTATED（未标注代码块）**
+  适用：函数或组件在以下任一检测范围内，但既无 @GOV 又无 triage 记录：
+    - 导出函数（export function / export const）
+    - 导出组件（export default / export const [大写开头]）
+    - ADUS 链路注册表中出现的函数名
+
+  豁免（以下情况不纳入检测）：
+    - 纯类型声明（interface / type / enum）
+    - 测试文件内函数
+    - 只做参数透传的工厂函数（判断标准：函数体只有一条 return，且无条件分支）
+
+  AI 处理：
+    对检测范围内的未标注块，在 triage 报告中逐一记录
+    同时判断其应归属的分类（VALID_EMPTY / CALLER_OWNS_RULE / RULE_MISSING 等）
+    不得将「暂时找不到对应规则」直接记录为 BLOCK_UNANNOTATED，须进一步分类
+  audit 脚本对在范围内但既无 @GOV 又无 triage 记录的代码块，报 BLOCK_UNANNOTATED warning。
+
 ### 5.3 triage 报告格式
 
 triage 报告是独立文件：`[模块]_triage.md`
@@ -1311,7 +1512,6 @@ codes:          [代码块 codes 值]
 **/node_modules/**
 ```
 
-豁免列表在 CLAUDE.md 中声明。
 
 ### 5.5 日志代码处理
 
@@ -1360,6 +1560,20 @@ codes:          [代码块 codes 值]
 
 测试辅助代码无需治理映射。
 
+**链路集成测试声明规范：**
+
+ADUS 链路注册表中每条链路必须有 `integration_test` 字段，不允许空值静默通过 audit。
+
+合法值：
+  `[测试文件路径]::[测试名称]`   — 已有集成测试，路径可验证
+  `deferred: phase-N`             — 当前阶段有意推迟，N 为预计阶段编号
+
+audit 检测规则：
+  `integration_test` 字段缺失或为空 → 报 `CHAIN_INTEGRATION_TEST_MISSING` warning
+  `deferred` 值存在 → 通过 audit，但在 audit 报告中列出所有 deferred 条目供人类确认优先级
+
+`deferred` 不是永久豁免，只是显式推迟声明；进入对应阶段时必须补充实际测试并移除 `deferred` 标记。
+
 ### 5.7 AI 语义审计
 
 `governance:audit` 脚本输出 `semantic_review_candidates` 列表，包含所有有规则引用且 boundary 非空的 @GOV 块。
@@ -1391,6 +1605,13 @@ codes:          [代码块 codes 值]
 ```
 
 `confidence: low` 时只输出报告，不输出判断结论，直接标记 `recommended_action: human_review`。
+
+**语义审计触发点：**
+
+Issue Trace 阶段：输出 `semantic_review_candidates` 候选列表，供后续消费。
+VALIDATING 阶段（ADP）：若本次 CODE_CHANGE 涉及有 `semantic_review_candidates` 标记的规则，必须执行 AI 语义比对，将发现写入 Task Runtime Report 的 `unresolved_items` 或 `stop_conditions`。
+  候选列表不得在 VALIDATING 阶段静默跳过。
+  无候选条目时可跳过此步骤。
 
 ### 5.8 新概念候选暴露（new_domain_concept_candidate）
 
@@ -1499,7 +1720,14 @@ AI 必须按顺序输出全部十一项，不得跳过。
     - 验证哪些链路日志序列
     - 更新哪些 triage 报告条目
 
-### 6.3 文件范围控制
+### 6.3 Issue Trace 文档状态
+
+Issue Trace 文档状态为 A。
+
+Issue Trace 在执行期间约束任务范围（Scope Lock），任务完成后作为执行记录保留。
+任务完成不改变文档状态，不得将已完成的 Issue Trace 改为 R 或 X。
+
+### 6.4 文件范围控制
 
 Issue Trace 完成后，必须产出文件范围结论，作为 ADP Scope Lock 的输入：
 
@@ -1534,3 +1762,9 @@ Issue Trace 完成后，必须产出文件范围结论，作为 ADP Scope Lock �
 | 2026-05-21 | v1.10 | 前言/名词定义/§2.1 L0：将治理控制文档从四份补全为五份，增加 APC；明确 APC 和 ADUS 为项目级，路径由 governance.config.json 声明 |
 | 2026-05-21 | v1.11 | §3.2 新增 TERM 标注块格式、创建流程、三类 audit 检测类型；§4.2 新增 term_ref 可选字段；§4.6 新增 BOUNDARY_ABSTRACT 死线规则；§5.7 新增 AI 语义审计流程和输出格式；§5.8 新增 new_domain_concept_candidate 说明 |
 | 2026-05-21 | v1.12 | §0.2 接入前提补充 TERM 可选标注块说明；步骤二补充 TERM 注册步骤（步骤4，原步骤4→5）；§4.6 BOUNDARY_ABSTRACT 词汇表补充 param / info |
+| 2026-05-22 | v1.13 | §2.3 A 定义去除「当前」时间性限定，R 定义去除「包含草稿」；新增 §6.3 Issue Trace 文档状态规则（原 §6.3 顺延为 §6.4） |
+| 2026-05-22 | v1.14 | §5.4 删除悬空句「豁免列表在 CLAUDE.md 中声明」；§0.2 脚本调用改为 `npm run governance:generate`；§3.2 TERM_ORPHAN 新增豁免说明（历史代码/未标注块不纳入统计）；§4.2 codes 字段允许 generated 状态；§4.4 映射 ID 生成时机说明同步；§4.5 新增 primary owner 四步判定层级 |
+| 2026-05-22 | v1.15 | §4.6 新增 DELEGATE_ABSTRACT 规则（delegate= 必须是实际下游标识符，禁止架构描述词）；§4.5 新增链路入口强制标注规则 CHAIN_ENTRY_UNANNOTATED（ADUS 链路入口函数必须有 @GOV chain= 引用）；§5.2 新增第八种 triage 分类 BLOCK_UNANNOTATED（检测范围、豁免条件和 audit 输出规则） |
+| 2026-05-22 | v1.16 | §5.1 新增 audit 正空间/负空间双扫描模式定义（两者均为必须执行项）；§5.7 补充语义审计触发点（VALIDATING 阶段必须消费 semantic_review_candidates，不得静默跳过）；§5.6 新增链路集成测试声明规范（integration_test 字段必填，deferred 为合法推迟声明，缺失报 CHAIN_INTEGRATION_TEST_MISSING） |
+| 2026-05-23 | v1.17 | §1.2 阶段二完成标准：「扫描脚本无 P0/P1 违规」改为「audit 无 CHAIN_ENTRY_UNANNOTATED error 或其他 error 级违规」（P0/P1 audit 分级未在 ADU 定义） |
+| 2026-05-22 | v1.17 | §1.2 补充 APC 可定义阶段一子阶段门禁；新增 §2.6 APC 项目覆盖机制；§3.2 新增 REQ、REQ_MAP 和可选 STATE_MACHINE 标注块及 ADUS 协同说明 |

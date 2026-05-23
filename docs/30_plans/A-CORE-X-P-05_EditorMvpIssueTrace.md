@@ -1,6 +1,6 @@
 ---
 文档编号：   CORE-X-P-05
-文档状态：   R
+文档状态：   A
 负责模块：   ED
 文档职责：   EditorMVP范围
 上游约束：   ADP.md、SYS-C-T-01、CORE-X-P-02
@@ -45,7 +45,7 @@ task_type: CODE_CHANGE
 
 allowed_files:
 
-- `docs/30_plans/R-CORE-X-P-05_EditorMvpIssueTrace.md` # 本 Issue Trace
+- `docs/30_plans/A-CORE-X-P-05_EditorMvpIssueTrace.md` # 本 Issue Trace
 - `src/types/editor.ts` # Editor 数据结构扩展
 - `src/services/editorService.ts` # Editor 前端服务边界
 - `src/App.tsx` # Editor UI 接入
@@ -69,7 +69,7 @@ scope_reason: Phase 3 当前剩余步骤为打开文件、区分可编辑/只读
 
 ## Allowed Files
 
-- docs/30_plans/R-CORE-X-P-05_EditorMvpIssueTrace.md
+- docs/30_plans/A-CORE-X-P-05_EditorMvpIssueTrace.md
 - src/types/editor.ts
 - src/services/editorService.ts
 - src/App.tsx
@@ -94,7 +94,7 @@ Editor MVP 完成后，用户可以点击 Workspace 文件列表中的文件打�
 ## Validation Commands
 
 - npm run governance:generate
-- npm run governance:audit -- --issue docs/30_plans/R-CORE-X-P-05_EditorMvpIssueTrace.md
+- npm run governance:audit -- --issue docs/30_plans/A-CORE-X-P-05_EditorMvpIssueTrace.md
 - npm run check:ts
 - npm run test
 - npm run check:rust
@@ -105,3 +105,4 @@ Editor MVP 完成后，用户可以点击 Workspace 文件列表中的文件打�
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
 | 2026-05-22 | v1.0 | 初始版本，记录 Editor MVP Scope Lock |
+| 2026-05-22 | v1.1 | 文档状态由 R 更正为 A（符合 ADU.md §6.3 Issue Trace 状态规则） |

@@ -1,6 +1,6 @@
 ---
 文档编号：   CORE-X-P-23
-文档状态：   R
+文档状态：   A
 负责模块：   CORE,ED,SYS
 文档职责：   Editor dirty 保护与状态栏 Issue Trace
 上游约束：   CORE-C-P-01、CORE-X-P-12、ED-M-D-01、ED-M-T-01、SYS-C-T-01、SYS-C-T-02
@@ -19,7 +19,7 @@
 
 ## Allowed Files
 
-- docs/30_plans/R-CORE-X-P-23_EditorDirtyStatusIssueTrace.md
+- docs/30_plans/A-CORE-X-P-23_EditorDirtyStatusIssueTrace.md
 - docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md
 - docs/20_design/R-SYS-C-T-02_需求规则映射矩阵.md
 - docs/20_design/R-ED-M-T-01_Editor技术架构.md
@@ -51,7 +51,7 @@
 ## Validation Commands
 
 - npm run governance:generate
-- npm run governance:audit -- --issue docs/30_plans/R-CORE-X-P-23_EditorDirtyStatusIssueTrace.md
+- npm run governance:audit -- --issue docs/30_plans/A-CORE-X-P-23_EditorDirtyStatusIssueTrace.md
 - npm run check:ts
 - npm run test
 
@@ -68,3 +68,4 @@
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
 | 2026-05-22 | v1.0 | 初始版本，锁定 Editor dirty 保护与状态栏实现范围 |
+| 2026-05-22 | v1.1 | 文档状态由 R 更正为 A（符合 ADU.md §6.3 Issue Trace 状态规则） |

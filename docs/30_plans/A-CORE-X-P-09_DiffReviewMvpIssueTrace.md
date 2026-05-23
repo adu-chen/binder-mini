@@ -1,6 +1,6 @@
 ---
 文档编号：   CORE-X-P-09
-文档状态：   R
+文档状态：   A
 负责模块：   DE
 文档职责：   Diff Review MVP范围
 上游约束：   ADP.md、SYS-C-T-01、CORE-X-P-02
@@ -51,7 +51,7 @@ task_type: CODE_CHANGE
 
 allowed_files:
 
-- `docs/30_plans/R-CORE-X-P-09_DiffReviewMvpIssueTrace.md` # 本 Issue Trace
+- `docs/30_plans/A-CORE-X-P-09_DiffReviewMvpIssueTrace.md` # 本 Issue Trace
 - `src/types/diff.ts` # PendingDiff 请求结构扩展
 - `src/types/agent.ts` # edit_current_editor_document ToolName 扩展
 - `src/services/diffService.ts` # PendingDiff 生命周期服务
@@ -75,7 +75,7 @@ scope_reason: Phase 5 当前步骤由已注册 DE-CREATE-DIFF、DE-ACCEPT-DIFF�
 
 ## Allowed Files
 
-- docs/30_plans/R-CORE-X-P-09_DiffReviewMvpIssueTrace.md
+- docs/30_plans/A-CORE-X-P-09_DiffReviewMvpIssueTrace.md
 - src/types/diff.ts
 - src/types/agent.ts
 - src/services/diffService.ts
@@ -100,7 +100,7 @@ scope_reason: Phase 5 当前步骤由已注册 DE-CREATE-DIFF、DE-ACCEPT-DIFF�
 ## Validation Commands
 
 - npm run governance:generate
-- npm run governance:audit -- --issue docs/30_plans/R-CORE-X-P-09_DiffReviewMvpIssueTrace.md
+- npm run governance:audit -- --issue docs/30_plans/A-CORE-X-P-09_DiffReviewMvpIssueTrace.md
 - npm run check:ts
 - npm run test
 - npm run build
@@ -110,3 +110,4 @@ scope_reason: Phase 5 当前步骤由已注册 DE-CREATE-DIFF、DE-ACCEPT-DIFF�
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
 | 2026-05-22 | v1.0 | 初始版本，记录 Diff Review MVP Scope Lock |
+| 2026-05-22 | v1.1 | 文档状态由 R 更正为 A（符合 ADU.md §6.3 Issue Trace 状态规则） |

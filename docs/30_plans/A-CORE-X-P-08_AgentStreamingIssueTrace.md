@@ -1,6 +1,6 @@
 ---
 文档编号：   CORE-X-P-08
-文档状态：   R
+文档状态：   A
 负责模块：   AG
 文档职责：   Agent流式响应范围
 上游约束：   ADP.md、SYS-C-T-01、CORE-X-P-02
@@ -48,7 +48,7 @@ task_type: CODE_CHANGE
 
 allowed_files:
 
-- `docs/30_plans/R-CORE-X-P-08_AgentStreamingIssueTrace.md` # 本 Issue Trace
+- `docs/30_plans/A-CORE-X-P-08_AgentStreamingIssueTrace.md` # 本 Issue Trace
 - `src/types/agent.ts` # 流式消息类型扩展
 - `src/services/agentService.ts` # 流式响应服务
 - `src/App.tsx` # Agent 流式 UI 接入
@@ -71,7 +71,7 @@ scope_reason: Phase 4 当前步骤为 Agent 消息流式响应，可由现有 AG
 
 ## Allowed Files
 
-- docs/30_plans/R-CORE-X-P-08_AgentStreamingIssueTrace.md
+- docs/30_plans/A-CORE-X-P-08_AgentStreamingIssueTrace.md
 - src/types/agent.ts
 - src/services/agentService.ts
 - src/App.tsx
@@ -95,7 +95,7 @@ Agent 发送消息后，assistant 消息按 chunk 逐步显示；发送中不能
 ## Validation Commands
 
 - npm run governance:generate
-- npm run governance:audit -- --issue docs/30_plans/R-CORE-X-P-08_AgentStreamingIssueTrace.md
+- npm run governance:audit -- --issue docs/30_plans/A-CORE-X-P-08_AgentStreamingIssueTrace.md
 - npm run check:ts
 - npm run test
 - npm run build
@@ -105,3 +105,4 @@ Agent 发送消息后，assistant 消息按 chunk 逐步显示；发送中不能
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
 | 2026-05-22 | v1.0 | 初始版本，记录 Agent 流式响应 Scope Lock |
+| 2026-05-22 | v1.1 | 文档状态由 R 更正为 A（符合 ADU.md §6.3 Issue Trace 状态规则） |

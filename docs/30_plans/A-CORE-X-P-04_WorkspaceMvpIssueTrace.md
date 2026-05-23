@@ -1,6 +1,6 @@
 ---
 文档编号：   CORE-X-P-04
-文档状态：   R
+文档状态：   A
 负责模块：   WS
 文档职责：   WorkspaceMVP范围
 上游约束：   ADP.md、SYS-C-T-01、CORE-X-P-02
@@ -44,7 +44,7 @@ task_type: CODE_CHANGE
 
 allowed_files:
 
-- `docs/30_plans/R-CORE-X-P-04_WorkspaceMvpIssueTrace.md` # 本 Issue Trace
+- `docs/30_plans/A-CORE-X-P-04_WorkspaceMvpIssueTrace.md` # 本 Issue Trace
 - `src/types/workspace.ts` # Workspace 数据结构扩展
 - `src/services/workspaceService.ts` # Workspace 前端服务边界
 - `src/App.tsx` # 最小 Workspace UI 接入
@@ -69,7 +69,7 @@ scope_reason: Phase 3 第一段只实现 Workspace 打开和文件树读取，�
 
 ## Allowed Files
 
-- docs/30_plans/R-CORE-X-P-04_WorkspaceMvpIssueTrace.md
+- docs/30_plans/A-CORE-X-P-04_WorkspaceMvpIssueTrace.md
 - src/types/workspace.ts
 - src/services/workspaceService.ts
 - src/App.tsx
@@ -95,7 +95,7 @@ Workspace MVP 完成后，前端可以通过 Tauri command 打开目录并展示
 ## Validation Commands
 
 - npm run governance:generate
-- npm run governance:audit -- --issue docs/30_plans/R-CORE-X-P-04_WorkspaceMvpIssueTrace.md
+- npm run governance:audit -- --issue docs/30_plans/A-CORE-X-P-04_WorkspaceMvpIssueTrace.md
 - npm run check:ts
 - npm run test
 - npm run check:rust
@@ -106,3 +106,4 @@ Workspace MVP 完成后，前端可以通过 Tauri command 打开目录并展示
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
 | 2026-05-22 | v1.0 | 初始版本，记录 Workspace MVP Scope Lock |
+| 2026-05-22 | v1.1 | 文档状态由 R 更正为 A（符合 ADU.md §6.3 Issue Trace 状态规则） |

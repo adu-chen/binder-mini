@@ -144,7 +144,12 @@ apc_path 为空：
        - 创建 APC 文件到确认路径，文档状态直接为 A
        - 运行 npm run governance:generate
 
-apc_path 已填写：
+apc_path 已填写，adus_path 为空：
+  → 提示人类：adus_path 未配置，无法读取 ADUS 索引
+    建议补充路径：[project_root]/docs/00_core/A-[编号]_ADUS.md
+  → 若 apc_path 已填写但 adus_path 为空，不进入 bootstrap，等待人类补充 adus_path 后继续
+
+apc_path 已填写，adus_path 已填写：
   → 读取 APC 文件，按正常开发流程继续
 ```
 
