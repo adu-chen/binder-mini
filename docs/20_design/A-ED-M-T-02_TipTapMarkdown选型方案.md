@@ -13,13 +13,13 @@
 
 ## 1. 目标
 
-为 `REQ-ED-006` 确认 Editor 从 textarea MVP 迁移到 TipTap/Markdown 的技术路线。
+为 `REQ-ED-006` 确认 Editor 从 textarea MVP 迁移到 TipTap 的技术路线。
 
 目标不是一次性完成运行时代码，而是确定下一步实现的规则来源：
 
 1. `.md` 文件使用 TipTap / ProseMirror 承载编辑体验。
 2. `.md` 保存时输出 Markdown 文本。
-3. `.txt` 文件暂时保持纯文本 textarea 路径，避免把 Markdown 转换风险带入 txt 主流程。
+3. `.txt` 文件与 `.md` 共用同一 TipTap 实例，采用纯文本序列化（无 Markdown 转换）。对齐 binder-core EditorArea.tsx。
 4. Markdown 转换失败不得覆盖磁盘内容。
 
 ## 2. 参考来源
@@ -55,21 +55,20 @@
 |------|------------|
 | 自研完整 Markdown parser/serializer | 范围过大，且容易引入语义漂移 |
 | 直接污染 Markdown 源文保存 BlockId | 会改变用户源文件，需等 BlockId 专项再决策 |
-| `.txt` 立即迁移到 TipTap | 当前收益有限，会扩大主流程回归面 |
 
 ## 4. 文件类型边界
 
-| 文件类型 | 下一步实现路径 | 保存路径 |
-|----------|----------------|----------|
-| `.md` | TipTap + Markdown storage | Markdown 文本 |
-| `.txt` | 继续 textarea 纯文本 | 原纯文本写回 |
+| 文件类型 | 实现路径 | 保存路径 |
+|----------|----------|----------|
+| `.md` | TipTap + Markdown storage（`tiptap-markdown`）| Markdown 文本 |
+| `.txt` | TipTap 纯文本序列化（共用同一 TipTap 实例，无 Markdown 转换）| 原纯文本写回 |
 | 其他文件 | readonly | 不保存 |
 
 约束：
 
 1. `.md` 转换失败时，Editor 必须保留 dirty 状态并展示错误。
 2. `.md` 转换失败不得调用保存写盘。
-3. `.txt` 主流程不得因 TipTap 引入回退。
+3. `.txt` 必须通过 TipTap 纯文本序列化路径维护编辑状态；不得退回 textarea 或其他独立 runtime。
 4. 其他格式不得被 TipTap 改造成可编辑格式。
 
 ## 5. Markdown 转换验收口径
@@ -105,7 +104,7 @@ TipTap/Markdown 选型只解决编辑器渲染和 Markdown 保存问题，不解
 ## 7. 后续实现顺序
 
 1. 依赖安装 Issue：安装 TipTap 和 Markdown 适配依赖。
-2. `.md` EditorArea 运行时 Issue：为 `.md` tab 使用 TipTap，`.txt` 保持 textarea。
+2. EditorArea 运行时 Issue：`.md` tab 使用 TipTap + Markdown storage；`.txt` tab 共用同一 TipTap 实例，纯文本序列化。
 3. Markdown 转换测试 Issue：补读写往返和失败保护测试。
 4. BlockId 策略 Issue：确认 workspace.db 映射表或其他方案。
 5. DiffDecoration 骨架 Issue：接入 ProseMirror Decoration。
@@ -132,3 +131,4 @@ Markdown 转换失败不得覆盖磁盘内容。
 |------|------|---------|
 | 2026-05-22 | v1.0 | 初始版本，确认 TipTap/Markdown 技术选型 |
 | 2026-05-23 | v1.1 | 文档状态 R→A；§8 候选规则 ED-CAND-DATA-001→ED-CAND-DATA-002（对齐 SYS-C-T-01/T-02 注册编号） |
+| 2026-05-24 | v1.2 | 同步 ED-M-T-01 v1.6 决策：§1/§3/§4/§7 将 `.txt` 路径从"textarea"更新为"与 .md 共用 TipTap 实例，纯文本序列化"；从"暂不采用"表格移除已采用的 `.txt` TipTap 条目；§4 约束 3 更新为不得退回 textarea |

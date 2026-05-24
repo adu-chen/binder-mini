@@ -43,7 +43,7 @@
 | REQ-ED-003 | 多标签编辑 | BR-ED-STATE-002 | ED-OPEN-FILE | 已覆盖多标签数据结构和 active tab 编辑保存 |
 | REQ-ED-004 | dirty 标记与关闭保护 | BR-ED-STATE-003、BR-WS-STATE-003 | ED-SAVE-FILE、WS-CLOSE | 已覆盖 dirty tab 关闭保护和 Workspace 切换阻断 |
 | REQ-ED-005 | 状态栏 | BR-ED-STATE-004 | ED-OPEN-FILE | 已覆盖 active tab 状态栏派生 |
-| REQ-ED-006 | TipTap/Markdown 编辑 | BR-ED-PERSIST-002 | ED-OPEN-FILE、ED-SAVE-FILE | 已覆盖 `.md` TipTap/Markdown 运行时与转换失败保存阻断 |
+| REQ-ED-006 | TipTap/Markdown 编辑 | BR-ED-PERSIST-002、BR-ED-PERSIST-003 | ED-OPEN-FILE、ED-SAVE-FILE | 已覆盖 `.md` TipTap/Markdown 运行时与转换失败保存阻断；`.txt` 共用 TipTap 纯文本序列化路径 |
 | REQ-ED-007 | BlockId 定位 | 待升级：ED-CAND-DATA-002 | ED-OPEN-FILE、DE-CREATE-DIFF | 前置：DE-M-T-01 Phase 13-A 数据结构完成后进入 |
 | REQ-ED-008 | DiffDecoration 绿增 | 待升级：ED-CAND-STATE-004 | ED-DIFF-RENDER、DE-CREATE-DIFF | 前置：BlockId 策略确认 + DE-M-T-01 anchor 协议完成后进入 |
 
@@ -118,6 +118,7 @@
 | 2026-05-24 | v3.2 | REQ-ED-008 名称"绿审态"改为"绿增"（术语统一） |
 | 2026-05-24 | v3.3 | §4 REQ-AG-010 状态改为"持久化为必须需求"（不可延后），添加 AG-CAND-PERSIST-001 追踪；§5 REQ-DE-001/002/004 补充已升级正式规则引用；REQ-DE-011 更名为"diff 叠加处理"并补充设计决策（BR-DE-STATE-012 子场景，非冲突错误）；新增 REQ-DE-012（继承流）；§6 候选规则追踪表增加状态列，标记 6 条已升级候选，新增 AG-CAND-PERSIST-001 |
 | 2026-05-24 | v3.4 | §4 REQ-AG-004 状态更新（originalText+newText 精确替换接口，AG-CAND-DATA-005 追踪）；§5 REQ-DE-001 状态更新（字符精确替换 + appliedRange）；§6 候选规则追踪表新增 AG-CAND-DATA-005（精确替换接口约束）|
+| 2026-05-24 | v3.5 | §5 REQ-ED-006 已注册规则补充 BR-ED-PERSIST-003，状态说明扩展至包含 `.txt` TipTap 纯文本序列化路径 |
 | 2026-05-22 | v2.2 | 将 REQ-ED-006 映射到 Editor Markdown 正式规则 |
 | 2026-05-22 | v2.1 | 标记 Editor TipTap/Markdown 技术选型已确认 |
 | 2026-05-22 | v2.0 | 将 Editor dirty 关闭保护和状态栏候选规则升级为正式规则映射 |

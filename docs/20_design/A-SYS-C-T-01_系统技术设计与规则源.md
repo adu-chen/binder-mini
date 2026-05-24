@@ -531,6 +531,15 @@ rule_id: BR-ED-PERSIST-002
 Editor Markdown 文件必须通过 TipTap/Markdown 运行时维护逻辑 Markdown 文本；转换失败时必须展示错误并阻断保存，不得覆盖磁盘内容。
 
 <!-- RULE
+rule_id: BR-ED-PERSIST-003
+主链路: ED-OPEN-FILE,ED-SAVE-FILE
+域: PERSIST
+需求映射: REQ-ED-006
+-->
+
+Editor `.txt` 文件必须与 `.md` 文件共用同一 TipTap 实例，采用纯文本序列化路径（无 Markdown 转换）；不得退回 textarea 或其他独立 runtime；保存时直接输出 TipTap textContent，不做格式转换。
+
+<!-- RULE
 rule_id: BR-AG-STATE-001
 主链路: AG-SEND-MESSAGE
 域: STATE
@@ -767,3 +776,4 @@ preapplied 状态只适用于已打开文件链路：diff 创建时立即在 ori
 | 2026-05-24 | v2.3 | §0 TERM-DE-004 补充 code_identifier（GreenAdditionOverlay/GreenAdditionDecoration）；新增 TERM-DE-005（baseRevision）、TERM-AG-005（callId）、TERM-ED-002（ActiveFile）；§6 注册 BR-DE-STATE-010/011/012（DiskState 写入边界、accept 不写盘、统一 expire）、BR-ED-STATE-005（DisplayState 只读派生）、BR-AG-SEC-001（API key 安全）、BR-AG-STATE-002（SSE 错误终止）、BR-AG-DATA-002（工具结果回流）、BR-DE-DATA-001（PendingDiff 可溯源字段）、BR-DE-STATE-004（accept 前校验）、BR-DE-STATE-005（preapplied 三态）共 10 条正式规则；§9 升级 AG-CAND-STATE-002/DATA-002/DATA-003 为正式规则，新增 AG-CAND-PERSIST-001；§10 升级 DE-CAND-DATA-001/STATE-004/STATE-005 为正式规则；§11 候选表增加状态列 |
 | 2026-05-24 | v2.4 | §9 新增 AG-CAND-STRUCT-001（edit_document_block blockId 来源与校验约束，Phase 13-B）|
 | 2026-05-24 | v2.5 | 精确编辑架构（D-01/D-02/D-10）：§0 新增 TERM-DE-006（originalText，精确原文主定位器）、TERM-DE-007（newText，替换内容片段）、TERM-DE-008（appliedRange，已应用 PM 位置范围）；§6 BR-DE-STATE-005 改为字符精确替换语义（非全文替换）；BR-DE-STATE-011 更新（LogicalState 含 newText 不变）；§9 移除 AG-CAND-STRUCT-001（edit_document_block 已移除），新增 AG-CAND-DATA-005（originalText+newText 精确替换接口约束） |
+| 2026-05-24 | v2.6 | §6 新增 BR-ED-PERSIST-003（`.txt` 文件必须共用 TipTap 纯文本序列化路径，不得退回 textarea）；对应 REQ-ED-006，收敛 ED-M-T-01 v1.6 的 .txt 路径决策为正式规则 |
