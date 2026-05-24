@@ -26,19 +26,25 @@
 ```typescript
 interface PendingDiff {
   id: string;
-  filePath: string;          // Workspace 相对路径
-  originalText: string;      // 生成 diff 时的文件内容快照
-  proposedText: string;      // AI 建议的完整内容
+  filePath: string;            // Workspace 相对路径
+  originalText: string;        // 待替换精确原文字符串（主定位器，IR-RANGE-005）
+  newText: string;             // 替换内容字符串（精确替换片段，非全文）
   status: PendingDiffStatus;
   summary: string;
-  sourceToolId: string;      // Phase 13-A：生成此 diff 的 ToolExecution.id（callId）
-  baseRevision: string;      // Phase 13-A：DiskState 内容 hash（Inherit 流程校验用，必填）
-  createdAt: number;         // Phase 13-A：Unix timestamp
+  sourceToolId: string;        // Phase 13-A：生成此 diff 的 ToolExecution.id（callId）
+  baseRevision: string;        // Phase 13-A：DiskState 内容 hash（Inherit 流程校验用，必填）
+  createdAt: number;           // Phase 13-A：Unix timestamp
   effectivePath: "open-file" | "closed-file"; // accept 路径语义路由
-                             // INHERIT_APPLIED 后从 "closed-file" 升级为 "open-file"
-  anchorRef?: DiffAnchorRef; // Phase 13-B：Editor 定位引用（可选）
+                               // INHERIT_APPLIED 后从 "closed-file" 升级为 "open-file"
+  anchor?: DiffAnchorRef;      // Phase 13-B：Editor BlockId 定位辅助（可选；originalText 为主定位器）
+  appliedRange?: {             // preapplied 后由 Editor Runtime 记录的 PM 绝对位置范围
+    from: number;
+    to: number;
+  };
 }
 ```
+
+（字段定义以 DE-M-T-01 §3.1 为权威源，本节为接口层声明。）
 
 ### 2.2 DiffStore 接口
 
@@ -55,10 +61,10 @@ DiffStore 是所有 PendingDiff 生命周期操作的唯一收口网关。各工
 
 | 方法 | 语义 | 输入 | 持久化 |
 |------|------|------|--------|
-| createDiff | 新建 PendingDiff；已打开文件：立即修改 LogicalState → preapplied；未打开文件：status=pending | AG 工具参数 + sourceToolId | 应写入 workspace.db |
-| acceptDiff（已打开文件）| preapplied → accepting → terminal(accepted)；只移除绿增效果；LogicalState 不变；DiskState 不写 | diffId | 更新 DB（终态） |
-| acceptDiff（未打开文件）| pending → accepting → terminal(accepted)；写入 DiskState（磁盘） | diffId | 写磁盘成功后更新 DB |
-| rejectDiff（已打开文件）| preapplied → rejecting → terminal(rejected)；LogicalState 回滚到 originalText | diffId | 应写入 DB |
+| createDiff | 新建 PendingDiff；已打开文件：Editor 在 originalText 位置精确替换为 newText → 记录 appliedRange → preapplied；未打开文件：status=pending | AG 工具参数 + sourceToolId | 应写入 workspace.db |
+| acceptDiff（已打开文件）| preapplied → accepting → terminal(accepted)；只移除 appliedRange 绿增效果；LogicalState 不变（已含 newText）；DiskState 不写 | diffId | 更新 DB（终态） |
+| acceptDiff（未打开文件）| pending → accepting → terminal(accepted)；写入 DiskState（磁盘），originalText → newText 精确替换 | diffId | 写磁盘成功后更新 DB |
+| rejectDiff（已打开文件）| preapplied → rejecting → terminal(rejected)；appliedRange 精确回滚（newText → originalText） | diffId | 应写入 DB |
 | rejectDiff（未打开文件）| pending → rejecting → terminal(rejected)；DiskState 不变 | diffId | 应写入 DB |
 | expireDiff | pending/preapplied → expired → terminal | diffId | 应写入 DB |
 | loadDiffsFromWorkspace | Workspace 打开时从 DB 恢复 pending diff | workspaceRoot | 只读 |
@@ -85,13 +91,14 @@ DiffStore 是所有 PendingDiff 生命周期操作的唯一收口网关。各工
 CREATE TABLE pending_diffs (
   id TEXT PRIMARY KEY,
   file_path TEXT NOT NULL,
-  original_text TEXT NOT NULL,
-  proposed_text TEXT NOT NULL,
+  original_text TEXT NOT NULL,   -- 待替换精确原文（主定位器，IR-RANGE-005）
+  new_text TEXT NOT NULL,        -- 替换内容（精确替换片段，非全文）
   status TEXT NOT NULL,
   summary TEXT NOT NULL,
   source_tool_id TEXT,
-  base_revision TEXT,
-  created_at INTEGER NOT NULL
+  base_revision TEXT NOT NULL,   -- DiskState 内容 hash
+  created_at INTEGER NOT NULL,
+  anchor_json TEXT               -- DiffAnchorRef 序列化（可选），JSON
 );
 
 CREATE TABLE terminal_diff_cards (
@@ -140,10 +147,10 @@ expireAllOnClose 在 Workspace 关闭时执行：
 
 ### 7.2 与 ED
 
-- createDiff（已打开文件）：DE 推送 proposedText 给 ED → ED 修改 LogicalState → diff → preapplied；ED 展示绿增效果
-- acceptDiff（已打开文件）：DE 通知 ED 移除绿增 Decoration；LogicalState 不变；不写磁盘
-- acceptDiff（未打开文件）：DE 读取磁盘 DiskState，校验 baseRevision 后写入 proposedText
-- preapplied → rejectDiff：diffMachine 向 editorMachine 发送 `ROLLBACK_LOGICAL_STATE { diffId, targetContent: originalText }` 事件；editorMachine 将对应文件 LogicalState 回写为 originalText（详见 DE-M-T-01 §4.4）
+- createDiff（已打开文件）：DE 向 ED 发出 originalText+newText+anchor；ED 定位 originalText → 精确替换为 newText → 记录 appliedRange → diff → preapplied；ED 在 appliedRange 展示绿增效果
+- acceptDiff（已打开文件）：DE 通知 ED 移除 appliedRange 绿增 Decoration；LogicalState 不变；不写磁盘
+- acceptDiff（未打开文件）：DE 读取磁盘 DiskState，校验 baseRevision 后在 DiskState 中精确替换 originalText → newText（不全文覆盖）
+- preapplied → rejectDiff：diffMachine 向 editorMachine 发送 `ROLLBACK_LOGICAL_STATE { diffId, appliedRange, originalText }` 事件；editorMachine 在 appliedRange 精确回滚（newText → originalText）（详见 DE-M-T-01 §4.4）
 - Workspace 打开时：ED 可查询 diffStore 当前文件的 preapplied diff 展示绿增效果（Phase 9-F）
 
 ### 7.3 与 WS
@@ -159,3 +166,4 @@ expireAllOnClose 在 Workspace 关闭时执行：
 | 2026-05-23 | v1.0 | 初始版本，定义 binder-mini DiffStore 接口协议和持久化策略（参考 binder-core DE-M-P-01 适配简化架构）|
 | 2026-05-24 | v1.1 | 三态模型重构：§3 acceptDiff 按两路径拆分（已打开：移除绿增不写磁盘；未打开：写 DiskState）；§4 约束 1 移除 mounted_pending；§5.2 恢复策略更新（preapplied 降级为 pending；去除 mounted_pending）；§6 不变量重写（新增条目 7：accept 不写 DiskState）；§7.2 DE→ED 协作更新（createDiff 即推送 proposedText；accept 移除绿增）|
 | 2026-05-24 | v1.2 | §2.1 PendingDiff 接口补充 effectivePath 字段（与 DE-M-T-01 §3.1 权威源对齐）；baseRevision 改为必填；§6 不变量 4/5 规则引用从候选（CAND）改为正式规则（BR-DE-STATE-004/005）；§7.2 reject 协议注释更新（ROLLBACK_LOGICAL_STATE 事件已确认，去除"待 Phase 13-B 确认"） |
+| 2026-05-24 | v1.3 | 精确编辑架构对齐（D-10）：§2.1 PendingDiff 字段更新（proposedText→newText 精确替换片段；originalText 语义改为主定位器；新增 appliedRange{from,to}；anchorRef→anchor 重命名，说明辅助定位关系）；§3 createDiff/acceptDiff/rejectDiff 操作语义重写（字符精确替换而非全文替换）；§5.1 DB schema 更新（proposed_text→new_text，新增 anchor_json，base_revision 改为必填）；§7.2 ED 协作描述更新（originalText+newText+appliedRange 传递链路，accept/reject 精确操作） |

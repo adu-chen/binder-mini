@@ -177,6 +177,33 @@ definition: 当前 editorSession 中处于 focus 状态的 tab 所对应的文�
 forbidden: 当前文件, active file, 当前打开文件
 -->
 
+<!-- TERM
+term_id: TERM-DE-006
+chains: DE-CREATE-DIFF,DE-ACCEPT-DIFF,DE-EXPIRE-DIFF,AG-TOOL-CALL
+zh: 精确原文
+en: originalText
+definition: 模型在内容编辑工具调用中提供的待替换精确原文字符串；是主定位器（IR-RANGE-005 原则），系统通过 ProseMirror 文本搜索在文档中定位匹配位置后执行字符精确替换；originalText 不匹配时 diff 进入 error 终态，不 fallback 为全量替换。
+forbidden: 原始文本, 原始内容, 文件快照, 全文内容
+-->
+
+<!-- TERM
+term_id: TERM-DE-007
+chains: DE-CREATE-DIFF,DE-ACCEPT-DIFF,DE-REJECT-DIFF,AG-TOOL-CALL
+zh: 替换内容
+en: newText
+definition: 模型在内容编辑工具调用中提供的替换内容字符串；与 originalText 配对使用，系统在定位 originalText 后将其精确替换为 newText；是字符级精确替换片段，不是全文内容。
+forbidden: 建议内容, 修改内容, proposedText, 新全文
+-->
+
+<!-- TERM
+term_id: TERM-DE-008
+chains: DE-CREATE-DIFF,ED-DIFF-RENDER
+zh: 已应用范围
+en: appliedRange
+definition: diff 字符精确替换执行成功后，由 Editor Runtime 记录的 ProseMirror 绝对位置范围 {from, to}，标识 newText 在文档中的当前位置；用于 DiffDecoration 绑定绿增 overlay 和 syncPendingDiffsWithDocument 的 originalText 一致性检测。
+forbidden: 位置范围, diff位置, 高亮范围
+-->
+
 ## 1. 模块注册
 
 <!-- MODULE
@@ -591,7 +618,7 @@ rule_id: BR-DE-STATE-011
 需求映射: REQ-DE-002
 -->
 
-Accept（已打开文件路径）不写 DiskState：接受操作仅移除编辑器绿增 overlay，LogicalState 保持 proposedText 不变，DiskState 不触碰，文件保持 dirty 状态；DiskState 只在用户后续 Cmd+S 时更新。
+Accept（已打开文件路径）不写 DiskState：接受操作仅移除编辑器绿增 overlay，LogicalState 保持不变（已含 newText，字符精确替换结果），DiskState 不触碰，文件保持 dirty 状态；DiskState 只在用户后续 Cmd+S 时更新。
 
 <!-- RULE
 rule_id: BR-DE-STATE-012
@@ -663,7 +690,7 @@ rule_id: BR-DE-STATE-005
 需求映射: REQ-DE-001
 -->
 
-preapplied 状态只适用于已打开文件链路：diff 创建时立即修改 LogicalState 为 proposedText（pending 为短暂过渡态，立即触发 LOGICAL_STATE_APPLIED）；未打开文件保持 pending 直到用户决策；Accept（已打开文件）只移除绿增，不写 DiskState。
+preapplied 状态只适用于已打开文件链路：diff 创建时立即在 originalText 位置精确替换为 newText（字符级精确替换，非全文替换；pending 为短暂过渡态，立即触发 LOGICAL_STATE_APPLIED）；未打开文件保持 pending 直到用户决策；Accept（已打开文件）只移除绿增，不写 DiskState。
 
 ## 7. 验收与测试入口
 
@@ -698,7 +725,7 @@ preapplied 状态只适用于已打开文件链路：diff 创建时立即修改 
 | AG-CAND-STATE-003 | REQ-AG-007 | AG-SEND-MESSAGE | Agent 只能向 Provider 暴露 allowedTools 中的工具，不得暴露全部已注册工具。 | 待升级（Phase 12）|
 | AG-CAND-DATA-004 | REQ-AG-006 | AG-TOOL-CALL | InputReference 只注入 Provider 请求上下文，不触发任何文件副作用。 | 待升级（Phase 12）|
 | AG-CAND-PERSIST-001 | REQ-AG-010 | AG-SEND-MESSAGE | 聊天消息必须在 WORKSPACE_CLOSED 时持久化到 workspace.db，WORKSPACE_OPENED 时读取恢复；不得在切换 Workspace 时直接清空内存 messages 而不落盘。 | 待升级（Phase 12）|
-| AG-CAND-STRUCT-001 | REQ-AG-TBD | AG-TOOL-CALL | edit_document_block 的 blockId 必须由 Editor Runtime 注入 L0 system prompt 并经 Rust 执行层校验；blockId 无效时返回结构化错误，不得 fallback 为全量替换。 | 待升级（Phase 13-B，BlockId 稳定性策略决策后）|
+| AG-CAND-DATA-005 | REQ-AG-004 | AG-TOOL-CALL | 内容编辑工具（edit_current_editor_document、update_file）必须使用 originalText（精确原文字符串）+ newText（替换内容）接口；系统通过 PM 文本搜索定位 originalText 后执行字符精确替换；不得使用全量 proposedText 替换整个文件内容；originalText 找不到时返回结构化错误，不 fallback 为全量替换。 | 待升级（Phase 9 重写时）|
 
 ## 10. Diff Review 候选规则（Phase 13，进入实现前升级为正式规则）
 
@@ -739,3 +766,4 @@ preapplied 状态只适用于已打开文件链路：diff 创建时立即修改 
 | 2026-05-24 | v2.2 | §0 新增 TERM 块：DiskState（TERM-DOC-001）、LogicalState（TERM-DOC-002）、DisplayState（TERM-DOC-003）、GreenAddition/绿增（TERM-DE-004，forbidden: 绿审/绿审态）；§10 DE-CAND-STATE-005 描述移除 mounted_pending，改为 preapplied 仅适用已打开文件链路 |
 | 2026-05-24 | v2.3 | §0 TERM-DE-004 补充 code_identifier（GreenAdditionOverlay/GreenAdditionDecoration）；新增 TERM-DE-005（baseRevision）、TERM-AG-005（callId）、TERM-ED-002（ActiveFile）；§6 注册 BR-DE-STATE-010/011/012（DiskState 写入边界、accept 不写盘、统一 expire）、BR-ED-STATE-005（DisplayState 只读派生）、BR-AG-SEC-001（API key 安全）、BR-AG-STATE-002（SSE 错误终止）、BR-AG-DATA-002（工具结果回流）、BR-DE-DATA-001（PendingDiff 可溯源字段）、BR-DE-STATE-004（accept 前校验）、BR-DE-STATE-005（preapplied 三态）共 10 条正式规则；§9 升级 AG-CAND-STATE-002/DATA-002/DATA-003 为正式规则，新增 AG-CAND-PERSIST-001；§10 升级 DE-CAND-DATA-001/STATE-004/STATE-005 为正式规则；§11 候选表增加状态列 |
 | 2026-05-24 | v2.4 | §9 新增 AG-CAND-STRUCT-001（edit_document_block blockId 来源与校验约束，Phase 13-B）|
+| 2026-05-24 | v2.5 | 精确编辑架构（D-01/D-02/D-10）：§0 新增 TERM-DE-006（originalText，精确原文主定位器）、TERM-DE-007（newText，替换内容片段）、TERM-DE-008（appliedRange，已应用 PM 位置范围）；§6 BR-DE-STATE-005 改为字符精确替换语义（非全文替换）；BR-DE-STATE-011 更新（LogicalState 含 newText 不变）；§9 移除 AG-CAND-STRUCT-001（edit_document_block 已移除），新增 AG-CAND-DATA-005（originalText+newText 精确替换接口约束） |

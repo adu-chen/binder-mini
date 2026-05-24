@@ -57,8 +57,8 @@ Phase 13 目标是将当前 PendingDiff MVP 升级到可支撑后续绿增展示
 interface PendingDiff {
   id: string;
   filePath: string;           // Workspace 相对路径
-  originalText: string;       // 生成 diff 时的文件内容快照
-  proposedText: string;       // AI 建议修改后的完整内容
+  originalText: string;       // 模型输出的待替换精确原文字符串（主定位器，IR-RANGE-005）
+  newText: string;            // 模型输出的替换内容字符串（不是全文，是精确替换片段）
   status: PendingDiffStatus;
   summary: string;            // 来自工具调用的人类可读描述
   // Phase 13-A 新增：
@@ -70,7 +70,11 @@ interface PendingDiff {
                               // "closed-file"：accept 写 DiskState（须先校验 baseRevision）
                               // Inherit 流程（INHERIT_APPLIED）将 effectivePath 从 "closed-file" 升级为 "open-file"
   // Phase 13-B 新增（状态扩展后使用）：
-  anchorRef?: DiffAnchorRef;  // 来自 Editor BlockId 的定位引用（可选）
+  anchor?: DiffAnchorRef;     // Editor BlockId 定位辅助（可选；originalText 为主定位器，anchor 为辅助）
+  appliedRange?: {            // preapplied 后由 Editor Runtime 记录的 PM 绝对位置范围
+    from: number;             // PM 位置（newText 插入起点）
+    to: number;               // PM 位置（newText 插入终点）
+  };
 }
 
 type PendingDiffStatus =
@@ -100,8 +104,12 @@ interface TerminalDiffCard {
 
 ```ts
 interface DiffAnchorRef {
-  blockId?: string;          // Editor BlockId（来自 ED-M-T-01）
-  lineRange?: [number, number]; // 降级定位：行号范围
+  startBlockId?: string;     // originalText 所在块的 BlockId（来自 ED BlockIdExtension）
+  endBlockId?: string;       // 跨块替换时的结束块 BlockId（单块替换时等于 startBlockId）
+  startOffset?: number;      // originalText 在 startBlockId 块 textContent 中的起始字符偏移（0-based，不含 Markdown 语法字符）
+  endOffset?: number;        // originalText 在 endBlockId 块 textContent 中的结束字符偏移
+  occurrenceIndex?: number;  // originalText 在文档中第几次出现（0-based，用于重复文本消歧）
+  paraIndex?: number;        // 段落序号（降级定位 hint；定位时允许 ±3 块容错半径）
 }
 ```
 
@@ -116,9 +124,9 @@ Diff Review 的所有操作基于以下三态模型：
 | **DisplayState** | 渲染层；读 LogicalState + 绿增等效果；无独立存储 | 派生自 LogicalState，不可直接写 |
 
 Diff 对 LogicalState 的操作：
-- **createDiff（已打开文件）**：LogicalState → proposedText；diff → preapplied
-- **acceptDiff（已打开文件）**：LogicalState 不变（已是 proposedText）；仅移除绿增效果；DiskState 不触碰
-- **rejectDiff（已打开文件）**：LogicalState → originalText（回滚）；绿增移除
+- **createDiff（已打开文件）**：LogicalState 中 originalText 位置精确替换为 newText（字符级精确，不替换全文）；diff → preapplied；记录 appliedRange
+- **acceptDiff（已打开文件）**：LogicalState 不变（已包含 newText）；仅移除绿增效果；DiskState 不触碰
+- **rejectDiff（已打开文件）**：LogicalState 回滚——将 appliedRange 位置的 newText 替换回 originalText；绿增移除
 - **Cmd+S 保存**：LogicalState → DiskState；dirty 清除
 
 ### 3.6 DiffStore（Phase 13 收口网关）
@@ -205,12 +213,12 @@ interface PendingDiff {
 
 reject 执行逻辑（LogicalState 回滚，DE→ED 事件协议）：
 
-回滚事件：diffMachine 向 editorMachine 发送 `ROLLBACK_LOGICAL_STATE` 事件，携带 `{ diffId: string, targetContent: string /* originalText */ }`；editorMachine 接收后将对应文件 LogicalState 回写为 targetContent。
+回滚事件：diffMachine 向 editorMachine 发送 `ROLLBACK_LOGICAL_STATE` 事件，携带 `{ diffId: string, appliedRange: {from, to}, originalText: string }`；editorMachine 接收后在 appliedRange 位置执行精确替换，将 newText 回滚为 originalText（`deleteRange({from, to}).insertContentAt(from, originalText)`）。
 
 回滚校验：
 
 1. 读取当前 editor revision token（editorMachine 状态）。
-2. 若当前 revision **等于** `contentRevisionAfterApply`：向 editorMachine 发送 `ROLLBACK_LOGICAL_STATE`，回滚 LogicalState 到 `originalText`，diffMachine 进入 rejecting。
+2. 若当前 revision **等于** `contentRevisionAfterApply`：向 editorMachine 发送 `ROLLBACK_LOGICAL_STATE`，在 appliedRange 位置将 newText 回滚为 originalText，diffMachine 进入 rejecting。
 3. 若当前 revision **不等于** `contentRevisionAfterApply`：用户在 preapplied 之后继续编辑了 diff 区域，不覆盖用户内容；diffMachine 直接进入 error 终态（errMessage: "reject 时用户已编辑 diff 区域，无法安全回滚"），不发送 ROLLBACK_LOGICAL_STATE。LogicalState 保持用户最新编辑内容不变。
 
 不得在 revision 不匹配时强制覆盖 LogicalState，否则会丢失用户后续编辑。
@@ -219,13 +227,13 @@ reject 执行逻辑（LogicalState 回滚，DE→ED 事件协议）：
 
 **核心规则（面向 LogicalState）**：diff 区域的 LogicalState 变化 → diff 自动失效（EXPIRE_REQUESTED）。
 
-已打开文件（preapplied 状态），失效检测采用**编辑器缓冲区粒度**（对齐 binder-core BR-DE-DIFF-004）：
+已打开文件（preapplied 状态），失效检测由 `syncPendingDiffsWithDocument` 事务监听器执行（对齐 binder-core）：
 
-1. 只有用户编辑**命中 diff 所在区域**（blockId / 行号范围重叠）时才触发 `EXPIRE_REQUESTED`。
-2. 非 diff 区域的编辑不误触发失效（允许用户在文档其他部分自由编辑）。
-3. 当 diff 区域可被唯一重定位时，更新 anchor offset 后继续审阅，不触发 expire。
-4. **新 diff 覆盖同区域时**，新 diff 修改 LogicalState → 旧 diff 区域 LogicalState 变化 → 旧 diff 自然触发失效（diff-on-diff 场景自然处理，不返回冲突错误）。
-5. DiskState 变化（外部写入）触发全文件 expire 检测（比较 baseRevision hash）。
+1. 每次 `docChanged` 事务，检查 `doc.textBetween(appliedRange.from, appliedRange.to) === originalText`
+2. 不匹配时（用户编辑命中 diff 区域）自动发出 `EXPIRE_REQUESTED`，diff 进入 expired
+3. 非 diff 区域的编辑不触发失效（textBetween 检测范围精确到 appliedRange，不扫描全文）
+4. **新 diff 覆盖同区域时**：新 diff 修改 LogicalState → 旧 diff 的 originalText 不再匹配 → 旧 diff 自然触发失效（diff-on-diff 场景自然处理，不返回冲突错误）
+5. DiskState 变化（外部写入）触发全文件 expire 检测（比较 baseRevision hash）
 
 ## 5. 已打开文件 vs 未打开文件链路（Phase 13-E）
 
@@ -234,12 +242,13 @@ reject 执行逻辑（LogicalState 回滚，DE→ED 事件协议）：
 工具：`edit_current_editor_document`
 
 ```
-DIFF_CREATED → pending
-→ LOGICAL_STATE_APPLIED（LogicalState = proposedText，编辑器展示绿增）→ preapplied
-→ [用户接受] ACCEPT_REQUESTED → accepting → 移除绿增 Decoration → ACCEPT_CONFIRMED → terminal(accepted)
-   [LogicalState 不变；DiskState 不写；文件保持 dirty]
-→ [用户拒绝] REJECT_REQUESTED → rejecting → LogicalState 回滚 → TERMINAL_RECORDED → terminal(rejected)
-→ [LogicalState 变化（用户编辑/新 diff 覆盖）] EXPIRE_REQUESTED → expired → TERMINAL_RECORDED → terminal(expired)
+工具调用（edit_current_editor_document，originalText + newText + anchor?）
+→ DIFF_CREATED → pending
+→ LOGICAL_STATE_APPLIED（Editor 定位 originalText → 精确替换为 newText → 记录 appliedRange；编辑器在 appliedRange 展示绿增）→ preapplied
+→ [用户接受] ACCEPT_REQUESTED → accepting → 移除 appliedRange 绿增 Decoration → ACCEPT_CONFIRMED → terminal(accepted)
+   [LogicalState 不变（已含 newText）；DiskState 不写；文件保持 dirty]
+→ [用户拒绝] REJECT_REQUESTED → rejecting → 精确回滚 appliedRange（newText → originalText）→ TERMINAL_RECORDED → terminal(rejected)
+→ [syncPendingDiffsWithDocument 检测 originalText 不匹配] EXPIRE_REQUESTED → expired → TERMINAL_RECORDED → terminal(expired)
 ```
 
 ### 5.2 未打开文件链路
@@ -314,13 +323,14 @@ PendingDiff 状态存储在 `.binder/workspace.db`（WorkspaceDatabase）中。
 CREATE TABLE pending_diffs (
   id TEXT PRIMARY KEY,
   file_path TEXT NOT NULL,
-  original_text TEXT NOT NULL,
-  proposed_text TEXT NOT NULL,
+  original_text TEXT NOT NULL,   -- 待替换精确原文（主定位器）
+  new_text TEXT NOT NULL,        -- 替换内容（非全文，精确替换片段）
   status TEXT NOT NULL,
   summary TEXT NOT NULL,
   source_tool_id TEXT,
-  base_revision TEXT,
-  created_at INTEGER NOT NULL
+  base_revision TEXT NOT NULL,   -- DiskState 内容 hash
+  created_at INTEGER NOT NULL,
+  anchor_json TEXT               -- DiffAnchorRef 序列化（可选），JSON
 );
 
 CREATE TABLE terminal_diff_cards (
@@ -368,15 +378,16 @@ Phase 13-A（数据结构扩展）完成标准：
 
 Phase 13-B/C（状态机升级）完成标准：
 
-1. preapplied 状态正确流转（diff 创建即修改 LogicalState，无 mounted_pending 中间态）。
-2. preapplied → reject 触发 LogicalState 回滚（逆补丁 + revision token 校验）。
+1. preapplied 状态正确流转（diff 创建即字符精确替换 originalText→newText，记录 appliedRange，无 mounted_pending 中间态）。
+2. preapplied → reject 触发 appliedRange 精确回滚（newText → originalText，revision token 校验）。
 3. preapplied → reject 在 revision 不匹配时（用户已编辑 diff 区域）进入 error 终态，不发送 ROLLBACK_LOGICAL_STATE，不强制覆盖 LogicalState。
 4. 未打开文件链路不进入 preapplied；继承流（文件打开）以 DiskState hash 一致为前提。
-5. 统一失效规则：LogicalState 变化（含新 diff 覆盖）自然触发旧 diff expired；非 diff 区域编辑不触发 expire。
+5. 统一失效规则：syncPendingDiffsWithDocument 检测 originalText 不匹配（LogicalState 变化）→ EXPIRE_REQUESTED；非 diff 区域编辑不触发 expire。
 6. Accept（已打开文件）不写 DiskState；编辑器文件保持 dirty。
-7. 编辑器内只显示绿增（新增绿色），不显示红删；完整 diff 视图只在聊天流中。
+7. 编辑器内只显示绿增（newText 字符精确绿色高亮），不显示红删；完整 diff 视图只在聊天流中（calculateHybridDiff(originalText, newText)）。
 8. Cmd+S 时有 preapplied diff 必须弹出确认对话框。
 9. 批量 accept 按 createdAt 升序执行，失败卡片独立结算（跳过继续）。
+10. originalText 在文档中找不到时（匹配失败），diff 进入 error 终态，不 fallback 为全量替换。
 
 Phase 13-D（持久化）完成标准：
 
@@ -393,3 +404,4 @@ Phase 13-D（持久化）完成标准：
 | 2026-05-23 | v1.2 | §1 canExecutePendingDiff 补充 Phase 分阶段说明；PendingDiffStatus 类型注释说明 accepting/rejecting 为内存临时态不写库；§6.2 崩溃恢复步骤 3 修正：accepting/rejecting 不存在于 DB，preapplied 恢复时降级为 mounted_pending。 |
 | 2026-05-24 | v1.3 | 全面引入文档三态模型（DiskState/LogicalState/DisplayState）；消除 mounted_pending（无此中间状态，diff 创建即 LOGICAL_STATE_APPLIED → preapplied）；新增 §3.4 三态模型表；§3.1 PendingDiffStatus 完整重写（移除 mounted_pending，按路径拆分 pending/accepted/rejected 语义）；§4.2 状态机重画（LOGICAL_STATE_APPLIED、INHERIT_APPLIED 事件；移除 MOUNT_TO_EDITOR/PREAPPLY_CONTENT）；§4.3 约束更新（Accept 不写磁盘）；§4.5 统一失效规则（LogicalState 变化规则，覆盖 diff-on-diff 场景）；§5.1/5.2 链路重写（含继承流）；§5-A/5-B.3 Cmd+S 语义修正（写盘仍为 Cmd+S，accept 不写盘）；§6.2 恢复降级 preapplied→pending；§7 DE-CAND-STATE-005 更新；§9 B/C 验收标准重写 |
 | 2026-05-24 | v1.4 | §3.1 PendingDiff 新增 effectivePath 字段（D-01："open-file"/"closed-file" 路由 accept 语义；INHERIT_APPLIED 时从 closed-file 升级为 open-file）；baseRevision 改为必填（非可选）；§4.2 状态机增加 LOGICAL_STATE_APPLIED_FAILED → error 路径；INHERIT_APPLIED 注释补充 effectivePath 升级语义；§4.3 约束 3/4/5/6 重写（effectivePath 路由、LOGICAL_STATE_APPLIED_FAILED 处置、INHERIT_APPLIED 所有权）；§4.4 回滚协议重写（D-02：revision 不匹配时进入 error 终态而非 conflict 子状态，明确 ROLLBACK_LOGICAL_STATE 事件名和 DE→ED 协议）；§5.2 INHERIT_APPLIED 触发方明确为 editorMachine，补充完整触发流程；§5-A Cmd+S 对话框文案更新（D-07：表述用户编辑 + AI 修改）；§9 B/C 验收标准 3 更新（conflict/expired → error 终态） |
+| 2026-05-24 | v1.5 | 精确编辑架构重写（D-10）：§3.1 PendingDiff 字段重写（proposedText→newText：精确替换片段；originalText 语义改为"待替换精确原文字符串，主定位器 IR-RANGE-005"；新增 appliedRange{from,to} 字段由 Editor Runtime 记录 PM 位置；anchor 由可选改为 DiffAnchorRef 设计完善）；§3.3 DiffAnchorRef 完整重写（startBlockId/endBlockId/startOffset/endOffset/occurrenceIndex/paraIndex）；§3.4 三态模型操作描述改为字符精确替换（非全文替换）；§4.4 回滚协议改为 appliedRange 精确回滚（newText → originalText），ROLLBACK_LOGICAL_STATE 事件携带 appliedRange；§4.5 失效检测改为 syncPendingDiffsWithDocument 事务监听（doc.textBetween 检查）；§5.1 已打开链路图重写（originalText+newText+anchor? 入参，appliedRange 记录）；§6.1 DB schema 更新（proposed_text→new_text，新增 anchor_json）；§9 验收标准新增条目 10（originalText 找不到转 error） |

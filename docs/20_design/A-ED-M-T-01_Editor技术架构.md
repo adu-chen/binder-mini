@@ -104,16 +104,24 @@ TipTap/Markdown 选型以 `A-ED-M-T-02` 为准（已确认，状态 A）。
 
 ## 4. BlockId / Anchor 策略
 
-BlockId 目标是为后续 Diff Review v2 提供比全文搜索更稳定的定位辅助。
+BlockId 是 Diff 定位体系的基础，为 `edit_current_editor_document` 的 `startBlockId` 参数提供稳定的块标识，辅助 `originalText` 文本搜索精确定位。
 
-最小策略：
+### 4.1 BlockIdExtension 架构
 
-1. 顶层块可生成 `blockId` 或等价 `DocumentAnchor`。
-2. BlockId 由 Editor Runtime 生成、修复和校验。
-3. 模型可以引用 BlockId，但不能凭模型输出直接越过校验。
-4. 缺失、重复或无法解析时，PatchValidation 必须降级为弱定位或拒绝执行。
+采用 TipTap 自定义扩展 `BlockIdExtension`，通过 ProseMirror `appendTransaction` 机制为文档节点分配 UUID：
 
-持久化策略（已决策）：
+**可寻址块类型（BLOCK_NODE_NAMES）**：
+```
+paragraph, heading, blockquote, codeBlock, listItem, tableCell
+```
+
+**工作机制**：
+1. `appendTransaction` 拦截每次文档变更，检查新增节点
+2. 为每个 BLOCK_NODE_NAMES 节点分配 UUID v4，写入 `data-block-id` HTML attribute
+3. 已有 blockId 的节点不重新分配（节点重用保持 blockId 稳定）
+4. 节点被删除后 blockId 失效；新建节点获得新 UUID
+
+**持久化策略（已决策）**：
 
 | 策略 | 说明 | 决策 |
 |------|------|------|
@@ -121,21 +129,50 @@ BlockId 目标是为后续 Diff Review v2 提供比全文搜索更稳定的定�
 | workspace.db 映射表 | 在 `.binder/workspace.db` 维护 path + block hash + id | 不采用（需维护重建逻辑）|
 | 会话内生成（已选）| BlockId 在每次打开文件时由 Editor Runtime 生成，不持久化，跨会话重置 | **采用** |
 
-决策说明：BlockId 采用**会话内生成**方案（对齐 binder-core data-block-id HTML 属性实现）。每次打开文件时 Editor Runtime 生成新 BlockId，应用重启或文件关闭后 BlockId 失效。跨会话 BlockId 失效为已接受的已知限制。
+BlockId 为**会话级（session-level）**，应用重启或文件关闭后失效。这是已接受的限制：跨会话 diff 的 blockId 字段失效后，系统回退到 `originalText` 文本搜索作为主定位器（不影响 diff 执行正确性）。
 
-**前置门禁**：BlockId 实现必须先完成 `DE-M-T-01` Diff Review v2 数据结构设计，确认 anchor 消费协议后再开始。
+### 4.2 坐标系统
+
+**两种坐标系**：
+- **块内文本偏移（blockOffset）**：相对于块 `textContent` 的字符索引，不含 Markdown 语法字符
+- **PM 绝对位置（PM position）**：ProseMirror 文档树的绝对节点位置，用于实际编辑操作
+
+TipTap 解析 Markdown 语法字符（`#`、`**` 等）为节点类型和属性，不在 `textContent` 中保留语法字符：
+- `# My Title` → `heading` 节点，`textContent = "My Title"`，`startOffset=0` 指向 "M"
+- `**bold**` → 加粗文本节点，`textContent = "bold"`
+
+**转换层（blockOffsetToPMRange）**：Editor Runtime 负责将 `blockId + startOffset/endOffset` 翻译为 PM 绝对位置 `{from, to}`；模型只操作 blockId+offset，不感知 PM 坐标。
+
+**前置门禁**：BlockId 实现必须在 `DE-M-T-01` Diff Review v2 数据结构确认后进入（ED-CAND-DATA-002 升级为正式规则后执行）。
 
 ## 5. DiffDecoration 绿增
 
 DiffDecoration 只负责 DisplayState 展示，不拥有 Diff 生命周期。
 
-核心约束：
+### 5.1 核心约束
 
 1. 数据来源必须是 DE / Diff Review 产生的 PendingDiff（preapplied 状态）。
-2. 绿增位置必须来自已验证 range/anchor。
-3. 无法解析 range/anchor 时，不得用全文搜索伪造高亮。
+2. 绿增位置来自 PendingDiff 的 `appliedRange.{from, to}`（diff 应用后由 Editor Runtime 记录的验证 PM 位置）。
+3. 无法解析 appliedRange 时，不得全文搜索伪造高亮。
 4. 编辑器内只显示绿色新增（绿增），不显示红色删除；完整红删绿增 diff 视图只在聊天消息流中展示。
 5. Accepted / Rejected / Expired / Error 等终态后高亮自动移除，不在编辑器长期保留可执行高亮。
+
+### 5.2 实现机制
+
+**GreenAdditionDecoration（TipTap 扩展）**：
+- 使用 `Decoration.inline(from, to, {class: "diff-pending"})` 实现字符精确绿色高亮
+- 以 `diffId` 为 key 管理 decoration 注册，不使用文件路径或行号
+- 文档变更时（`docChanged`）从存储的 `{diffId, from, to}` 重建 decoration set，不使用 `tr.mapping` 映射
+
+**applyDiffReplaceInEditor（执行函数）**：
+- 执行 `deleteRange({from, to})` + `insertContentAt(from, newText)` 完成字符精确替换
+- 返回 `{insertFrom, insertTo}` 作为绿增 decoration 的绑定范围，存入 PendingDiff.appliedRange
+- 执行前后通过 `withSuppressedPendingContentSync` 抑制 `syncPendingDiffsWithDocument` 检测，避免误触发 expire
+
+**syncPendingDiffsWithDocument（事务监听器）**：
+- 监听每次 `docChanged` 事务
+- 对每个 preapplied PendingDiff，检查 `doc.textBetween(appliedRange.from, appliedRange.to) === originalText`
+- 不匹配时（用户编辑命中区域）发出 `EXPIRE_REQUESTED`，对应 diff 进入 expired
 
 **代码命名规范（对齐 TERM-DE-004 code_identifier）**：
 
@@ -143,7 +180,7 @@ DiffDecoration 只负责 DisplayState 展示，不拥有 Diff 生命周期。
 - TipTap 自定义扩展命名为 `GreenAdditionDecoration`，负责在 ProseMirror 视图层注册 overlay decoration。
 - 绑定和移除绿增时以 `diffId` 为 key 区分不同 diff 的 overlay 注册；不使用文件路径或行号作为 overlay key。
 
-**前置门禁**：DiffDecoration 骨架实现必须在 BlockId 策略确认和 DE-M-T-01 数据结构完成后进入。
+**前置门禁**：DiffDecoration 骨架实现必须在 BlockIdExtension（ED-CAND-DATA-002 正式规则化）完成后进入。
 
 ## 5-A. 文档三态模型与 Dirty 状态
 
@@ -178,8 +215,8 @@ isDirty = (LogicalState ≠ DiskState)
 
 | 候选规则 | 候选链路 | 来源需求 | 规则意图 |
 |----------|----------|----------|----------|
-| ED-CAND-DATA-002 | ED-OPEN-FILE | REQ-ED-007 | BlockId / Anchor 必须由 Editor Runtime 生成或校验。 |
-| ED-CAND-STATE-004 | ED-DIFF-RENDER | REQ-ED-008 | DiffDecoration 只能消费已验证 range/anchor；编辑器内只渲染绿增，不渲染红删。 |
+| ED-CAND-DATA-002 | ED-OPEN-FILE | REQ-ED-007 | BlockIdExtension 必须通过 appendTransaction 为 BLOCK_NODE_NAMES 节点分配 UUID v4；blockId 由 Editor Runtime 生成，不由模型输出直接决定；会话级有效，不持久化。 |
+| ED-CAND-STATE-004 | ED-DIFF-RENDER | REQ-ED-008 | DiffDecoration 只能消费 PendingDiff.appliedRange（已验证 PM 范围）；无法解析时不渲染伪高亮；编辑器内只渲染绿增（newText 字符精确高亮），不渲染红删。 |
 
 已升级为正式规则：
 
@@ -198,10 +235,11 @@ isDirty = (LogicalState ≠ DiskState)
 2. 多标签切换不丢失 dirty 内容。
 3. 关闭 dirty 标签或切换 Workspace 有保护路径。
 4. Markdown 保存转换失败不会写坏原文件。
-5. BlockId 不由模型输出直接决定执行位置。
-6. DiffDecoration 无验证 range/anchor 时不渲染伪高亮。
+5. BlockId 不由模型输出直接决定执行位置；blockId 只是 originalText 定位的辅助，不是主定位器。
+6. DiffDecoration 无 PendingDiff.appliedRange 时不渲染伪高亮；decoration 从 appliedRange 构建，不重新搜索。
 7. Accept（已打开文件路径）不写入 DiskState；DiskState 仅 Cmd+S 保存时更新。
-8. 编辑器内只显示绿增（新增内容绿色覆盖），不显示红色删除；红删绿增完整 diff 视图只在聊天消息流中展示。
+8. 编辑器内只显示绿增（newText 字符精确绿色高亮），不显示红色删除；红删绿增完整 diff 视图只在聊天消息流中展示。
+9. syncPendingDiffsWithDocument 检测 originalText 不匹配时自动触发 EXPIRE_REQUESTED；非 diff 区域编辑不触发。
 
 ## 变更记录
 
@@ -216,3 +254,4 @@ isDirty = (LogicalState ≠ DiskState)
 | 2026-05-23 | v1.6 | §3 .txt 文件路径从"继续 textarea"改为"与 .md 共用 TipTap 实例，纯文本序列化"（对齐 binder-core EditorArea.tsx）；§4 BlockId 持久化策略从"建议 workspace.db 映射表"改为已决策"会话内生成，不持久化" |
 | 2026-05-24 | v1.7 | §5 标题"绿审态"改为"绿增"；补充编辑器只显示绿增不显示红删约束；新增 §5-A 文档三态模型（DiskState/LogicalState/DisplayState）与 Dirty 状态规则；Accept 不写磁盘绝对边界明确；§6 候选规则 ED-CAND-STATE-004 补充绿增约束；§7 验收标准新增条目 7、8 |
 | 2026-05-24 | v1.8 | §5 补充代码命名规范（D-05）：GreenAdditionOverlay（React 组件）、GreenAdditionDecoration（TipTap 扩展）；绿增 overlay 以 diffId 为 key |
+| 2026-05-24 | v1.9 | §4 BlockId 策略重写（D-07）：BlockIdExtension 架构（appendTransaction + UUID v4 + BLOCK_NODE_NAMES）；§4.2 新增坐标系统说明（blockOffset vs PM position，Markdown 语法字符不计入 textContent）；§5 DiffDecoration 重写（D-08）：拆分为 §5.1/§5.2；appliedRange 作为 decoration 数据来源；applyDiffReplaceInEditor 执行机制；syncPendingDiffsWithDocument 监听协议；withSuppressedPendingContentSync 防误触；§6 ED-CAND-DATA-002/STATE-004 描述更新；§7 验收标准新增 9 |

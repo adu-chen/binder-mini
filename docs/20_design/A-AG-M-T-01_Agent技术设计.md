@@ -124,15 +124,13 @@ interface ToolExecution {
 }
 ```
 
-### 3.4 ToolName（Phase 11/13-B 扩展）
+### 3.4 ToolName（Phase 11 扩展）
 
 当前：`"read_file" | "list_files" | "search_files" | "edit_current_editor_document"`
 
 Phase 11 新增候选：`"create_file" | "create_folder" | "rename_file" | "move_file" | "delete_file" | "update_file" | "web_search"`
 
-Phase 13-B 新增候选（BlockId 稳定性策略 ED-CAND-DATA-002 升级为正式规则后激活）：`"edit_document_block"`
-
-所有写操作工具（create/rename/move/delete/edit/update）必须先在 DE-M-T-01 确认 Diff Review 路由协议后，才能进入工具矩阵。`edit_document_block` 激活还额外依赖 L0 文档结构注入机制就绪（AG-M-P-02 §3）。
+所有写操作工具（create/rename/move/delete/edit/update）必须先在 DE-M-T-01 确认 Diff Review 路由协议后，才能进入工具矩阵。内容编辑工具（`edit_current_editor_document`、`update_file`）使用 `originalText + newText` 字符精确替换接口，不再使用全量 proposedText。
 
 ### 3.5 InputReference（已有，Phase 12 重构为判别联合类型）
 
@@ -309,3 +307,4 @@ Phase 12 完成标准：
 | 2026-05-23 | v1.2 | §3.5 InputReference 重构为判别联合类型（kind: file|text|url），补充 DocumentAnchorTarget 精确坐标结构，移除旧 mode:"readonly" 字段；§5.2 create_file 说明改为 content 必填不经 Diff Review |
 | 2026-05-24 | v1.3 | §2.1 状态图 cancelling→error 事件名从 FAILED 修正为 ABORT_FAILED（与 AG-M-P-04 §2/§4 对齐） |
 | 2026-05-24 | v1.4 | §3.4 ToolName 新增 Phase 13-B 候选 edit_document_block（依赖 BlockId 稳定性策略和 L0 文档结构注入机制）|
+| 2026-05-24 | v1.5 | 精确编辑架构对齐（D-02）：§3.4 ToolName 移除 edit_document_block 候选（定位能力折叠进 edit_current_editor_document anchor 字段，不作为独立工具存在）；内容编辑工具说明改为 originalText+newText 字符精确替换接口 |

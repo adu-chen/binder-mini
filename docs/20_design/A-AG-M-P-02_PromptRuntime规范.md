@@ -64,26 +64,26 @@ L0 在每次请求时组装，包含以下四组信息：
 
 ```xml
 <document_structure file="{activeFilePath}">
-  <heading level="1">第一章：背景</heading>
-  <heading level="2">1.1 项目起源</heading>
-  <heading level="2">1.2 当前问题</heading>
-  <heading level="1">第二章：方案</heading>
+  <heading level="1" block-id="uuid-001">第一章：背景</heading>
+  <heading level="2" block-id="uuid-002">1.1 项目起源</heading>
+  <heading level="2" block-id="uuid-003">1.2 当前问题</heading>
+  <heading level="1" block-id="uuid-004">第二章：方案</heading>
+  <paragraph block-id="uuid-005">摘要段落...</paragraph>
 </document_structure>
 ```
 
 约束：
 - 字符上限 1500；超出时只保留标题层级，去除细节
 - 不注入正文文本（正文需模型显式调用 `read_file` 获取）
-- 当前版本**不注入 blockId**（依赖 BlockId 稳定性策略 ED-CAND-DATA-002，待独立 Issue 决策后启用）
+- **注入 blockId**（ED-CAND-DATA-002 确认后启用；blockId 由 Editor Runtime 的 BlockIdExtension 生成，会话级有效）；模型使用 blockId 作为 `edit_current_editor_document` 的 `startBlockId` 参数辅助定位
 - 非 .md 文件不注入此块（避免对代码文件、纯文本等无意义注入）
 
 **④ 工具使用系统约束声明**
 
 告知模型系统层的硬性边界（描述系统约束事实，不做意图分类或判断）：
 
-- `edit_current_editor_document` 将替换当前活跃文件的**全部**内容；`activeFileMode` 为 `readonly` 时不可用
-- `edit_document_block` 的 blockId 必须来自本 system prompt 注入的 `<document_structure>` 块，不得自报；blockId 未启用时此工具不进入 allowedTools
-- `update_file` 只能操作当前未在 Editor 中打开的文件
+- `edit_current_editor_document`：提供 `originalText`（文档中待替换的精确原文）和 `newText`（替换内容）；可附带 `startBlockId`（来自本 system prompt `<document_structure>` 的 block-id 属性）和 `startOffset`（块内字符偏移）辅助定位；`activeFileMode` 为 `readonly` 时不可用；不得全量替换文件（不得省略 `originalText`）
+- `update_file`：只能操作当前未在 Editor 中打开的文件；同样使用 `originalText` + `newText` 精确替换
 - 当不确定用户是否意图修改文件时，优先通过对话确认，再发起写工具调用
 
 示例组装结果：
@@ -94,15 +94,15 @@ Current workspace: {workspaceName}
 Active file: design.md [editable] [dirty] [2 pending diffs]
 
 <document_structure file="design.md">
-  <heading level="1">系统设计</heading>
-  <heading level="2">状态模型</heading>
-  <heading level="2">数据结构</heading>
+  <heading level="1" block-id="uuid-a1b2">系统设计</heading>
+  <heading level="2" block-id="uuid-c3d4">状态模型</heading>
+  <paragraph block-id="uuid-e5f6">当前状态机包含...</paragraph>
+  <heading level="2" block-id="uuid-g7h8">数据结构</heading>
 </document_structure>
 
 Tool constraints:
-- edit_current_editor_document replaces the entire active file. Unavailable when file is readonly.
-- edit_document_block requires blockId from <document_structure> above; unavailable when blockId not enabled.
-- update_file: only for files not currently open in the editor.
+- edit_current_editor_document: provide originalText (exact text to replace) and newText (replacement). Optionally provide startBlockId from <document_structure> above and startOffset (character offset in block text, excluding Markdown syntax chars). Do NOT replace entire file. Unavailable when file is readonly.
+- update_file: only for files not currently open in the editor. Same originalText+newText interface.
 - When uncertain about user's edit intent, confirm via conversation before calling write tools.
 ```
 
@@ -134,7 +134,7 @@ Tool constraints:
 
 ### 4.1 已注册工具全集
 
-Phase 10-11 范围内实现的工具：`read_file`、`list_files`、`search_files`（只读工具，已有）、`edit_current_editor_document`（已有）、`create_file`、`create_folder`、`rename_file`、`move_file`、`delete_file`、`update_file`（Phase 11）。
+Phase 10-11 范围内实现的工具：`read_file`、`list_files`、`search_files`（只读工具，已有）、`edit_current_editor_document`（已有，Phase 9 接口重写为 originalText+newText）、`create_file`、`create_folder`、`rename_file`、`move_file`、`delete_file`、`update_file`（Phase 11）。
 
 ### 4.2 过滤策略（场景动态）
 
@@ -210,7 +210,7 @@ Provider 实际收到的 tools 必须严格等于 allowedTools 指定的工具�
 | 禁止字段 | 原因 |
 |----------|------|
 | apiKey / api_key | API key 安全红线，只在后端 Keychain/安全存储中使用 |
-| blockId | 执行定位字段，不暴露给模型 |
+| blockId（工具调用参数中模型自报） | 模型不得在工具调用 arguments 中自报 blockId（只能来自 document_structure 注入）；Rust guard 扫描并移除；但 document_structure 中注入的 block-id 属性不受此限制 |
 | startOffset / endOffset | 执行定位字段，不暴露给模型 |
 | filePath（工具执行权威字段）| 路径绑定由 Rust guard 校验，不由模型自报 |
 | workspaceRoot（完整路径）| 暴露系统路径，改用 workspaceName |
@@ -233,3 +233,4 @@ Rust guard 必须在组装 payload 时扫描并移除上述字段（如果模型
 | 2026-05-23 | v1.0 | 初始版本，定义 binder-mini Prompt Runtime 四层结构、allowedTools 策略和 forbidden fields 清单 |
 | 2026-05-23 | v1.1 | §4 allowedTools 过滤策略从全局白名单改为场景动态（对齐 binder-core REQ-AG-007）；补充场景决策表和过滤不变量 |
 | 2026-05-24 | v1.2 | §2 workspaceContext 扩展（activeFileMode/activeFileDirty/pendingDiffCount/documentStructure）；§3 L0 层重构为四组信息（基础指令、Editor 状态注入、.md 文档结构摘要、工具系统约束声明）；§5.3 新增文件切换上下文标记协议（ACTIVE_FILE_CHANGED 合成系统消息） |
+| 2026-05-24 | v1.3 | 精确编辑架构对齐（D-09/D-02）：§3 L0 ③ document_structure 约束改为**注入 blockId**（ED-CAND-DATA-002 确认后启用；block-id 属性供模型作为 startBlockId 参数）；document_structure XML 示例补充 block-id 属性和 paragraph 节点；④ 工具约束声明重写（移除 edit_document_block、update edit_current_editor_document 为 originalText+newText 接口，不得全量替换）；§3 L0 示例 system prompt 更新（block-id 属性，新工具约束文案）；§4.1 已注册工具全集移除 edit_document_block；§7 forbidden fields 更新（blockId 说明精确化，区分模型自报 vs document_structure 注入）|

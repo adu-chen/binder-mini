@@ -29,15 +29,18 @@ PendingDiff 有两条链路，根据工具类型和目标文件是否已在 Edit
 ### 3.1 完整链路图
 
 ```
-工具调用（edit_current_editor_document）
+工具调用（edit_current_editor_document，参数：originalText、newText、anchor?）
 → DE.createDiff（status=pending）
-→ LOGICAL_STATE_APPLIED（LogicalState → proposedText；status=preapplied）
-→ [Editor 展示绿增效果；聊天流展示红删绿增完整 diff]
+→ LOGICAL_STATE_APPLIED
+    （Editor 定位 originalText：PM 文本搜索 + anchor 辅助
+    → 精确替换为 newText：deleteRange({from,to}).insertContentAt(from, newText)
+    → 记录 appliedRange{from, to}；status=preapplied）
+→ [Editor 在 appliedRange 展示绿增效果；聊天流展示红删绿增完整 diff（originalText vs newText）]
 → 用户决策：
     → [接受] ACCEPT_REQUESTED → accepting → ACCEPT_CONFIRMED → terminal(accepted)
-       [绿增效果消除；LogicalState 不变（已是 proposedText）；DiskState 不写；文件保持 dirty]
-    → [拒绝] REJECT_REQUESTED → rejecting → LogicalState 回滚到 originalText → TERMINAL_RECORDED → terminal(rejected)
-    → [LogicalState 变化：用户编辑命中区域 / 新 diff 覆盖] EXPIRE_REQUESTED → expired → TERMINAL_RECORDED → terminal(expired)
+       [绿增效果消除；LogicalState 不变（已含 newText）；DiskState 不写；文件保持 dirty]
+    → [拒绝] REJECT_REQUESTED → rejecting → appliedRange 精确回滚（newText → originalText）→ TERMINAL_RECORDED → terminal(rejected)
+    → [syncPendingDiffsWithDocument：originalText 不匹配] EXPIRE_REQUESTED → expired → TERMINAL_RECORDED → terminal(expired)
 ```
 
 ### 3.2 各状态进入条件
@@ -45,8 +48,10 @@ PendingDiff 有两条链路，根据工具类型和目标文件是否已在 Edit
 **preapplied 进入条件**：
 - 对应文件已在 Editor 中打开（有 active tab）
 - PendingDiff.status === "pending"
-- DE 推送 proposedText 给 ED → ED 修改 LogicalState → LogicalState === proposedText
-- diffMachine 收到 LOGICAL_STATE_APPLIED 事件
+- DE 向 ED 发送 originalText+newText+anchor → ED 定位 originalText → 精确替换为 newText → 记录 appliedRange
+- diffMachine 收到 LOGICAL_STATE_APPLIED 事件（携带 appliedRange）
+
+**originalText 定位失败**：originalText 在文档中找不到（PM 文本搜索返回 null）→ 发出 LOGICAL_STATE_APPLIED_FAILED → diff 进入 error 终态，不 fallback 为全量替换
 
 **preapplied → reject 特殊约束**：
 - 拒绝时必须触发 LogicalState 回滚（恢复到 originalText）
@@ -60,11 +65,11 @@ PendingDiff 有两条链路，根据工具类型和目标文件是否已在 Edit
 
 1. canExecutePendingDiff(diffId) 返回 true（status === "preapplied"）
 2. diffMachine → accepting（内存临时态，不写 DB）
-3. 通知 ED 移除对应绿增 Decoration
+3. 通知 ED 移除 appliedRange 绿增 Decoration（以 diffId 为 key）
 4. diffMachine → terminal(accepted)；写入 DB 终态记录
 5. **不读磁盘、不写磁盘**；DiskState 不触碰；文件保持 dirty 直到 Cmd+S 保存
 
-注：LogicalState 在 diff 创建时已修改为 proposedText，accept 时无需再推送内容。
+注：LogicalState 在 diff 创建时已精确替换（originalText → newText），accept 时只移除绿增效果，无需再推送内容。
 
 ## 4. 未打开文件链路（Phase 13-E）
 
@@ -107,18 +112,18 @@ LOGICAL_STATE_APPEARED（目标文件被打开，LogicalState 出现）
 
 ### 5.1 统一失效规则
 
-**核心规则**：diff 区域的 LogicalState 变化 → diff 自动失效（expired）。
+**核心规则**：`syncPendingDiffsWithDocument` 事务监听器检测 `doc.textBetween(appliedRange.from, appliedRange.to) !== originalText` → 发出 EXPIRE_REQUESTED → diff 自动失效（expired）。
 
-这是最基础的失效规则，自然覆盖以下场景：
-- 用户编辑命中 diff 区域 → LogicalState 变化 → 旧 diff 失效
-- 新 diff 覆盖同区域 → LogicalState 变化 → 旧 diff 失效（diff-on-diff 自然处理）
+这是最基础的失效机制，自然覆盖以下场景：
+- 用户编辑命中 diff 区域 → originalText 不再匹配 → 旧 diff 失效
+- 新 diff 覆盖同区域 → LogicalState 变化 → 旧 diff 的 originalText 不匹配 → 旧 diff 失效（diff-on-diff 自然处理）
 
 ### 5.2 完整失效触发表
 
 | 触发条件 | 检测时机 | 处理 |
 |----------|----------|------|
-| 用户编辑命中 diff 区域（LogicalState 变化）| 编辑器输入事件（按 blockId/行号范围检测）| 自动转 expired |
-| 新 diff 覆盖同区域（LogicalState 被新 proposedText 覆盖）| createDiff 执行时 | 旧 diff 自动转 expired，新 diff 正常创建 |
+| 用户编辑命中 diff 区域（syncPendingDiffsWithDocument：originalText 不匹配）| 每次 docChanged 事务 | 自动转 expired |
+| 新 diff 覆盖同区域（新 diff 执行后旧 diff originalText 不匹配）| 每次 docChanged 事务 | 旧 diff 自动转 expired，新 diff 正常创建 |
 | DiskState 变化（磁盘被外部修改，baseRevision hash 不一致）| accept 前校验（未打开文件）、Workspace 重新打开 | 自动转 expired |
 | 目标文件被删除 | 工具调用结果或文件树刷新 | 自动转 expired |
 | Workspace 关闭（expireAllOnClose）| workspaceMachine → Closing | 所有非终态 diff 转 expired |
@@ -158,9 +163,9 @@ Cmd+S 批量 accept 的原子性遵循跳过继续原则：有 diff accept 失�
 
 | 终态 | 路径 | 语义 | LogicalState | DiskState | 可逆 |
 |------|------|------|-------------|-----------|------|
-| accepted | 已打开文件 | 绿增效果消除；文件保持 dirty | = proposedText（不变）| 不变（Cmd+S 保存才写）| 否 |
-| accepted | 未打开文件 | proposedText 写入磁盘 | 不存在（文件未打开）| = proposedText | 否 |
-| rejected | 已打开文件 | LogicalState 回滚到 originalText；dirty 清除（若无其他编辑）| = originalText | 不变 | 否 |
+| accepted | 已打开文件 | 绿增效果消除；文件保持 dirty | 含 newText（不变）| 不变（Cmd+S 保存才写）| 否 |
+| accepted | 未打开文件 | originalText→newText 精确替换写入磁盘 | 不存在（文件未打开）| 含 newText | 否 |
+| rejected | 已打开文件 | appliedRange 精确回滚（newText→originalText）；dirty 清除（若无其他编辑）| 含 originalText | 不变 | 否 |
 | rejected | 未打开文件 | 文件内容不变 | 不存在 | = originalText（不变）| 否 |
 | expired | 任意 | LogicalState 或 DiskState 变化致失效，不可操作 | 不确定 | 不确定 | 否 |
 | error | 任意 | 执行链路出错（写入失败、读取失败等）| 不确定 | 不确定 | 否 |
@@ -185,3 +190,4 @@ Cmd+S 批量 accept 的原子性遵循跳过继续原则：有 diff accept 失�
 | 2026-05-23 | v1.1 | §6.1 批量接受原子性从 NEEDS_HUMAN_DECISION 改为已决策（跳过继续）；§6.2 Cmd+S 从 NEEDS_HUMAN_DECISION 改为已决策（必须弹确认框）；§3.3 补充 canExecutePendingDiff Phase 阶段说明 |
 | 2026-05-24 | v1.2 | 三态模型重构：§2 表格已打开链路移除 mounted_pending（pending→preapplied 立即）；§3 完整重写（LOGICAL_STATE_APPLIED 事件；accept 不写磁盘；绿增效果）；§4 未打开链路补充继承流（LOGICAL_STATE_APPEARED→preapplied）；§5 失效规则从单条触发改为统一 LogicalState 变化规则（§5.1 核心规则；§5.2 完整表）；§6.2 Cmd+S 语义修正（固化绿增，写盘仍为 Cmd+S 本身）；§7 终态表按路径拆分两行 accepted |
 | 2026-05-24 | v1.3 | §4.3 继承流补充 effectivePath 升级（closed-file → open-file）和 ROLLBACK_LOGICAL_STATE 事件引用；§6.2 Cmd+S 确认框文案对齐 DE-M-T-01 §5-A 最新版本 |
+| 2026-05-24 | v1.4 | 精确编辑架构对齐（D-10）：§3.1 已打开文件链路图重写（originalText+newText+anchor? 入参，applyDiffReplaceInEditor 执行，appliedRange 记录，syncPendingDiffsWithDocument 检测）；§3.2 preapplied 进入条件更新（originalText 精确替换+appliedRange；originalText 找不到→LOGICAL_STATE_APPLIED_FAILED→error）；§3.3 accept 语义注释更新（accept 只移除 appliedRange 绿增，无需再推送内容）；§5.1 失效规则改为 syncPendingDiffsWithDocument 事务监听（doc.textBetween 检查）；§5.2 完整失效触发表更新（用户编辑/新 diff 均通过 originalText 不匹配检测）；§7 终态表更新（proposedText→newText/appliedRange 精确回滚语义） |

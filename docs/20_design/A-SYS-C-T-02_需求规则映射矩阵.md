@@ -54,7 +54,7 @@
 | REQ-AG-001 | Provider 配置 | BR-AG-STATE-001 | AG-SEND-MESSAGE | 已覆盖 Provider 校验门控（MVP 本地模拟） |
 | REQ-AG-002 | 消息发送与流式响应 | BR-AG-STATE-001 | AG-SEND-MESSAGE | MVP 已有模拟流；真实 SSE 待升级：AG-CAND-STATE-002 |
 | REQ-AG-003 | 只读与检索工具 | BR-AG-OBS-001、BR-AG-DATA-001、X-CONST-001 | AG-TOOL-CALL | 已覆盖 read_file/list_files/search_files；web_search Phase 11 待实现；工具结果回流待升级：AG-CAND-DATA-002 |
-| REQ-AG-004 | 内容编辑工具 | BR-DE-STATE-001、X-CONST-002 | AG-TOOL-CALL、DE-CREATE-DIFF | 已覆盖 edit_current_editor_document → PendingDiff 路由 |
+| REQ-AG-004 | 内容编辑工具 | BR-DE-STATE-001、X-CONST-002 | AG-TOOL-CALL、DE-CREATE-DIFF | 已覆盖 edit_current_editor_document → PendingDiff 路由；接口重写为 originalText+newText 字符精确替换（待升级：AG-CAND-DATA-005）|
 | REQ-AG-005 | 工具执行记录 | BR-AG-OBS-001 | AG-TOOL-CALL | 已覆盖 ToolExecution 记录结构 |
 | REQ-AG-006 | InputReference | BR-AG-DATA-001 | AG-SEND-MESSAGE、AG-TOOL-CALL | 已覆盖只读约束；上下文注入待升级：AG-CAND-DATA-004 |
 | REQ-AG-007 | Prompt Runtime | 待升级：AG-CAND-DATA-003、AG-CAND-STATE-003 | AG-SEND-MESSAGE | 真实 Provider SSE 和 allowedTools 过滤在 Phase 10-12 实现 |
@@ -67,7 +67,7 @@
 
 | 需求 ID | 需求名称 | 已注册规则 / 约束 | 主链路 | 当前状态 |
 |---------|----------|-------------------|--------|----------|
-| REQ-DE-001 | PendingDiff 创建 | BR-DE-STATE-001、BR-DE-STATE-005、X-CONST-002 | DE-CREATE-DIFF | preapplied 三态已覆盖（BR-DE-STATE-005）；已打开文件 diff 创建即 LOGICAL_STATE_APPLIED |
+| REQ-DE-001 | PendingDiff 创建 | BR-DE-STATE-001、BR-DE-STATE-005、X-CONST-002 | DE-CREATE-DIFF | preapplied 三态已覆盖（BR-DE-STATE-005）；已打开文件 diff 创建即 LOGICAL_STATE_APPLIED（字符精确替换 originalText→newText，记录 appliedRange） |
 | REQ-DE-002 | 接受 diff | BR-DE-PERSIST-001、BR-DE-STATE-004、BR-DE-STATE-010、BR-DE-STATE-011 | DE-ACCEPT-DIFF | 已覆盖；open-file 路径不写入 DiskState（BR-DE-STATE-011）；closed-file 路径 hash 校验后写入 DiskState（BR-DE-STATE-004） |
 | REQ-DE-003 | 拒绝 diff | BR-DE-STATE-002 | DE-REJECT-DIFF | 已覆盖 rejectPendingDiff |
 | REQ-DE-004 | Diff 失效 | BR-DE-STATE-003、BR-DE-STATE-012 | DE-EXPIRE-DIFF | 统一失效规则已覆盖（BR-DE-STATE-012）；LogicalState 变化自动触发 expired |
@@ -92,6 +92,7 @@
 | AG-CAND-STATE-003 | AG-M-T-01 | REQ-AG-007 | Phase 12 | 待升级 |
 | AG-CAND-DATA-004 | AG-M-T-01 | REQ-AG-006 | Phase 12 | 待升级 |
 | AG-CAND-PERSIST-001 | AG-M-P-04 | REQ-AG-010 | Phase 12 | 待升级 |
+| AG-CAND-DATA-005 | AG-M-P-01 | REQ-AG-004 | Phase 9（接口重写）| 待升级 |
 | ~~DE-CAND-DATA-001~~ | DE-M-T-01 | REQ-DE-006 | Phase 13-A | **已升级 → BR-DE-DATA-001** |
 | ~~DE-CAND-STATE-004~~ | DE-M-T-01 | REQ-DE-002 | Phase 13-C | **已升级 → BR-DE-STATE-004** |
 | ~~DE-CAND-STATE-005~~ | DE-M-T-01 | REQ-DE-001 | Phase 13-B | **已升级 → BR-DE-STATE-005** |
@@ -116,6 +117,7 @@
 | 2026-05-23 | v3.1 | §4 REQ-AG-003 名称改为"只读与检索工具"；§4 补充 REQ-AG-008~011 行；§5 补充 REQ-DE-008~011 行 |
 | 2026-05-24 | v3.2 | REQ-ED-008 名称"绿审态"改为"绿增"（术语统一） |
 | 2026-05-24 | v3.3 | §4 REQ-AG-010 状态改为"持久化为必须需求"（不可延后），添加 AG-CAND-PERSIST-001 追踪；§5 REQ-DE-001/002/004 补充已升级正式规则引用；REQ-DE-011 更名为"diff 叠加处理"并补充设计决策（BR-DE-STATE-012 子场景，非冲突错误）；新增 REQ-DE-012（继承流）；§6 候选规则追踪表增加状态列，标记 6 条已升级候选，新增 AG-CAND-PERSIST-001 |
+| 2026-05-24 | v3.4 | §4 REQ-AG-004 状态更新（originalText+newText 精确替换接口，AG-CAND-DATA-005 追踪）；§5 REQ-DE-001 状态更新（字符精确替换 + appliedRange）；§6 候选规则追踪表新增 AG-CAND-DATA-005（精确替换接口约束）|
 | 2026-05-22 | v2.2 | 将 REQ-ED-006 映射到 Editor Markdown 正式规则 |
 | 2026-05-22 | v2.1 | 标记 Editor TipTap/Markdown 技术选型已确认 |
 | 2026-05-22 | v2.0 | 将 Editor dirty 关闭保护和状态栏候选规则升级为正式规则映射 |
