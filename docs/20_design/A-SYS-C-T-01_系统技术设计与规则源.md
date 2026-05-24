@@ -557,11 +557,21 @@ Agent 工具执行必须记录工具名称、输入边界、执行结果和错�
 
 <!-- RULE
 rule_id: BR-AG-DATA-001
-主链路: AG-TOOL-CALL
+主链路: AG-SEND-MESSAGE,AG-TOOL-CALL
 域: DATA
+需求映射: REQ-AG-006
 -->
 
-InputReference 是只读上下文，只能注入 Agent 请求，不得触发文件写入、文件移动或 diff 接受。
+InputReference 是结构化内容载体，通过 system prompt L1 层注入 Provider payload；filePath 等内部字段不进入 prompt；Agent 可自行判断引用是编辑对象或背景参考，但不论何种判断，引用内容不得直接触发文件写入——写入必须经由 Diff Review 链路，结构操作必须经由 WS 工具链。
+
+<!-- RULE
+rule_id: BR-AG-TOOL-001
+主链路: AG-TOOL-CALL,WS-FILE-MANAGE
+域: DATA
+需求映射: REQ-AG-004
+-->
+
+Agent 结构操作工具（create_file、create_folder、rename_file、move_file、delete_file）必须通过 WS 模块工具链执行；操作路径必须通过 Workspace 边界守卫（X-CONST-001），且遭遇 PathConflict 时必须返回冲突错误，不得静默覆盖。
 
 <!-- RULE
 rule_id: BR-DE-STATE-001
@@ -701,6 +711,69 @@ rule_id: BR-DE-STATE-005
 
 preapplied 状态只适用于已打开文件链路：diff 创建时立即在 originalText 位置精确替换为 newText（字符级精确替换，非全文替换；pending 为短暂过渡态，立即触发 LOGICAL_STATE_APPLIED）；未打开文件保持 pending 直到用户决策；Accept（已打开文件）只移除绿增，不写 DiskState。
 
+<!-- RULE
+rule_id: BR-AG-PERSIST-001
+主链路: AG-SEND-MESSAGE
+域: PERSIST
+需求映射: REQ-AG-010,REQ-AG-011
+-->
+
+chatMachine 消息必须在 WORKSPACE_CLOSED 时持久化到 workspace.db，并在 WORKSPACE_OPENED 时读取恢复；切换 Workspace 时不得直接清空内存 messages 而不落盘；历史 PendingDiff 在对话恢复后仅展示终态卡片，不恢复非终态 diff 执行状态。
+
+<!-- RULE
+rule_id: BR-AG-DATA-003
+主链路: AG-TOOL-CALL,DE-CREATE-DIFF
+域: DATA
+需求映射: REQ-AG-004
+-->
+
+内容编辑工具（edit_current_editor_document、update_file）必须使用 originalText（精确原文字符串）+ newText（替换内容）接口；系统通过 ProseMirror 文本搜索定位 originalText 后执行字符精确替换；originalText 找不到时返回结构化错误，不 fallback 为全量替换；不得使用全量内容替换整个文件。
+
+<!-- RULE
+rule_id: BR-ED-DATA-002
+主链路: ED-OPEN-FILE,DE-CREATE-DIFF
+域: DATA
+需求映射: REQ-ED-007
+-->
+
+BlockIdExtension 必须由 Editor Runtime 在 TipTap appendTransaction 钩子中生成和维护（UUID v4），为 BLOCK_NODE_NAMES（paragraph、heading、blockquote、codeBlock、listItem、tableCell）中的所有节点分配 block-id 属性；block-id 是 session 级别标识，不持久化到文件内容；模型只能从 document_structure 注入数据中读取 block-id，不得自行生成或假设 block-id 值。
+
+<!-- RULE
+rule_id: BR-ED-STATE-006
+主链路: ED-DIFF-RENDER,DE-CREATE-DIFF
+域: STATE
+需求映射: REQ-ED-008
+-->
+
+GreenAdditionDecoration 只能消费已验证的 appliedRange（ProseMirror 绝对位置范围），由 DiffDecoration 在 diff preapplied 状态时渲染绿增 overlay；appliedRange 未经 syncPendingDiffsWithDocument 验证通过时不得渲染；不得直接向渲染层注入内容绕过 LogicalState（BR-ED-STATE-005）。
+
+<!-- RULE
+rule_id: BR-DE-PERSIST-002
+主链路: DE-ACCEPT-DIFF,DE-REJECT-DIFF,DE-EXPIRE-DIFF
+域: PERSIST
+需求映射: REQ-DE-007,REQ-DE-010
+-->
+
+PendingDiff 状态必须持久化到 workspace.db 的 pending_diffs 表；应用重启后，非终态 diff 记录根据当前文件内容和 baseRevision 校验自动恢复为 preapplied 或转为 expired；已是终态的 diff 记录仅保留供历史展示，不恢复执行状态。
+
+<!-- RULE
+rule_id: BR-DE-STATE-013
+主链路: DE-EXPIRE-DIFF
+域: STATE
+需求映射: REQ-DE-007,REQ-DE-009
+-->
+
+Workspace 关闭时（收到 WORKSPACE_CLOSED 事件），所有非终态 PendingDiff 必须立即转为 expired 状态并写入 workspace.db；不得在 Workspace 切换后仍保留上一 Workspace 的非终态 diff 内存状态。
+
+<!-- RULE
+rule_id: BR-DE-STATE-014
+主链路: DE-REJECT-DIFF,DE-ACCEPT-DIFF
+域: STATE
+需求映射: REQ-DE-008
+-->
+
+关闭包含 preapplied 状态 diff 的 Editor Tab 前，必须提示用户选择批量接受（accept all）或批量拒绝（reject all）该文件所有 preapplied diff；未经选择不得直接关闭 Tab 并丢弃 preapplied 状态。
+
 ## 7. 验收与测试入口
 
 首批测试方案：
@@ -732,9 +805,9 @@ preapplied 状态只适用于已打开文件链路：diff 创建时立即在 ori
 | ~~AG-CAND-DATA-002~~ | REQ-AG-003 | AG-TOOL-CALL | 工具结果必须在同一对话轮次内以 tool_result 形式回流，不得注入为 user message。 | **已升级 → BR-AG-DATA-002** |
 | ~~AG-CAND-DATA-003~~ | REQ-AG-007 | AG-SEND-MESSAGE | Provider API key 不得在前端持有、传递或出现在日志中；由后端安全存储读取。 | **已升级 → BR-AG-SEC-001** |
 | AG-CAND-STATE-003 | REQ-AG-007 | AG-SEND-MESSAGE | Agent 只能向 Provider 暴露 allowedTools 中的工具，不得暴露全部已注册工具。 | 待升级（Phase 12）|
-| AG-CAND-DATA-004 | REQ-AG-006 | AG-TOOL-CALL | InputReference 只注入 Provider 请求上下文，不触发任何文件副作用。 | 待升级（Phase 12）|
-| AG-CAND-PERSIST-001 | REQ-AG-010 | AG-SEND-MESSAGE | 聊天消息必须在 WORKSPACE_CLOSED 时持久化到 workspace.db，WORKSPACE_OPENED 时读取恢复；不得在切换 Workspace 时直接清空内存 messages 而不落盘。 | 待升级（Phase 12）|
-| AG-CAND-DATA-005 | REQ-AG-004 | AG-TOOL-CALL | 内容编辑工具（edit_current_editor_document、update_file）必须使用 originalText（精确原文字符串）+ newText（替换内容）接口；系统通过 PM 文本搜索定位 originalText 后执行字符精确替换；不得使用全量 proposedText 替换整个文件内容；originalText 找不到时返回结构化错误，不 fallback 为全量替换。 | 待升级（Phase 9 重写时）|
+| ~~AG-CAND-DATA-004~~ | REQ-AG-006 | AG-TOOL-CALL | InputReference 只注入 Provider 请求上下文，不触发任何文件副作用。 | **已吸收 → BR-AG-DATA-001（语义升级为结构化内容载体）** |
+| ~~AG-CAND-PERSIST-001~~ | REQ-AG-010,REQ-AG-011 | AG-SEND-MESSAGE | 聊天消息必须在 WORKSPACE_CLOSED 时持久化到 workspace.db，WORKSPACE_OPENED 时读取恢复；不得在切换 Workspace 时直接清空内存 messages 而不落盘。 | **已升级 → BR-AG-PERSIST-001** |
+| ~~AG-CAND-DATA-005~~ | REQ-AG-004 | AG-TOOL-CALL,DE-CREATE-DIFF | 内容编辑工具（edit_current_editor_document、update_file）必须使用 originalText（精确原文字符串）+ newText（替换内容）接口；系统通过 PM 文本搜索定位 originalText 后执行字符精确替换；不得使用全量 proposedText 替换整个文件内容；originalText 找不到时返回结构化错误，不 fallback 为全量替换。 | **已升级 → BR-AG-DATA-003** |
 
 ## 10. Diff Review 候选规则（Phase 13，进入实现前升级为正式规则）
 
@@ -745,8 +818,8 @@ preapplied 状态只适用于已打开文件链路：diff 创建时立即在 ori
 | ~~DE-CAND-DATA-001~~ | REQ-DE-006 | DE-CREATE-DIFF | PendingDiff 必须携带 sourceToolId、baseRevision、createdAt、effectivePath，可追溯到生成它的 ToolExecution。 | **已升级 → BR-DE-DATA-001** |
 | ~~DE-CAND-STATE-004~~ | REQ-DE-002 | DE-ACCEPT-DIFF | Accept（未打开文件路径）前必须校验 DiskState hash 与 baseRevision 一致；不一致时转 expired，不执行写入。 | **已升级 → BR-DE-STATE-004** |
 | ~~DE-CAND-STATE-005~~ | REQ-DE-001 | DE-CREATE-DIFF、DE-ACCEPT-DIFF | preapplied 状态只适用于已打开文件链路；diff 创建时立即修改 LogicalState；Accept（已打开文件）不写 DiskState。 | **已升级 → BR-DE-STATE-005** |
-| DE-CAND-PERSIST-002 | REQ-DE-007 | DE-ACCEPT-DIFF、DE-REJECT-DIFF | PendingDiff 状态必须持久化到 workspace.db，应用重启后可恢复或转 expired。 | 待升级（Phase 13-D）|
-| DE-CAND-STATE-006 | REQ-DE-007 | DE-EXPIRE-DIFF | Workspace 关闭时，所有非终态 PendingDiff 必须转 expired 并写入持久化存储。 | 待升级（Phase 13-D）|
+| ~~DE-CAND-PERSIST-002~~ | REQ-DE-007,REQ-DE-010 | DE-ACCEPT-DIFF、DE-REJECT-DIFF | PendingDiff 状态必须持久化到 workspace.db，应用重启后可恢复或转 expired。 | **已升级 → BR-DE-PERSIST-002** |
+| ~~DE-CAND-STATE-006~~ | REQ-DE-007,REQ-DE-009 | DE-EXPIRE-DIFF | Workspace 关闭时，所有非终态 PendingDiff 必须转 expired 并写入持久化存储。 | **已升级 → BR-DE-STATE-013** |
 
 ## 11. Editor 候选规则（Phase 9 剩余项，进入实现前升级为正式规则）
 
@@ -754,8 +827,8 @@ preapplied 状态只适用于已打开文件链路：diff 创建时立即在 ori
 
 | 候选规则 ID | 承接需求 | 建议链路 | 设计意图 | 状态 |
 |-------------|----------|----------|----------|------|
-| ED-CAND-DATA-002 | REQ-ED-007 | ED-OPEN-FILE | BlockId / Anchor 必须由 Editor Runtime 生成或校验，不由模型输出直接决定执行位置。 | 待升级（Phase 9-E）|
-| ED-CAND-STATE-004 | REQ-ED-008 | ED-DIFF-RENDER | DiffDecoration 只能消费已验证 range/anchor；无法解析时不渲染伪高亮。 | 待升级（Phase 9-F）|
+| ~~ED-CAND-DATA-002~~ | REQ-ED-007 | ED-OPEN-FILE,DE-CREATE-DIFF | BlockId / Anchor 必须由 Editor Runtime 生成或校验，不由模型输出直接决定执行位置。 | **已升级 → BR-ED-DATA-002** |
+| ~~ED-CAND-STATE-004~~ | REQ-ED-008 | ED-DIFF-RENDER,DE-CREATE-DIFF | DiffDecoration 只能消费已验证 range/anchor；无法解析时不渲染伪高亮。 | **已升级 → BR-ED-STATE-006** |
 
 ## 变更记录
 
@@ -777,4 +850,5 @@ preapplied 状态只适用于已打开文件链路：diff 创建时立即在 ori
 | 2026-05-24 | v2.4 | §9 新增 AG-CAND-STRUCT-001（edit_document_block blockId 来源与校验约束，Phase 13-B）|
 | 2026-05-24 | v2.5 | 精确编辑架构（D-01/D-02/D-10）：§0 新增 TERM-DE-006（originalText，精确原文主定位器）、TERM-DE-007（newText，替换内容片段）、TERM-DE-008（appliedRange，已应用 PM 位置范围）；§6 BR-DE-STATE-005 改为字符精确替换语义（非全文替换）；BR-DE-STATE-011 更新（LogicalState 含 newText 不变）；§9 移除 AG-CAND-STRUCT-001（edit_document_block 已移除），新增 AG-CAND-DATA-005（originalText+newText 精确替换接口约束） |
 | 2026-05-24 | v2.6 | §6 新增 BR-ED-PERSIST-003（`.txt` 文件必须共用 TipTap 纯文本序列化路径，不得退回 textarea）；对应 REQ-ED-006，收敛 ED-M-T-01 v1.6 的 .txt 路径决策为正式规则 |
+| 2026-05-24 | v2.8 | §6 修正 BR-AG-DATA-001（InputReference 语义从"只读上下文"升级为"结构化内容载体"，写入仍须经 Diff Review 链路）；新增 BR-AG-TOOL-001（Agent 结构操作工具必须通过 WS 工具链 + PathConflict 守卫）；升级 AG-CAND-PERSIST-001 → BR-AG-PERSIST-001（消息持久化 + 终态卡片恢复）、AG-CAND-DATA-005 → BR-AG-DATA-003（originalText+newText 精确替换接口）、ED-CAND-DATA-002 → BR-ED-DATA-002（BlockIdExtension Runtime 生成规则）、ED-CAND-STATE-004 → BR-ED-STATE-006（GreenAdditionDecoration 验证渲染规则）、DE-CAND-PERSIST-002 → BR-DE-PERSIST-002（PendingDiff 持久化与重启恢复）、DE-CAND-STATE-006 → BR-DE-STATE-013（WORKSPACE_CLOSED 时全体非终态转 expired）；新增 BR-DE-STATE-014（含 preapplied diff 的 Tab 关闭前必须 accept/reject 处理）；AG-CAND-DATA-004 标记为已吸收（语义纳入更新后的 BR-AG-DATA-001） |
 | 2026-05-24 | v2.7 | §4 状态机设计入口表新增"完整设计文档"列；workspaceMachine → WS-M-P-02，editorMachine → ED-M-P-01（新建专项文档）；editorMachine 最小状态列表补充 noWorkspace 和 idle；diffMachine 状态列表对齐 DE-M-T-01 v1.6 正式状态名 |

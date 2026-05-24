@@ -165,7 +165,7 @@ status: active
 
 ### REQ-WS-003
 
-文件树在 WS 进入 active 后通过递归扫描构建，返回目录和文件的 FileNode 层级结构；用户触发刷新时重新扫描并更新树结构。点击文件节点在 Editor 中打开文件；点击目录节点展开/折叠子树。文件树手动管理操作（创建、重命名、移动、删除）由 REQ-WS-011 描述，UI 交互路径（右键菜单、拖拽、行内重命名）与 Agent 工具调用路径在 WS 层共用同一校验和执行链路。
+文件树在 WS 进入 active 后通过递归扫描构建，返回目录和文件的 FileNode 层级结构；用户触发刷新时重新扫描并更新树结构。点击文件节点在 Editor 中打开文件；点击目录节点展开/折叠子树。文件树手动管理操作（创建、重命名、移动、删除）见 REQ-WS-006~REQ-WS-008，UI 交互路径（右键菜单、拖拽、行内重命名）与 Agent 工具调用路径在 WS 层共用同一校验和执行链路。
 
 ### REQ-WS-004
 
@@ -252,4 +252,5 @@ status: active
 | 2026-05-23 | v1.2 | §8 将全部 NEEDS_HUMAN_DECISION 项替换为已决策约束；对齐 binder-core（隐式 DDL 迁移、.binder gitignore、静默降级、排除 fs-watch）|
 | 2026-05-23 | v1.3 | 新增 REQ-WS-011（文件树手动管理，含拖拽整理、行内重命名、右键菜单）；扩展 WS-CLOSE-FLOW（补充 pending diff N 条提示和"全部接受/全部作废/取消"三路分支）；REQ-WS-003/006/007 补充 UI 交互路径与 Agent 工具路径说明 |
 | 2026-05-23 | v1.4 | 删除 REQ-WS-011 独立需求项（UI 交互路径已合并入 REQ-WS-006/007）；WS-FILE-TREE-MANAGE-FLOW 归属改为 REQ-WS-007 补充；WS-CLOSE-FLOW S03 明确多 dirty 标签逐个弹窗处理，任一取消则终止关闭 |
+| 2026-05-24 | v1.6 | REQ-WS-003 中"由 REQ-WS-011 描述"遗留引用改为"见 REQ-WS-006~REQ-WS-008"（REQ-WS-011 已在 v1.4 删除）|
 | 2026-05-23 | v1.5 | WS-OPEN-FLOW S06 workspaceMachine 状态改为 PascalCase（Active）；WS-CLOSE-FLOW S07 idle→NoWorkspace；§9 跨模块交互表 idle→NoWorkspace 全部更新 |
