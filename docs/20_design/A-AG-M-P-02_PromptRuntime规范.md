@@ -24,8 +24,12 @@ interface PromptRuntime {
   systemPrompt: string;       // 组装好的 system prompt（纯文本）
   allowedTools: ToolName[];   // 暴露给模型的工具列表
   workspaceContext: {
-    workspaceRoot: string;    // Workspace 根目录（仅用于 system prompt，不暴露给模型）
-    activeFilePath?: string;  // 当前 Editor 活跃文件路径（相对路径）
+    workspaceRoot: string;                      // 仅用于 system prompt，不暴露给模型
+    activeFilePath?: string;                    // 当前 Editor 活跃文件路径（相对路径）
+    activeFileMode?: "editable" | "readonly";   // 当前活跃文件编辑模式（M-01）
+    activeFileDirty?: boolean;                  // 是否有未保存的用户编辑（M-01）
+    pendingDiffCount?: number;                  // 当前活跃文件待审 PendingDiff 数量（M-01）
+    documentStructure?: string;                 // 仅 .md 文件：标题层级摘要（≤1500字符，每次请求刷新）（M-05）
   };
   inputReferences?: InputReference[];  // 用户引用（Phase 12）
   historySlice?: AgentMessage[];       // 裁剪后的对话历史
@@ -40,16 +44,66 @@ system prompt 按以下顺序组装（L0→L3）：
 
 ### L0：系统基础层
 
-包含：
-- 固定系统指令（模型角色定义、基础行为约束）
-- Workspace 上下文（当前 workspaceRoot 目录名，不暴露完整系统路径）
-- 当前活跃文件（activeFilePath，若有）
+L0 在每次请求时组装，包含以下四组信息：
 
-示例：
+**① 基础指令与工作区**
+
+- 固定系统指令（模型角色定义）
+- Workspace 上下文（workspaceName，不暴露完整系统路径）
+- 当前活跃文件路径（activeFilePath，若有）
+
+**② Editor 状态（每次请求从 editorMachine 读取，客观事实）**
+
+- `activeFileMode`：`editable` 或 `readonly`——模型据此判断是否可发起编辑工具调用
+- `activeFileDirty`：当前文件是否有未保存的用户编辑——模型据此感知 LogicalState 与 DiskState 的差异
+- `pendingDiffCount`：当前文件待审 PendingDiff 数量——模型据此感知是否已有待处理建议
+
+**③ 文档结构摘要（仅 .md 活跃文件，每次请求刷新）**
+
+当 activeFilePath 为 `.md` 文件时，注入当前 LogicalState 的标题层级结构（不注入正文内容）：
+
+```xml
+<document_structure file="{activeFilePath}">
+  <heading level="1">第一章：背景</heading>
+  <heading level="2">1.1 项目起源</heading>
+  <heading level="2">1.2 当前问题</heading>
+  <heading level="1">第二章：方案</heading>
+</document_structure>
+```
+
+约束：
+- 字符上限 1500；超出时只保留标题层级，去除细节
+- 不注入正文文本（正文需模型显式调用 `read_file` 获取）
+- 当前版本**不注入 blockId**（依赖 BlockId 稳定性策略 ED-CAND-DATA-002，待独立 Issue 决策后启用）
+- 非 .md 文件不注入此块（避免对代码文件、纯文本等无意义注入）
+
+**④ 工具使用系统约束声明**
+
+告知模型系统层的硬性边界（描述系统约束事实，不做意图分类或判断）：
+
+- `edit_current_editor_document` 将替换当前活跃文件的**全部**内容；`activeFileMode` 为 `readonly` 时不可用
+- `edit_document_block` 的 blockId 必须来自本 system prompt 注入的 `<document_structure>` 块，不得自报；blockId 未启用时此工具不进入 allowedTools
+- `update_file` 只能操作当前未在 Editor 中打开的文件
+- 当不确定用户是否意图修改文件时，优先通过对话确认，再发起写工具调用
+
+示例组装结果：
+
 ```
 You are a coding assistant for the Binder workspace editor.
 Current workspace: {workspaceName}
-Active file: {activeFilePath}
+Active file: design.md [editable] [dirty] [2 pending diffs]
+
+<document_structure file="design.md">
+  <heading level="1">系统设计</heading>
+  <heading level="2">状态模型</heading>
+  <heading level="2">数据结构</heading>
+</document_structure>
+
+Tool constraints:
+- edit_current_editor_document replaces the entire active file. Unavailable when file is readonly.
+- edit_document_block requires blockId from <document_structure> above; unavailable when blockId not enabled.
+- update_file: only for files not currently open in the editor.
+- When uncertain about user's edit intent, confirm via conversation before calling write tools.
 ```
 
 ### L1：InputReference 上下文层（Phase 12，可选）
@@ -128,6 +182,19 @@ Provider 实际收到的 tools 必须严格等于 allowedTools 指定的工具�
 2. 裁剪只从历史头部删除，不从中间抽取
 3. tool_call 和对应的 tool_result 必须成对保留，不能只保留一个
 
+### 5.3 文件切换上下文标记
+
+当用户在会话中切换活跃文件时（editorMachine 触发 `ACTIVE_FILE_CHANGED` 事件通知 chatMachine），chatMachine 在 `messages` 中追加一条合成系统消息：
+
+```
+[Context: Active file switched from {oldPath} to {newPath}]
+```
+
+此合成消息：
+- `role` 设为 `"system"`，参与 N 条裁剪计算（不额外占用配额）
+- 帮助模型感知会话焦点切换，对切换前文件上下文自然降权
+- 不执行任何摘要或内容压缩，不修改其他历史消息
+
 ## 6. InputReference 内容截断规则
 
 | 项目 | 规则 |
@@ -165,3 +232,4 @@ Rust guard 必须在组装 payload 时扫描并移除上述字段（如果模型
 |------|------|---------|
 | 2026-05-23 | v1.0 | 初始版本，定义 binder-mini Prompt Runtime 四层结构、allowedTools 策略和 forbidden fields 清单 |
 | 2026-05-23 | v1.1 | §4 allowedTools 过滤策略从全局白名单改为场景动态（对齐 binder-core REQ-AG-007）；补充场景决策表和过滤不变量 |
+| 2026-05-24 | v1.2 | §2 workspaceContext 扩展（activeFileMode/activeFileDirty/pendingDiffCount/documentStructure）；§3 L0 层重构为四组信息（基础指令、Editor 状态注入、.md 文档结构摘要、工具系统约束声明）；§5.3 新增文件切换上下文标记协议（ACTIVE_FILE_CHANGED 合成系统消息） |

@@ -87,6 +87,7 @@ stateDiagram-v2
 | `FAILED` | SYS | Provider 错误 / 网络错误 / 工具超时（10s）|
 | `ABORT_FAILED` | SYS | cancelling 状态下 Rust SSE abort 返回 FAILED 而非 CANCELLED；chatMachine 转 error，error.message 标注"取消过程中发生错误" |
 | `RETRY` | User | 用户从 error 状态重试 |
+| `ACTIVE_FILE_CHANGED` | editorMachine | 用户切换活跃文件；chatMachine 向 messages 追加合成系统消息标记上下文切换（见 §6.6）|
 
 ## 5. Context 定义
 
@@ -122,6 +123,7 @@ Context 变更规则：
 3. `inputReferences` 在 SEND_MESSAGE 事件触发时快照到 payload，RESPONSE_DONE 后清空；FAILED/CANCEL 后保留。
 4. `pendingToolExecutions` 在 streaming 收到全部 tool_use block 后整体写入，进入 toolCalling 时从队列头取出 `activeToolExecution`；TOOL_FINISHED 后结算当前项，若队列非空继续取下一个，队列空时回 streaming 等待 RESPONSE_DONE；CANCEL 时清空队列并标记 activeToolExecution 为 cancelled。
 5. RETRY 从 error 状态重发时：context.messages 截断至最后一条**完整** assistant message（partial streaming 内容丢弃）；若无完整 assistant message，messages 保持 SEND_MESSAGE 之前的状态重发。
+6. 文件切换合成消息：收到 ACTIVE_FILE_CHANGED 时，向 messages 追加 `role: "system"` 的合成消息 `"[Context: Active file switched from {oldPath} to {newPath}]"`；此消息参与 N 条裁剪计算，不单独维护。
 
 ## 6. 门禁约束
 
@@ -166,6 +168,15 @@ cancelling → ready 后：
 - 不追加完整轮次消息到历史（不添加 assistant 消息的完整版本）。
 - inputReferences 保留（供用户重发）。
 
+### 6.6 ACTIVE_FILE_CHANGED 处理
+
+ACTIVE_FILE_CHANGED 在 `ready`、`sending`、`streaming`、`toolCalling`、`error` 状态下均有效（`noWorkspace` 时忽略）：
+
+1. 向 `messages` 追加合成系统消息：`[Context: Active file switched from {oldPath} to {newPath}]`
+2. 此消息 `role` 为 `"system"`，标记会话焦点切换，帮助模型在后续轮次对切换前的文件上下文自然降权
+3. **不触发任何状态转移**，不清空历史，不压缩内容
+4. chatMachine 不维护 activeFilePath；L0 层的 workspaceContext 在每次 SEND_MESSAGE 时从 editorMachine 实时读取当前值
+
 ## 7. 与现有 agentMachine 的关系
 
 当前代码中的 `agentMachine` 覆盖了部分状态（idle / validatingProvider / sending / streaming / toolCalling / error），Phase 10 实现时：
@@ -194,3 +205,4 @@ cancelling → ready 后：
 | 2026-05-23 | v1.0 | 初始版本，定义 chatMachine 完整状态机（对齐 binder-core 状态机驱动原则，补全 REQ-AG-008/009）|
 | 2026-05-23 | v1.1 | §2 状态图：补充 sending/streaming/toolCalling → noWorkspace 直接边（WORKSPACE_CLOSED）；删除错误的 error → ready WORKSPACE_CLOSED 边；§6.3 说明修正为"直接 → noWorkspace，不经 cancelling" |
 | 2026-05-24 | v1.2 | §2 状态图 cancelling→error 事件改为 ABORT_FAILED（区分正常 CANCEL_DONE）；§4 新增 ABORT_FAILED 事件描述；§5 Context 新增 pendingToolExecutions 队列（D-03 顺序化并行工具调用），补充 RETRY partial message 截断语义（规则 5）；§6.3 WORKSPACE_CLOSED 处理改为先持久化后清空内存（D-04，对齐 REQ-AG-010），补充 WORKSPACE_OPENED 读取历史逻辑 |
+| 2026-05-24 | v1.3 | §4 新增 ACTIVE_FILE_CHANGED 事件（editorMachine → chatMachine）；§5 Context 规则 6 补充文件切换合成系统消息语义；§6.6 新增 ACTIVE_FILE_CHANGED 处理协议（追加合成消息、不触发状态转移、chatMachine 不维护 activeFilePath）|

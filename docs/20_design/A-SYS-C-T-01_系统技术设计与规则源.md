@@ -698,6 +698,7 @@ preapplied 状态只适用于已打开文件链路：diff 创建时立即修改 
 | AG-CAND-STATE-003 | REQ-AG-007 | AG-SEND-MESSAGE | Agent 只能向 Provider 暴露 allowedTools 中的工具，不得暴露全部已注册工具。 | 待升级（Phase 12）|
 | AG-CAND-DATA-004 | REQ-AG-006 | AG-TOOL-CALL | InputReference 只注入 Provider 请求上下文，不触发任何文件副作用。 | 待升级（Phase 12）|
 | AG-CAND-PERSIST-001 | REQ-AG-010 | AG-SEND-MESSAGE | 聊天消息必须在 WORKSPACE_CLOSED 时持久化到 workspace.db，WORKSPACE_OPENED 时读取恢复；不得在切换 Workspace 时直接清空内存 messages 而不落盘。 | 待升级（Phase 12）|
+| AG-CAND-STRUCT-001 | REQ-AG-TBD | AG-TOOL-CALL | edit_document_block 的 blockId 必须由 Editor Runtime 注入 L0 system prompt 并经 Rust 执行层校验；blockId 无效时返回结构化错误，不得 fallback 为全量替换。 | 待升级（Phase 13-B，BlockId 稳定性策略决策后）|
 
 ## 10. Diff Review 候选规则（Phase 13，进入实现前升级为正式规则）
 
@@ -737,3 +738,4 @@ preapplied 状态只适用于已打开文件链路：diff 创建时立即修改 
 | 2026-05-23 | v2.1 | §0 补充 TERM 块：DiffAnchorRef、PromptRuntime、chatMachine、EditorTab；§4 工作流机：workspaceMachine 状态改为 PascalCase 并加 Closing；editorMachine 补充 dirty 状态；agentMachine 改名 chatMachine 并更新状态列表；删除变更记录重复条目 |
 | 2026-05-24 | v2.2 | §0 新增 TERM 块：DiskState（TERM-DOC-001）、LogicalState（TERM-DOC-002）、DisplayState（TERM-DOC-003）、GreenAddition/绿增（TERM-DE-004，forbidden: 绿审/绿审态）；§10 DE-CAND-STATE-005 描述移除 mounted_pending，改为 preapplied 仅适用已打开文件链路 |
 | 2026-05-24 | v2.3 | §0 TERM-DE-004 补充 code_identifier（GreenAdditionOverlay/GreenAdditionDecoration）；新增 TERM-DE-005（baseRevision）、TERM-AG-005（callId）、TERM-ED-002（ActiveFile）；§6 注册 BR-DE-STATE-010/011/012（DiskState 写入边界、accept 不写盘、统一 expire）、BR-ED-STATE-005（DisplayState 只读派生）、BR-AG-SEC-001（API key 安全）、BR-AG-STATE-002（SSE 错误终止）、BR-AG-DATA-002（工具结果回流）、BR-DE-DATA-001（PendingDiff 可溯源字段）、BR-DE-STATE-004（accept 前校验）、BR-DE-STATE-005（preapplied 三态）共 10 条正式规则；§9 升级 AG-CAND-STATE-002/DATA-002/DATA-003 为正式规则，新增 AG-CAND-PERSIST-001；§10 升级 DE-CAND-DATA-001/STATE-004/STATE-005 为正式规则；§11 候选表增加状态列 |
+| 2026-05-24 | v2.4 | §9 新增 AG-CAND-STRUCT-001（edit_document_block blockId 来源与校验约束，Phase 13-B）|

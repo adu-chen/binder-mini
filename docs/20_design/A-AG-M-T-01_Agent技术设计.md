@@ -124,13 +124,15 @@ interface ToolExecution {
 }
 ```
 
-### 3.4 ToolName（Phase 11 扩展）
+### 3.4 ToolName（Phase 11/13-B 扩展）
 
 当前：`"read_file" | "list_files" | "search_files" | "edit_current_editor_document"`
 
 Phase 11 新增候选：`"create_file" | "create_folder" | "rename_file" | "move_file" | "delete_file" | "update_file" | "web_search"`
 
-所有写操作工具（create/rename/move/delete/edit/update）必须先在 DE-M-T-01 确认 Diff Review 路由协议后，才能进入工具矩阵。
+Phase 13-B 新增候选（BlockId 稳定性策略 ED-CAND-DATA-002 升级为正式规则后激活）：`"edit_document_block"`
+
+所有写操作工具（create/rename/move/delete/edit/update）必须先在 DE-M-T-01 确认 Diff Review 路由协议后，才能进入工具矩阵。`edit_document_block` 激活还额外依赖 L0 文档结构注入机制就绪（AG-M-P-02 §3）。
 
 ### 3.5 InputReference（已有，Phase 12 重构为判别联合类型）
 
@@ -306,3 +308,4 @@ Phase 12 完成标准：
 | 2026-05-23 | v1.1 | §2 agentMachine 升级为 chatMachine 设计（完整状态机见 AG-M-P-04）；§6 补充 allowedTools 场景动态决策、工具超时 10s 约束、tool_result provider-native 协议；§9 Phase 10 验收标准补充 chatMachine 迁移要求和取消路径验证 |
 | 2026-05-23 | v1.2 | §3.5 InputReference 重构为判别联合类型（kind: file|text|url），补充 DocumentAnchorTarget 精确坐标结构，移除旧 mode:"readonly" 字段；§5.2 create_file 说明改为 content 必填不经 Diff Review |
 | 2026-05-24 | v1.3 | §2.1 状态图 cancelling→error 事件名从 FAILED 修正为 ABORT_FAILED（与 AG-M-P-04 §2/§4 对齐） |
+| 2026-05-24 | v1.4 | §3.4 ToolName 新增 Phase 13-B 候选 edit_document_block（依赖 BlockId 稳定性策略和 L0 文档结构注入机制）|
