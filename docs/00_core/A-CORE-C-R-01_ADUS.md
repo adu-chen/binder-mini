@@ -40,7 +40,7 @@
 
 <!-- 自动生成。禁止人工编辑。-->
 <!-- 运行：npm run governance:generate -->
-<!-- 最后生成时间：2026-05-23T20:01:12.595Z -->
+<!-- 最后生成时间：2026-05-24T05:00:07.180Z -->
 
 ### 模块编码表
 
@@ -153,6 +153,9 @@
 | TERM-DE-005   | DE-CREATE-DIFF,DE-EXPIRE-DIFF                                          | 基准版本      | baseRevision      | 原始版本, 基础版本, 内容快照hash             | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
 | TERM-AG-005   | AG-TOOL-CALL                                                           | 工具调用标识    | callId            | toolId, requestId, executionId   | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
 | TERM-ED-002   | ED-OPEN-FILE,ED-SAVE-FILE,AG-SEND-MESSAGE,AG-TOOL-CALL                 | 激活文件      | ActiveFile        | 当前文件, active file, 当前打开文件        | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-DE-006   | DE-CREATE-DIFF,DE-ACCEPT-DIFF,DE-EXPIRE-DIFF,AG-TOOL-CALL              | 精确原文      | originalText      | 原始文本, 原始内容, 文件快照, 全文内容           | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-DE-007   | DE-CREATE-DIFF,DE-ACCEPT-DIFF,DE-REJECT-DIFF,AG-TOOL-CALL              | 替换内容      | newText           | 建议内容, 修改内容, proposedText, 新全文    | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
+| TERM-DE-008   | DE-CREATE-DIFF,ED-DIFF-RENDER                                          | 已应用范围     | appliedRange      | 位置范围, diff位置, 高亮范围               | docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md |
 
 ### 链路视图
 
