@@ -352,12 +352,12 @@ status: active
 
 首批必须设计状态机的逻辑链：
 
-| 状态机 | 主责模块 | 覆盖链路 | 最小状态 |
-|--------|----------|----------|----------|
-| workspaceMachine | WS | WS-OPEN、WS-FILE-MANAGE、WS-CLOSE | NoWorkspace、Loading、Active、Closing、Error |
-| editorMachine | ED | ED-OPEN-FILE、ED-SAVE-FILE | closed、loading、editing、dirty、saving、readonly、error |
-| chatMachine | AG | AG-SEND-MESSAGE、AG-TOOL-CALL | noWorkspace、ready、validatingProvider、sending、streaming、toolCalling、cancelling、error |
-| diffMachine | DE | DE-CREATE-DIFF、DE-ACCEPT-DIFF、DE-REJECT-DIFF、DE-EXPIRE-DIFF | none、pending、accepting、rejecting、expired、terminal、error |
+| 状态机 | 主责模块 | 覆盖链路 | 最小状态 | 完整设计文档 |
+|--------|----------|----------|----------|-------------|
+| workspaceMachine | WS | WS-OPEN、WS-FILE-MANAGE、WS-CLOSE | NoWorkspace、Loading、Active、Closing、Error | **WS-M-P-02** |
+| editorMachine | ED | ED-OPEN-FILE、ED-SAVE-FILE | noWorkspace、idle、loading、editing、dirty、saving、readonly、error | **ED-M-P-01** |
+| chatMachine | AG | AG-SEND-MESSAGE、AG-TOOL-CALL | noWorkspace、ready、validatingProvider、sending、streaming、toolCalling、cancelling、error | AG-M-P-04 |
+| diffMachine | DE | DE-CREATE-DIFF、DE-ACCEPT-DIFF、DE-REJECT-DIFF、DE-EXPIRE-DIFF | pending、preapplied、accepting、rejecting、expired、accepted、rejected、error | DE-M-T-01 §4 |
 
 ## 5. 跨模块约束
 
@@ -777,3 +777,4 @@ preapplied 状态只适用于已打开文件链路：diff 创建时立即在 ori
 | 2026-05-24 | v2.4 | §9 新增 AG-CAND-STRUCT-001（edit_document_block blockId 来源与校验约束，Phase 13-B）|
 | 2026-05-24 | v2.5 | 精确编辑架构（D-01/D-02/D-10）：§0 新增 TERM-DE-006（originalText，精确原文主定位器）、TERM-DE-007（newText，替换内容片段）、TERM-DE-008（appliedRange，已应用 PM 位置范围）；§6 BR-DE-STATE-005 改为字符精确替换语义（非全文替换）；BR-DE-STATE-011 更新（LogicalState 含 newText 不变）；§9 移除 AG-CAND-STRUCT-001（edit_document_block 已移除），新增 AG-CAND-DATA-005（originalText+newText 精确替换接口约束） |
 | 2026-05-24 | v2.6 | §6 新增 BR-ED-PERSIST-003（`.txt` 文件必须共用 TipTap 纯文本序列化路径，不得退回 textarea）；对应 REQ-ED-006，收敛 ED-M-T-01 v1.6 的 .txt 路径决策为正式规则 |
+| 2026-05-24 | v2.7 | §4 状态机设计入口表新增"完整设计文档"列；workspaceMachine → WS-M-P-02，editorMachine → ED-M-P-01（新建专项文档）；editorMachine 最小状态列表补充 noWorkspace 和 idle；diffMachine 状态列表对齐 DE-M-T-01 v1.6 正式状态名 |
