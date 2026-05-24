@@ -146,7 +146,7 @@ interface SearchResult {
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
-| 2026-05-22 | v1.1 | 标记方案进入实现，承接 BR-WS-DATA-005 |
 | 2026-05-22 | v1.0 | 初始版本，定义 Workspace FTS5 搜索索引方案 |
+| 2026-05-22 | v1.1 | 标记方案进入实现，承接 BR-WS-DATA-005 |
 | 2026-05-22 | v1.2 | 文件名前缀由 R 更正为 A（文档头状态 A，约束实现，命名前缀有误） |
 | 2026-05-23 | v1.3 | 对齐 binder-core：存储路径从 workspace.db 改为 search.db；表结构从 3 表（search_index_meta、search_documents、search_documents_fts）改为单表 search_index（file_path、file_name、content）；§3/§4/§5 SQL 引用全部更新 |

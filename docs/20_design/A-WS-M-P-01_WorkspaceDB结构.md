@@ -43,12 +43,13 @@ CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
 CREATE TABLE IF NOT EXISTS pending_diffs (
   id TEXT PRIMARY KEY,
   file_path TEXT NOT NULL,
-  original_text TEXT NOT NULL,
-  proposed_text TEXT NOT NULL,
-  status TEXT NOT NULL,     -- pending/preapplied/accepted/rejected/expired/error
+  original_text TEXT NOT NULL,   -- 待替换精确原文（主定位器，IR-RANGE-005）
+  new_text TEXT NOT NULL,        -- 替换内容（精确替换片段，非全文）
+  status TEXT NOT NULL,          -- pending/preapplied/accepted/rejected/expired/error
   summary TEXT NOT NULL,
-  source_tool_id TEXT,      -- Phase 13-A：关联 ToolExecution.id
-  base_revision TEXT,       -- Phase 13-A：文件内容 hash
+  source_tool_id TEXT,           -- Phase 13-A：关联 ToolExecution.id
+  base_revision TEXT NOT NULL,   -- Phase 13-A：DiskState 全量内容 hash（必填）
+  anchor_json TEXT,              -- DiffAnchorRef 序列化（可选），JSON
   created_at INTEGER NOT NULL
 );
 
@@ -157,3 +158,4 @@ WAL 模式和并发加锁机制延后处理（Phase 13-D 实现持久化时评�
 | 2026-05-23 | v1.1 | §5.3 破坏性变更策略从 NEEDS_HUMAN_DECISION 改为已决策（对齐 binder-core 隐式 DDL，破坏性变更拒绝自动覆盖）；§7 WAL 延后处理；§8 .binder gitignore 改为强制约束 |
 | 2026-05-23 | v1.2 | §3.1 FTS5 表名 files→search_index，字段扩展（file_path、file_name、content），加注"位于 search.db"；§4 步骤 4 补充 schema_version 空值降级处理；§4 步骤 7 说明写入 search.db |
 | 2026-05-24 | v1.3 | pending_diffs.status 注释移除 mounted_pending（对齐三态模型：diff 创建即应用 LogicalState，无需独立 mounted_pending 状态） |
+| 2026-05-24 | v1.4 | §3.2 pending_diffs schema 对齐 DE-M-P-01 v1.3 权威源：proposed_text→new_text（TERM-DE-007）；base_revision TEXT→NOT NULL（必填字段，全量 DiskState hash）；新增 anchor_json TEXT（DiffAnchorRef 序列化，可选）|

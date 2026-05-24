@@ -210,6 +210,20 @@ isDirty = (LogicalState ≠ DiskState)
 
 **关键边界**：Accept（已打开文件路径）不修改 DiskState，不写入 DiskState；DiskState 仅在用户 Cmd+S 保存时更新。这是绝对约束，无例外。
 
+## 5-B. editorMachine 出站事件
+
+editorMachine 在以下场景向其他状态机发出事件：
+
+| 事件 | 接收方 | 触发条件 | 协议来源 |
+|------|--------|----------|----------|
+| `ACTIVE_FILE_CHANGED` | chatMachine | 用户在 Editor 多标签中切换活跃文件（activeFile 变更） | AG-M-P-04 §4 / AG-M-P-02 §5.3：chatMachine 追加合成系统消息标记上下文切换，不触发状态转移 |
+| `LOGICAL_STATE_APPEARED` | diffMachine（逐个） | ED-OPEN-FILE 流程完成后，editorMachine 查询 diffStore，对所有 `filePath` 匹配、`status === "pending"`、`effectivePath === "closed-file"` 的 diff 依次发送 | DE-M-T-01 §5.2：触发 Inherit Flow；diffMachine 完成 baseRevision 校验，hash 一致→ INHERIT_APPLIED，不一致→ EXPIRE_REQUESTED |
+
+**约束：**
+- editorMachine 是这两个事件的**唯一触发方**，其他模块不得代发
+- LOGICAL_STATE_APPEARED 发送顺序：按 diff 创建时间（createdAt）升序，逐一顺序发送，不并行
+- ACTIVE_FILE_CHANGED 在 `noWorkspace` 态时 chatMachine 忽略（见 AG-M-P-04 §6.6）
+
 ## 6. 候选规则
 
 以下规则是 Phase 9 后续实现候选，尚未登记为 `SYS-C-T-01` 的正式 RULE。进入代码实现前必须升级为正式规则、补 `@GOV` owner 和测试覆盖。
@@ -257,3 +271,4 @@ isDirty = (LogicalState ≠ DiskState)
 | 2026-05-24 | v1.8 | §5 补充代码命名规范（D-05）：GreenAdditionOverlay（React 组件）、GreenAdditionDecoration（TipTap 扩展）；绿增 overlay 以 diffId 为 key |
 | 2026-05-24 | v1.9 | §4 BlockId 策略重写（D-07）：BlockIdExtension 架构（appendTransaction + UUID v4 + BLOCK_NODE_NAMES）；§4.2 新增坐标系统说明（blockOffset vs PM position，Markdown 语法字符不计入 textContent）；§5 DiffDecoration 重写（D-08）：拆分为 §5.1/§5.2；appliedRange 作为 decoration 数据来源；applyDiffReplaceInEditor 执行机制；syncPendingDiffsWithDocument 监听协议；withSuppressedPendingContentSync 防误触；§6 ED-CAND-DATA-002/STATE-004 描述更新；§7 验收标准新增 9 |
 | 2026-05-24 | v2.0 | 审计修复：§5-A Dirty 状态表 proposedText 残留替换（C-08/C-09）："AI diff 应用" LogicalState 从"= proposedText"改为"含 newText（originalText 位置已精确替换）"；"Accept (open-file)" 从"不变（已是 proposedText）"改为"不变（已含 newText）" |
+| 2026-05-24 | v2.1 | §5-B 新增 editorMachine 出站事件文档（S-02 系统性审计修复）：ACTIVE_FILE_CHANGED（→ chatMachine，触发条件、约束引用 AG-M-P-04）；LOGICAL_STATE_APPEARED（→ diffMachine，触发条件、顺序化发送约束，引用 DE-M-T-01 §5.2）|
