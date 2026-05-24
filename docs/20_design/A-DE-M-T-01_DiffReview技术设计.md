@@ -17,7 +17,7 @@
 
 | 功能 | 实现状态 | 承接规则 |
 |------|----------|----------|
-| PendingDiff 数据结构（id、filePath、originalText、proposedText、status、summary） | 已实现 | BR-DE-STATE-001 |
+| PendingDiff 数据结构（id、filePath、originalText、proposedText、status、summary）——Phase 9 接口重写：proposedText 改为 newText（精确替换片段），见 §3.1 | 已实现（Phase 5）→Phase 9 重写 | BR-DE-STATE-001 |
 | createPendingDiffFromCurrentEditor | 已实现 | BR-DE-STATE-001 |
 | canExecutePendingDiff（Phase 13-A：status === "pending"（未打开文件）；Phase 13-B 后扩展为 preapplied（已打开文件）均可执行）| 已实现 | BR-DE-STATE-001 |
 | acceptPendingDiff（校验 originalText + 写入） | 已实现 | BR-DE-PERSIST-001 |
@@ -79,7 +79,7 @@ interface PendingDiff {
 
 type PendingDiffStatus =
   | "pending"          // 未打开文件路径：等待用户决策；已打开文件路径：短暂过渡态（立即转 preapplied）
-  | "preapplied"       // 已打开文件路径：LogicalState 已修改为 proposedText；绿增效果展示中（Phase 13-B）
+  | "preapplied"       // Phase 13-B：已打开文件路径：originalText 已精确替换为 newText（appliedRange 已记录）；绿增效果展示中
   | "accepting"        // 内存临时态：用户触发接受，处理中（不写入数据库）
   | "rejecting"        // 内存临时态：用户触发拒绝，处理中（不写入数据库）
   | "expired"          // 终态：LogicalState 变化或 DiskState 变化致失效
@@ -104,14 +104,25 @@ interface TerminalDiffCard {
 
 ```ts
 interface DiffAnchorRef {
-  startBlockId?: string;     // originalText 所在块的 BlockId（来自 ED BlockIdExtension）
-  endBlockId?: string;       // 跨块替换时的结束块 BlockId（单块替换时等于 startBlockId）
-  startOffset?: number;      // originalText 在 startBlockId 块 textContent 中的起始字符偏移（0-based，不含 Markdown 语法字符）
-  endOffset?: number;        // originalText 在 endBlockId 块 textContent 中的结束字符偏移
+  startBlockId?: string;     // originalText 所在块的 BlockId（模型从 document_structure 注入的 block-id 读取）
+  endBlockId?: string;       // 跨块替换时的结束块 BlockId（由 Editor Runtime 从 PM 文本搜索结果计算；单块替换时等于 startBlockId）
+  startOffset?: number;      // originalText 在 startBlockId 块 textContent 中的起始字符偏移（0-based，不含 Markdown 语法字符；模型从工具调用参数传入）
+  endOffset?: number;        // originalText 在 endBlockId 块 textContent 中的结束字符偏移（由 Editor Runtime 从 PM 文本搜索结果计算）
   occurrenceIndex?: number;  // originalText 在文档中第几次出现（0-based，用于重复文本消歧）
   paraIndex?: number;        // 段落序号（降级定位 hint；定位时允许 ±3 块容错半径）
 }
 ```
+
+**工具调用参数 → DiffAnchorRef 映射（G-03）：**
+
+| DiffAnchorRef 字段 | 来源 | 说明 |
+|-------------------|------|------|
+| `startBlockId` | 模型输入（工具调用参数） | 从 `document_structure` 注入的 `block-id` 属性读取，无 anchor 辅助时可省略 |
+| `startOffset` | 模型输入（工具调用参数） | 块内字符偏移，不含 Markdown 语法字符（如 `#`） |
+| `occurrenceIndex` | 模型输入（工具调用参数） | 重复文本消歧；模型确定不重复时可省略，默认 0 |
+| `paraIndex` | 模型输入（工具调用参数，降级 hint）| 允许省略 |
+| `endBlockId` | Editor Runtime 计算 | PM 文本搜索 originalText 后，确定结束位置所在 Block |
+| `endOffset` | Editor Runtime 计算 | PM 文本搜索 originalText 后，计算结束字符偏移 |
 
 ### 3.4 文档三态模型（核心前提）
 
@@ -120,7 +131,7 @@ Diff Review 的所有操作基于以下三态模型：
 | 状态 | 定义 | 谁修改 |
 |------|------|--------|
 | **DiskState** | 磁盘文件永久内容；Workspace 打开时读取 | 仅 Cmd+S 保存；未打开文件 accept 时也直接写 DiskState |
-| **LogicalState** | Editor 内存缓冲区（文件未打开时不存在）| 用户编辑、diff preapply（LogicalState = proposedText）、reject 回滚（LogicalState = originalText）|
+| **LogicalState** | Editor 内存缓冲区（文件未打开时不存在）| 用户编辑、diff preapply（originalText 位置精确替换为 newText）、reject 回滚（appliedRange 位置 newText 回滚为 originalText）|
 | **DisplayState** | 渲染层；读 LogicalState + 绿增等效果；无独立存储 | 派生自 LogicalState，不可直接写 |
 
 Diff 对 LogicalState 的操作：
@@ -180,7 +191,7 @@ stateDiagram-v2
 | 状态 | 含义 | 允许操作 |
 |------|------|----------|
 | pending | 未打开文件：等待用户决策；已打开文件：短暂过渡（立即→preapplied）| accept（未打开）/ reject / expire |
-| preapplied | LogicalState 已修改为 proposedText；绿增效果展示中 | accept（移除绿增）/ reject（回滚 LogicalState）/ expire |
+| preapplied | originalText 已精确替换为 newText（appliedRange 已记录）；绿增效果展示中 | accept（移除绿增）/ reject（appliedRange 精确回滚）/ expire |
 | accepting | 内存临时态：已打开文件→移除绿增确认中；未打开文件→写 DiskState 中 | 等待 ACCEPT_CONFIRMED |
 | rejecting | 内存临时态：正在记录拒绝（已打开：LogicalState 回滚；未打开：无操作）| 等待 TERMINAL_RECORDED |
 | expired | LogicalState 或 DiskState 变化致失效 | 仅允许记录 terminal |
@@ -268,7 +279,7 @@ DIFF_CREATED → pending
 
 **INHERIT_APPLIED 触发方（事件所有权）**：editorMachine 负责触发。ED-OPEN-FILE 流程完成后，editorMachine 查询 diffStore，对所有 `filePath` 匹配且 `status === "pending"` 且 `effectivePath === "closed-file"` 的 diff 依次发送 `LOGICAL_STATE_APPEARED` 事件至对应 diffMachine；diffMachine 完成 baseRevision 校验：
 
-- 校验通过（当前 DiskState hash == baseRevision）：将 effectivePath 更新为 `"open-file"`，应用 proposedText 到 LogicalState，进入 preapplied；editorMachine 注册绿增 overlay。
+- 校验通过（当前 DiskState hash == baseRevision）：将 effectivePath 更新为 `"open-file"`，在 originalText 位置精确替换为 newText（字符级），进入 preapplied，记录 appliedRange；editorMachine 注册绿增 overlay。
 - 校验失败：发出 `EXPIRE_REQUESTED`，diff 进入 expired。
 
 ## 5-A. Cmd+S 触发绿增固化协议（Phase 13-E）
@@ -405,3 +416,4 @@ Phase 13-D（持久化）完成标准：
 | 2026-05-24 | v1.3 | 全面引入文档三态模型（DiskState/LogicalState/DisplayState）；消除 mounted_pending（无此中间状态，diff 创建即 LOGICAL_STATE_APPLIED → preapplied）；新增 §3.4 三态模型表；§3.1 PendingDiffStatus 完整重写（移除 mounted_pending，按路径拆分 pending/accepted/rejected 语义）；§4.2 状态机重画（LOGICAL_STATE_APPLIED、INHERIT_APPLIED 事件；移除 MOUNT_TO_EDITOR/PREAPPLY_CONTENT）；§4.3 约束更新（Accept 不写磁盘）；§4.5 统一失效规则（LogicalState 变化规则，覆盖 diff-on-diff 场景）；§5.1/5.2 链路重写（含继承流）；§5-A/5-B.3 Cmd+S 语义修正（写盘仍为 Cmd+S，accept 不写盘）；§6.2 恢复降级 preapplied→pending；§7 DE-CAND-STATE-005 更新；§9 B/C 验收标准重写 |
 | 2026-05-24 | v1.4 | §3.1 PendingDiff 新增 effectivePath 字段（D-01："open-file"/"closed-file" 路由 accept 语义；INHERIT_APPLIED 时从 closed-file 升级为 open-file）；baseRevision 改为必填（非可选）；§4.2 状态机增加 LOGICAL_STATE_APPLIED_FAILED → error 路径；INHERIT_APPLIED 注释补充 effectivePath 升级语义；§4.3 约束 3/4/5/6 重写（effectivePath 路由、LOGICAL_STATE_APPLIED_FAILED 处置、INHERIT_APPLIED 所有权）；§4.4 回滚协议重写（D-02：revision 不匹配时进入 error 终态而非 conflict 子状态，明确 ROLLBACK_LOGICAL_STATE 事件名和 DE→ED 协议）；§5.2 INHERIT_APPLIED 触发方明确为 editorMachine，补充完整触发流程；§5-A Cmd+S 对话框文案更新（D-07：表述用户编辑 + AI 修改）；§9 B/C 验收标准 3 更新（conflict/expired → error 终态） |
 | 2026-05-24 | v1.5 | 精确编辑架构重写（D-10）：§3.1 PendingDiff 字段重写（proposedText→newText：精确替换片段；originalText 语义改为"待替换精确原文字符串，主定位器 IR-RANGE-005"；新增 appliedRange{from,to} 字段由 Editor Runtime 记录 PM 位置；anchor 由可选改为 DiffAnchorRef 设计完善）；§3.3 DiffAnchorRef 完整重写（startBlockId/endBlockId/startOffset/endOffset/occurrenceIndex/paraIndex）；§3.4 三态模型操作描述改为字符精确替换（非全文替换）；§4.4 回滚协议改为 appliedRange 精确回滚（newText → originalText），ROLLBACK_LOGICAL_STATE 事件携带 appliedRange；§4.5 失效检测改为 syncPendingDiffsWithDocument 事务监听（doc.textBetween 检查）；§5.1 已打开链路图重写（originalText+newText+anchor? 入参，appliedRange 记录）；§6.1 DB schema 更新（proposed_text→new_text，新增 anchor_json）；§9 验收标准新增条目 10（originalText 找不到转 error） |
+| 2026-05-24 | v1.6 | 审计修复：§3.1 PendingDiffStatus preapplied 补充 Phase 13-B 注释（CL-01）；§3.3 DiffAnchorRef 字段注释精确化：startBlockId/startOffset 来源标为"模型输入"，endBlockId/endOffset 标为"Editor Runtime 计算"（CL-02）；§3.3 新增工具调用参数→DiffAnchorRef 映射表（G-03） |

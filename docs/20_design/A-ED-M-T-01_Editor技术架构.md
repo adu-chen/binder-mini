@@ -171,7 +171,8 @@ DiffDecoration 只负责 DisplayState 展示，不拥有 Diff 生命周期。
 
 **syncPendingDiffsWithDocument（事务监听器）**：
 - 监听每次 `docChanged` 事务
-- 对每个 preapplied PendingDiff，检查 `doc.textBetween(appliedRange.from, appliedRange.to) === originalText`
+- 对每个 preapplied PendingDiff，检查 `doc.textBetween(appliedRange.from, appliedRange.to) === newText`
+  （Apply-first 模型：LOGICAL_STATE_APPLIED 后 appliedRange 存储的是 newText 所在范围；用户编辑命中该区域后 newText 不再匹配 → expire）
 - 不匹配时（用户编辑命中区域）发出 `EXPIRE_REQUESTED`，对应 diff 进入 expired
 
 **代码命名规范（对齐 TERM-DE-004 code_identifier）**：
@@ -202,8 +203,8 @@ isDirty = (LogicalState ≠ DiskState)
 |------|-------------|-----------|---------|
 | 文件打开（read DiskState）| = DiskState | 不变 | false |
 | 用户编辑 | 变化 | 不变 | true |
-| AI diff 应用（preapplied）| = proposedText | 不变 | true |
-| Accept（open-file 路径）| 不变（已是 proposedText）| **不变** | true（保持）|
+| AI diff 应用（preapplied）| 含 newText（originalText 位置已精确替换）| 不变 | true |
+| Accept（open-file 路径）| 不变（已含 newText）| **不变** | true（保持）|
 | Reject（open-file 路径）| 回滚 = originalText | 不变 | false（若无其他编辑）|
 | 保存（Cmd+S）| 不变 | = LogicalState | false |
 
@@ -255,3 +256,4 @@ isDirty = (LogicalState ≠ DiskState)
 | 2026-05-24 | v1.7 | §5 标题"绿审态"改为"绿增"；补充编辑器只显示绿增不显示红删约束；新增 §5-A 文档三态模型（DiskState/LogicalState/DisplayState）与 Dirty 状态规则；Accept 不写磁盘绝对边界明确；§6 候选规则 ED-CAND-STATE-004 补充绿增约束；§7 验收标准新增条目 7、8 |
 | 2026-05-24 | v1.8 | §5 补充代码命名规范（D-05）：GreenAdditionOverlay（React 组件）、GreenAdditionDecoration（TipTap 扩展）；绿增 overlay 以 diffId 为 key |
 | 2026-05-24 | v1.9 | §4 BlockId 策略重写（D-07）：BlockIdExtension 架构（appendTransaction + UUID v4 + BLOCK_NODE_NAMES）；§4.2 新增坐标系统说明（blockOffset vs PM position，Markdown 语法字符不计入 textContent）；§5 DiffDecoration 重写（D-08）：拆分为 §5.1/§5.2；appliedRange 作为 decoration 数据来源；applyDiffReplaceInEditor 执行机制；syncPendingDiffsWithDocument 监听协议；withSuppressedPendingContentSync 防误触；§6 ED-CAND-DATA-002/STATE-004 描述更新；§7 验收标准新增 9 |
+| 2026-05-24 | v2.0 | 审计修复：§5-A Dirty 状态表 proposedText 残留替换（C-08/C-09）："AI diff 应用" LogicalState 从"= proposedText"改为"含 newText（originalText 位置已精确替换）"；"Accept (open-file)" 从"不变（已是 proposedText）"改为"不变（已含 newText）" |

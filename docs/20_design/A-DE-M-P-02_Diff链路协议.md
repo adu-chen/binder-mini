@@ -80,7 +80,7 @@ PendingDiff 有两条链路，根据工具类型和目标文件是否已在 Edit
 → DE.createDiff（status=pending）
    [不修改 LogicalState（文件无 LogicalState）；不进入 preapplied]
 → 用户决策：
-    → [接受] ACCEPT_REQUESTED → accepting → 校验 DiskState hash → 写入 DiskState → WRITE_SUCCEEDED → terminal(accepted)
+    → [接受] ACCEPT_REQUESTED → accepting → 校验 DiskState hash（与 baseRevision 一致）→ DiskState 文本搜索 originalText → 精确替换为 newText → WRITE_SUCCEEDED → terminal(accepted)
     → [拒绝] REJECT_REQUESTED → rejecting → TERMINAL_RECORDED → terminal(rejected)
     → [DiskState 被外部修改 / Workspace 关闭] EXPIRE_REQUESTED → expired → TERMINAL_RECORDED → terminal(expired)
 ```
@@ -90,6 +90,7 @@ PendingDiff 有两条链路，根据工具类型和目标文件是否已在 Edit
 - 未打开文件不进入 preapplied
 - 未打开文件的 accept 直接写 DiskState（磁盘）
 - accept 前必须校验当前 DiskState hash 与 baseRevision 一致；不一致转 expired
+- **DiskState 文本写入协议（G-04）**：accept 执行时，在 DiskState 全文内容中搜索 `originalText`（与 IR-RANGE-005 一致：文本匹配为主定位器）；找到则精确替换为 `newText` 并写磁盘；找不到则转 `error`（不写入）；出现多次时使用 `occurrenceIndex` 消歧（默认 0）
 
 ### 4.3 继承流（Inherit Flow，Phase 13-E）
 
@@ -98,13 +99,13 @@ PendingDiff 有两条链路，根据工具类型和目标文件是否已在 Edit
 ```
 LOGICAL_STATE_APPEARED（目标文件被打开，LogicalState 出现）
 → 检查当前 DiskState hash 与 diff.baseRevision 是否一致
-    → 一致：推送 proposedText 给 ED → ED 修改 LogicalState → diff 转 preapplied → 走已打开文件链路
+    → 一致：调用 applyDiffReplaceInEditor（originalText 精确替换为 newText，记录 appliedRange）→ diff 转 preapplied → 走已打开文件链路
     → 不一致：DiskState 已变化 → diff 自动转 expired（不继承）
 ```
 
 继承流约束：
 - 继承时同步将 `effectivePath` 从 `"closed-file"` 更新为 `"open-file"`；后续 accept 走 open-file 路径（只移除绿增，不写入 DiskState）
-- 继承后绿增效果展示（Editor 已打开，LogicalState 已修改为 proposedText）
+- 继承后绿增效果展示（Editor 已打开，LogicalState 含 newText，originalText 已精确替换）
 - 继承后 accept 不写入 DiskState（effectivePath 已是 open-file 语义）；DiskState 需 Cmd+S 保存
 - 继承后 reject 通过 `ROLLBACK_LOGICAL_STATE` 事件回滚 LogicalState 到 originalText
 
@@ -112,18 +113,19 @@ LOGICAL_STATE_APPEARED（目标文件被打开，LogicalState 出现）
 
 ### 5.1 统一失效规则
 
-**核心规则**：`syncPendingDiffsWithDocument` 事务监听器检测 `doc.textBetween(appliedRange.from, appliedRange.to) !== originalText` → 发出 EXPIRE_REQUESTED → diff 自动失效（expired）。
+**核心规则**：`syncPendingDiffsWithDocument` 事务监听器检测 `doc.textBetween(appliedRange.from, appliedRange.to) !== newText` → 发出 EXPIRE_REQUESTED → diff 自动失效（expired）。
+（Apply-first 模型：LOGICAL_STATE_APPLIED 后 appliedRange 区域存储 newText；用户编辑命中该区域后 newText 不再匹配 → expire。）
 
 这是最基础的失效机制，自然覆盖以下场景：
-- 用户编辑命中 diff 区域 → originalText 不再匹配 → 旧 diff 失效
-- 新 diff 覆盖同区域 → LogicalState 变化 → 旧 diff 的 originalText 不匹配 → 旧 diff 失效（diff-on-diff 自然处理）
+- 用户编辑命中 diff 区域 → appliedRange 位置的 newText 不再匹配 → 旧 diff 失效
+- 新 diff 覆盖同区域 → LogicalState 变化 → 旧 diff appliedRange 位置的 newText 不匹配 → 旧 diff 失效（diff-on-diff 自然处理）
 
 ### 5.2 完整失效触发表
 
 | 触发条件 | 检测时机 | 处理 |
 |----------|----------|------|
-| 用户编辑命中 diff 区域（syncPendingDiffsWithDocument：originalText 不匹配）| 每次 docChanged 事务 | 自动转 expired |
-| 新 diff 覆盖同区域（新 diff 执行后旧 diff originalText 不匹配）| 每次 docChanged 事务 | 旧 diff 自动转 expired，新 diff 正常创建 |
+| 用户编辑命中 diff 区域（syncPendingDiffsWithDocument：appliedRange 位置 newText 不匹配）| 每次 docChanged 事务 | 自动转 expired |
+| 新 diff 覆盖同区域（新 diff 执行后旧 diff appliedRange 位置 newText 不匹配）| 每次 docChanged 事务 | 旧 diff 自动转 expired，新 diff 正常创建 |
 | DiskState 变化（磁盘被外部修改，baseRevision hash 不一致）| accept 前校验（未打开文件）、Workspace 重新打开 | 自动转 expired |
 | 目标文件被删除 | 工具调用结果或文件树刷新 | 自动转 expired |
 | Workspace 关闭（expireAllOnClose）| workspaceMachine → Closing | 所有非终态 diff 转 expired |
@@ -191,3 +193,4 @@ Cmd+S 批量 accept 的原子性遵循跳过继续原则：有 diff accept 失�
 | 2026-05-24 | v1.2 | 三态模型重构：§2 表格已打开链路移除 mounted_pending（pending→preapplied 立即）；§3 完整重写（LOGICAL_STATE_APPLIED 事件；accept 不写磁盘；绿增效果）；§4 未打开链路补充继承流（LOGICAL_STATE_APPEARED→preapplied）；§5 失效规则从单条触发改为统一 LogicalState 变化规则（§5.1 核心规则；§5.2 完整表）；§6.2 Cmd+S 语义修正（固化绿增，写盘仍为 Cmd+S 本身）；§7 终态表按路径拆分两行 accepted |
 | 2026-05-24 | v1.3 | §4.3 继承流补充 effectivePath 升级（closed-file → open-file）和 ROLLBACK_LOGICAL_STATE 事件引用；§6.2 Cmd+S 确认框文案对齐 DE-M-T-01 §5-A 最新版本 |
 | 2026-05-24 | v1.4 | 精确编辑架构对齐（D-10）：§3.1 已打开文件链路图重写（originalText+newText+anchor? 入参，applyDiffReplaceInEditor 执行，appliedRange 记录，syncPendingDiffsWithDocument 检测）；§3.2 preapplied 进入条件更新（originalText 精确替换+appliedRange；originalText 找不到→LOGICAL_STATE_APPLIED_FAILED→error）；§3.3 accept 语义注释更新（accept 只移除 appliedRange 绿增，无需再推送内容）；§5.1 失效规则改为 syncPendingDiffsWithDocument 事务监听（doc.textBetween 检查）；§5.2 完整失效触发表更新（用户编辑/新 diff 均通过 originalText 不匹配检测）；§7 终态表更新（proposedText→newText/appliedRange 精确回滚语义） |
+| 2026-05-24 | v1.5 | 审计修复（自洽性）：§4.1 未打开文件 accept 步骤补充"DiskState 文本搜索 originalText → 精确替换为 newText"（G-02）；§4.2 新增 DiskState 文本写入协议约束（G-04：originalText 搜索+occurrenceIndex 消歧）；§4.3 继承流 proposedText 残留全部替换为精确替换语言（C-06/C-07）；§5.1 syncPendingDiffsWithDocument 比较目标修正为 `!== newText`（Apply-first 模型修正，B-01 对应协议文档）；§5.1/5.2 "originalText 不匹配"描述统一改为"appliedRange 位置 newText 不匹配" |

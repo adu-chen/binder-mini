@@ -155,7 +155,7 @@ term_id: TERM-DE-005
 chains: DE-CREATE-DIFF,DE-EXPIRE-DIFF
 zh: 基准版本
 en: baseRevision
-definition: diff 创建时记录的 originalText 内容 hash，用于 Inherit 流程中校验文件打开时的 DiskState 是否与创建时一致；校验失败时 diff 降级为 expired。
+definition: diff 创建时记录的目标文件 DiskState 全量内容 hash（非 originalText 的 hash）；用于在 accept（未打开文件路径）或 Inherit 流程中校验当前 DiskState 是否被外部修改；hash 不一致时 diff 转 expired，不执行写入。
 forbidden: 原始版本, 基础版本, 内容快照hash
 -->
 
