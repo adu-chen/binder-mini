@@ -453,12 +453,14 @@ for (const block of annotationBlocks) {
 const referencedTermIds = new Set();
 for (const block of govBlocks) {
   if (block.fields.term_ref) {
-    const termId = block.fields.term_ref.trim();
-    referencedTermIds.add(termId);
-    if (!termMap.has(termId)) {
-      addTermFinding('TERM_UNREGISTERED', '@GOV term_ref points to unregistered TERM', {
-        file: block.file, line: block.line, term_ref: termId,
-      });
+    // term_ref may list multiple IDs separated by commas — split before lookup.
+    for (const termId of splitCsv(block.fields.term_ref)) {
+      referencedTermIds.add(termId);
+      if (!termMap.has(termId)) {
+        addTermFinding('TERM_UNREGISTERED', '@GOV term_ref points to unregistered TERM', {
+          file: block.file, line: block.line, term_ref: termId,
+        });
+      }
     }
   }
 }

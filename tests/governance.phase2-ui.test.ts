@@ -12,7 +12,7 @@ import { editorMachine } from "../src/machines/editorMachine";
  */
 
 describe("Phase 2 UI governance", () => {
-  // covers: BR-SYS-UI-001 — CSS token system
+  // covers: BR-SYS-UI-001
   it("index.css declares all 12 base tokens and 7 diff tokens", () => {
     const css = readFileSync(resolve(__dirname, "../src/index.css"), "utf8");
 
@@ -36,7 +36,7 @@ describe("Phase 2 UI governance", () => {
     }
   });
 
-  // covers: BR-SYS-UI-002 — ResizeHandle 4-column layout panel constraints
+  // covers: BR-SYS-UI-002
   it("MainLayout localStorage keys are declared in source", () => {
     const src = readFileSync(resolve(__dirname, "../src/components/MainLayout.tsx"), "utf8");
     expect(src).toContain("binder-panel-left-width");
@@ -48,7 +48,7 @@ describe("Phase 2 UI governance", () => {
     expect(src).toContain("600");
   });
 
-  // covers: BR-AG-UI-001 — Send button: ready + non-empty + provider; Cancel button: sending/streaming/toolCalling
+  // covers: BR-AG-UI-001
   it("chatMachine reaches toolCalling from streaming on TOOL_REQUESTED", () => {
     const actor = createActor(chatMachine).start();
     actor.send({ type: "WORKSPACE_OPENED", workspaceRoot: "/tmp/ws" });
@@ -71,7 +71,7 @@ describe("Phase 2 UI governance", () => {
     expect(actor.getSnapshot().value).toBe("cancelling");
   });
 
-  // covers: BR-DE-UI-001 — DiffCard must handle all 8 PendingDiff statuses
+  // covers: BR-DE-UI-001
   it("diffMachine covers all 8 PendingDiffStatus states", () => {
     // Phase 6-A: 8 true states — no "none" placeholder, no "terminal" catch-all;
     // final states are: accepted, rejected, expired, error (TERM-DE-009)
@@ -98,7 +98,7 @@ describe("Phase 2 UI governance", () => {
     expect(actor.getSnapshot().value).toBe("rejected");
   });
 
-  // covers: BR-DE-UI-002 — Red deletion text confined to DiffCard only; EditorArea must not render deletion decorations
+  // covers: BR-DE-UI-002
   it("EditorArea source does not contain red deletion class or --diff-del-bg", () => {
     const src = readFileSync(resolve(__dirname, "../src/components/EditorArea.tsx"), "utf8");
     expect(src).not.toContain("--diff-del-bg");
@@ -108,14 +108,24 @@ describe("Phase 2 UI governance", () => {
     expect(src).toContain("--diff-add-bg");
   });
 
-  // covers: BR-DE-UI-002 confirmation — DiffCard is the sole owner of red deletion rendering
+  // covers: BR-DE-UI-002
   it("DiffCard source contains --diff-del-bg and red deletion text", () => {
     const src = readFileSync(resolve(__dirname, "../src/components/DiffCard.tsx"), "utf8");
     expect(src).toContain("--diff-del-bg");
     expect(src).toContain("--danger");
   });
 
-  // covers: BR-ED-STATE-006 — EditorArea maps editorMachine states to TipTap editable/readonly/locked
+  // covers: BR-DE-UI-003
+  it("DiffActionBar is hidden when nonTerminalCount=0; visible when ≥1 (source check)", () => {
+    const src = readFileSync(resolve(__dirname, "../src/components/DiffActionBar.tsx"), "utf8");
+    // BR-DE-UI-003: batch-accept/reject bar visible only when pending/preapplied diffs exist
+    expect(src).toContain("nonTerminalCount === 0");
+    expect(src).toContain("return null");
+    expect(src).toContain("onAcceptAll");
+    expect(src).toContain("onRejectAll");
+  });
+
+  // covers: BR-ED-STATE-006
   it("editorMachine has all states mapped by EditorArea", () => {
     const EDITOR_STATES = ["noWorkspace", "idle", "loading", "editing", "dirty", "saving", "readonly", "error"];
     const stateKeys = Object.keys(editorMachine.config.states ?? {});

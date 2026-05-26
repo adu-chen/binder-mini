@@ -10,7 +10,7 @@ import { getActiveEditor } from "../stores/editorRegistry";
 /**
  * @GOV
  * codes: BR-AG-DATA-003
- * type: IMPL
+ * type: UTIL
  * chain: AG-TOOL-CALL
  * rules: BR-AG-DATA-003
  * boundary: in=originalText string and newText string from ToolCall input_json |

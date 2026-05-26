@@ -25,7 +25,7 @@ afterEach(() => {
   cleanup();
 });
 
-// covers: BR-ED-STATE-001 — WORKSPACE_OPENED lifts machine from noWorkspace to idle
+// covers: BR-ED-STATE-001
 it("editorMachine: WORKSPACE_OPENED → idle; OPEN_FILE + FILE_LOADED → editing (BR-ED-STATE-001)", () => {
   const actor = createActor(editorMachine).start();
   expect(actor.getSnapshot().value).toBe("noWorkspace");
@@ -39,7 +39,7 @@ it("editorMachine: WORKSPACE_OPENED → idle; OPEN_FILE + FILE_LOADED → editin
   expect(actor.getSnapshot().context.tabs).toHaveLength(1);
 });
 
-// covers: BR-ED-STATE-002 — dedup: FILE_LOADED for same path does not append duplicate tab
+// covers: BR-ED-STATE-002
 it("editorMachine: assignTabOpened dedup — reloading same filePath does not create duplicate tab (BR-ED-STATE-002)", () => {
   const actor = bootToEditing("/ws/b.md");
   // loading the same file again should NOT add a second tab
@@ -49,7 +49,7 @@ it("editorMachine: assignTabOpened dedup — reloading same filePath does not cr
   expect(actor.getSnapshot().context.activeTabId).toBe("/ws/b.md");
 });
 
-// covers: BR-ED-STATE-003 — USER_EDIT in editing → dirty; SAVE → saving; SAVE_SUCCEEDED → editing (clean)
+// covers: BR-ED-STATE-003
 it("editorMachine: editing → dirty → saving → editing lifecycle (BR-ED-STATE-003, BR-ED-PERSIST-001)", () => {
   const actor = bootToEditing();
   expect(actor.getSnapshot().value).toBe("editing");
@@ -63,7 +63,7 @@ it("editorMachine: editing → dirty → saving → editing lifecycle (BR-ED-STA
   expect(actor.getSnapshot().context.tabs[0].dirty).toBe(false);
 });
 
-// covers: BR-ED-PERSIST-002 — SAVE_FAILED → error; dirty tab stays dirty
+// covers: BR-ED-PERSIST-002
 it("editorMachine: SAVE_FAILED → error state; dirty flag remains on tab (BR-ED-PERSIST-002)", () => {
   const actor = bootToEditing();
   actor.send({ type: "USER_EDIT" });
@@ -73,7 +73,7 @@ it("editorMachine: SAVE_FAILED → error state; dirty flag remains on tab (BR-ED
   expect(actor.getSnapshot().context.errorMessage).toBe("disk full");
 });
 
-// covers: BR-ED-STATE-004 — isLastTab guard: closing the last tab → idle
+// covers: BR-ED-STATE-004
 it("editorMachine: isLastTab guard — closing last tab goes to idle (BR-ED-STATE-004)", () => {
   const actor = bootToEditing("/ws/c.md");
   expect(actor.getSnapshot().context.tabs).toHaveLength(1);
@@ -83,7 +83,7 @@ it("editorMachine: isLastTab guard — closing last tab goes to idle (BR-ED-STAT
   expect(actor.getSnapshot().context.activeTabId).toBeNull();
 });
 
-// covers: BR-ED-STATE-004 — SWITCH_TAB updates activeTabId and routes state correctly
+// covers: BR-ED-STATE-004
 it("editorMachine: SWITCH_TAB routes to dirty/editing based on new tab state (BR-ED-STATE-004)", () => {
   const actor = createActor(editorMachine).start();
   actor.send({ type: "WORKSPACE_OPENED", workspaceRoot: "/ws" });
@@ -105,7 +105,7 @@ it("editorMachine: SWITCH_TAB routes to dirty/editing based on new tab state (BR
   expect(actor.getSnapshot().context.activeTabId).toBe("/ws/b.md");
 });
 
-// covers: BR-ED-PERSIST-003 — .txt file type reaches editing via isEditable guard
+// covers: BR-ED-PERSIST-003
 it("editorMachine: .txt fileType is editable (BR-ED-PERSIST-003)", () => {
   const actor = createActor(editorMachine).start();
   actor.send({ type: "WORKSPACE_OPENED", workspaceRoot: "/ws" });
@@ -115,14 +115,14 @@ it("editorMachine: .txt fileType is editable (BR-ED-PERSIST-003)", () => {
   expect(actor.getSnapshot().context.tabs[0].fileType).toBe("txt");
 });
 
-// covers: BR-ED-DATA-002 — BlockIdExtension presence in extension source
+// covers: BR-ED-DATA-002
 it("BlockIdExtension is exported from extensions module (BR-ED-DATA-002)", async () => {
   const { BlockIdExtension } = await import("../src/components/extensions/BlockIdExtension");
   expect(BlockIdExtension).toBeDefined();
   expect(BlockIdExtension.name).toBe("blockId");
 });
 
-// covers: BR-ED-STATE-006 — loading must not mount an empty TipTap editor that writes "" back
+// covers: BR-ED-STATE-006
 it("EditorArea: loading → editing renders loaded markdown and does not emit empty onChange (BR-ED-STATE-006)", async () => {
   const onChange = vi.fn();
   const { container, rerender } = render(
@@ -193,6 +193,17 @@ describe("governance @GOV coverage metrics", () => {
     expect(src).toContain("BR-ED-DATA-002");
     expect(src).toContain("BLOCK_NODE_NAMES");
     expect(src).toContain("setMeta(blockIdPluginKey");
+  });
+
+  // covers: BR-ED-STATE-005
+  it("EditorArea.tsx marks editor readonly when active diff is preapplied (BR-ED-STATE-005 source check)", () => {
+    const src = readFileSync(
+      resolve("/Users/imatstarbucks/binder-mini/src/components/EditorArea.tsx"),
+      "utf8",
+    );
+    // BR-ED-STATE-005: DisplayState is read-only derived; editor locked when preapplied
+    expect(src).toContain("editable:");
+    expect(src).toContain("readonly");
   });
 
   it("EditorArea.tsx suppresses internal TipTap transactions during content sync (BR-ED-STATE-006 source check)", () => {

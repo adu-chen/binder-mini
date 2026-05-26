@@ -6,7 +6,7 @@ import type { Editor } from "@tiptap/core";
  *        BR-ED-STATE-005-DATA-DE-ED-DIFF-RENDER-001,
  *        BR-ED-STATE-006-DATA-DE-ED-DIFF-RENDER-002
  * type: DATA
- * chain: DE-CREATE-DIFF, ED-DIFF-RENDER
+ * chain: DE-CREATE-DIFF
  * rules: BR-AG-DATA-003, BR-ED-STATE-005, BR-ED-STATE-006
  * boundary: in=TipTap Editor instance registered by EditorArea on mount |
  *           out=active Editor reference consumed by applyDiffReplaceInEditor

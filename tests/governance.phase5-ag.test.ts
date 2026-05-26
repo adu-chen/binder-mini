@@ -15,7 +15,7 @@ function bootToReady(workspaceRoot = "/ws") {
   return actor;
 }
 
-// covers: BR-AG-STATE-001 — WORKSPACE_OPENED lifts machine from noWorkspace to ready
+// covers: BR-AG-STATE-001
 it("chatMachine: WORKSPACE_OPENED → ready; workspaceRoot recorded in context (BR-AG-STATE-001)", () => {
   const actor = createActor(chatMachine).start();
   expect(actor.getSnapshot().value).toBe("noWorkspace");
@@ -24,7 +24,7 @@ it("chatMachine: WORKSPACE_OPENED → ready; workspaceRoot recorded in context (
   expect(actor.getSnapshot().context.workspaceRoot).toBe("/my/ws");
 });
 
-// covers: BR-AG-STATE-001 — SEND_MESSAGE appends user message and transitions to validatingProvider
+// covers: BR-AG-STATE-001
 it("chatMachine: SEND_MESSAGE → validatingProvider; user message appended to context.messages (BR-AG-STATE-001)", () => {
   const actor = bootToReady();
   actor.send({
@@ -39,7 +39,7 @@ it("chatMachine: SEND_MESSAGE → validatingProvider; user message appended to c
   expect(msgs[0].content).toBe("Hello, binder!");
 });
 
-// covers: BR-AG-STATE-001 — PROVIDER_INVALID → error
+// covers: BR-AG-STATE-001
 it("chatMachine: PROVIDER_INVALID in validatingProvider → error (BR-AG-STATE-001)", () => {
   const actor = bootToReady();
   actor.send({ type: "SEND_MESSAGE", userContent: "test", inputReferences: [] });
@@ -53,7 +53,7 @@ it("chatMachine: PROVIDER_INVALID in validatingProvider → error (BR-AG-STATE-0
   expect(actor.getSnapshot().context.errorMessage).toBe("missing config");
 });
 
-// covers: BR-AG-STATE-001 — PROVIDER_INVALID can fail visibly before SEND_MESSAGE appends anything
+// covers: BR-AG-STATE-001
 it("chatMachine: PROVIDER_INVALID in ready → visible error without appending user message (BR-AG-STATE-001)", () => {
   const actor = bootToReady();
   actor.send({
@@ -66,7 +66,7 @@ it("chatMachine: PROVIDER_INVALID in ready → visible error without appending u
   expect(actor.getSnapshot().context.errorMessage).toBe("请先填写模型名称。");
 });
 
-// covers: BR-AG-STATE-001 — RETRY returns to ready instead of deadlocking in validatingProvider
+// covers: BR-AG-STATE-001
 it("chatMachine: RETRY from error clears error and returns to ready (BR-AG-STATE-001)", () => {
   const actor = bootToReady();
   actor.send({
@@ -80,7 +80,7 @@ it("chatMachine: RETRY from error clears error and returns to ready (BR-AG-STATE
   expect(actor.getSnapshot().context.errorMessage).toBeNull();
 });
 
-// covers: BR-AG-STATE-002 — TOKEN_RECEIVED accumulates streamingContent
+// covers: BR-AG-STATE-002
 it("chatMachine: STREAM_STARTED → streaming; TOKEN_RECEIVED accumulates streamingContent (BR-AG-STATE-002)", () => {
   const actor = bootToReady();
   actor.send({ type: "SEND_MESSAGE", userContent: "Hello", inputReferences: [] });
@@ -93,7 +93,7 @@ it("chatMachine: STREAM_STARTED → streaming; TOKEN_RECEIVED accumulates stream
   expect(actor.getSnapshot().context.streamingContent).toBe("Hello!");
 });
 
-// covers: BR-AG-STATE-002 — RESPONSE_DONE finalizes message and clears streamingContent
+// covers: BR-AG-STATE-002
 it("chatMachine: RESPONSE_DONE → ready; assistant message finalized, streamingContent cleared (BR-AG-STATE-002)", () => {
   const actor = bootToReady();
   actor.send({ type: "SEND_MESSAGE", userContent: "Hi", inputReferences: [] });
@@ -110,7 +110,7 @@ it("chatMachine: RESPONSE_DONE → ready; assistant message finalized, streaming
   expect(msgs[1].content).toBe("World");
 });
 
-// covers: BR-AG-STATE-001 — CANCEL in streaming → cancelling → CANCEL_DONE → ready
+// covers: BR-AG-STATE-001
 it("chatMachine: CANCEL in streaming → cancelling → CANCEL_DONE → ready (BR-AG-STATE-001)", () => {
   const actor = bootToReady();
   actor.send({ type: "SEND_MESSAGE", userContent: "test", inputReferences: [] });
@@ -123,7 +123,7 @@ it("chatMachine: CANCEL in streaming → cancelling → CANCEL_DONE → ready (B
   expect(actor.getSnapshot().value).toBe("ready");
 });
 
-// covers: BR-AG-PERSIST-001 — WORKSPACE_CLOSED clears all context (persistAndClearSession)
+// covers: BR-AG-PERSIST-001
 it("chatMachine: WORKSPACE_CLOSED → noWorkspace; context fully cleared (BR-AG-PERSIST-001)", () => {
   const actor = bootToReady();
   actor.send({ type: "SEND_MESSAGE", userContent: "hello", inputReferences: [] });
@@ -138,7 +138,7 @@ it("chatMachine: WORKSPACE_CLOSED → noWorkspace; context fully cleared (BR-AG-
   expect(ctx.streamingContent).toBe("");
 });
 
-// covers: BR-AG-STATE-001 — ACTIVE_FILE_CHANGED appends system message without state change
+// covers: BR-AG-STATE-001
 it("chatMachine: ACTIVE_FILE_CHANGED appends system message in ready/streaming states (BR-AG-STATE-001)", () => {
   const actor = bootToReady();
   actor.send({ type: "ACTIVE_FILE_CHANGED", oldPath: "/ws/a.md", newPath: "/ws/b.md" });
@@ -149,7 +149,7 @@ it("chatMachine: ACTIVE_FILE_CHANGED appends system message in ready/streaming s
   expect(msgs[0].content).toContain("b.md");
 });
 
-// covers: BR-AG-SEC-001 — chatActor.ts @GOV annotation covers API key security rule
+// covers: BR-AG-SEC-001
 describe("governance @GOV coverage for Phase 5", () => {
   it("chatActor.ts contains @GOV with BR-AG-SEC-001 and provider persistence rules", () => {
     const src = readFileSync(
@@ -164,6 +164,7 @@ describe("governance @GOV coverage for Phase 5", () => {
     expect(src).toContain("BR-AG-DATA-004");
   });
 
+  // covers: BR-AG-PERSIST-002
   it("ipc.ts contains @GOV for save_api_key with BR-AG-SEC-001 and BR-AG-PERSIST-002", () => {
     const src = readFileSync(
       resolve("/Users/imatstarbucks/binder-mini/src/ipc.ts"),
@@ -175,6 +176,7 @@ describe("governance @GOV coverage for Phase 5", () => {
     expect(src).toContain("BR-AG-PERSIST-002");
   });
 
+  // covers: BR-AG-UI-001
   it("ProviderConfigPanel exposes provider and model controls (BR-AG-UI-001 source check)", () => {
     const src = readFileSync(
       resolve("/Users/imatstarbucks/binder-mini/src/components/ProviderConfigPanel.tsx"),
@@ -211,6 +213,7 @@ describe("governance @GOV coverage for Phase 5", () => {
     expect(src).toContain("onModelChange={handleModelChange}");
   });
 
+  // covers: BR-AG-STATE-003
   it("Rust chat_stream dispatches by provider instead of hardcoding Anthropic (BR-AG-STATE-003 source check)", () => {
     const src = readFileSync(
       resolve("/Users/imatstarbucks/binder-mini/src-tauri/src/lib.rs"),
@@ -227,6 +230,7 @@ describe("governance @GOV coverage for Phase 5", () => {
     expect(src).toContain("ChatStreamEvent::Done { request_id");
   });
 
+  // covers: BR-AG-TOOL-001
   it("Rust chat_stream builds PromptRuntime context and exposes read/list/search tools", () => {
     const src = readFileSync(
       resolve("/Users/imatstarbucks/binder-mini/src-tauri/src/lib.rs"),
@@ -241,9 +245,10 @@ describe("governance @GOV coverage for Phase 5", () => {
     expect(src).toContain("active_file_path");
     expect(src).toContain("active_file_logical_state_snapshot");
     expect(src).toContain("<active_file_logical_state");
-    expect(src).toContain("not from read_file/DiskState");
+    expect(src).toContain("Do not use read_file/DiskState");
   });
 
+  // covers: BR-AG-DATA-004
   it("Agent runtime carries ActiveFile LogicalStateSnapshot instead of relying on DiskState", () => {
     const typesSrc = readFileSync(
       resolve("/Users/imatstarbucks/binder-mini/src/types/agent.ts"),

@@ -9,7 +9,7 @@ import type { Node } from "@tiptap/pm/model";
  * type: DATA
  * chain: ED-OPEN-FILE
  * rules: BR-ED-DATA-002
- * boundary: in=ProseMirror appendTransaction with new block nodes | out=data-block-id attribute stamped on paragraph, heading, blockquote, codeBlock, listItem, tableCell nodes via UUID v4 per session | delegate=crypto.randomUUID for BlockId generation; never persists BlockId to disk
+ * boundary: in=ProseMirror appendTransaction with new block nodes | out=BlockId UUID attribute stamped on paragraph, heading, blockquote, codeBlock, listItem, tableCell nodes via crypto.randomUUID per session; never persists BlockId to disk
  * term_ref: TERM-ED-004
  */
 

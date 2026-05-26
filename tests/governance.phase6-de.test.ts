@@ -305,7 +305,7 @@ describe("Issue 6-A — PendingDiff type + diffMachine 8-state + DiffStore", () 
 
 describe("Issue 6-B — AG-TOOL-CALL execution loop + applyDiffReplaceInEditor", () => {
 
-  // covers: BR-AG-DATA-002 — chatMachine toolCalling state and streamingContent cleared
+  // covers: BR-AG-DATA-002
   it("chatMachine: TOOL_REQUESTED → toolCalling; streamingContent cleared; TOOL_FINISHED → streaming (BR-AG-DATA-002)", () => {
     const actor = createActor(chatMachine).start();
     actor.send({ type: "WORKSPACE_OPENED", workspaceRoot: "/ws" });
@@ -329,7 +329,7 @@ describe("Issue 6-B — AG-TOOL-CALL execution loop + applyDiffReplaceInEditor",
     expect(actor.getSnapshot().value).toBe("streaming");
   });
 
-  // covers: BR-AG-DATA-002 — ToolResult callId matches ToolExecution.id (source invariant)
+  // covers: BR-AG-DATA-002
   it("chatActor.ts: ToolResult message sets toolCallId = payload.id from SSE tool_call event (source check BR-AG-DATA-002)", () => {
     const src = readFileSync(
       resolve("/Users/imatstarbucks/binder-mini/src/services/chatActor.ts"),
@@ -344,14 +344,14 @@ describe("Issue 6-B — AG-TOOL-CALL execution loop + applyDiffReplaceInEditor",
     expect(src).toContain('type: "text"');
   });
 
-  // covers: BR-AG-DATA-003 — applyDiffReplaceInEditor: no active editor registered
+  // covers: BR-AG-DATA-003
   it("applyDiffReplaceInEditor: no editor registered → { success: false, reason: \"no-editor\" } (BR-AG-DATA-003)", () => {
     unregisterEditor(); // ensure clean state
     const result = applyDiffReplaceInEditor("Hello world", "Hi");
     expect(result).toEqual({ success: false, reason: "no-editor" });
   });
 
-  // covers: BR-AG-DATA-003 — applyDiffReplaceInEditor: originalText absent in document
+  // covers: BR-AG-DATA-003
   it("applyDiffReplaceInEditor: originalText not in PM doc → { success: false, reason: \"text-not-found\" }; no edit dispatched (BR-AG-DATA-003)", () => {
     const { editor, edits } = buildMockEditor("Hello world");
     registerEditor(editor);
@@ -364,7 +364,7 @@ describe("Issue 6-B — AG-TOOL-CALL execution loop + applyDiffReplaceInEditor",
     }
   });
 
-  // covers: BR-AG-DATA-003 — empty originalText must not create NaN delete ranges
+  // covers: BR-AG-DATA-003
   it("applyDiffReplaceInEditor: empty originalText → text-not-found and no PM mutation (BR-AG-DATA-003)", () => {
     const { editor, edits } = buildMockEditor("Hello world");
     registerEditor(editor);
@@ -377,7 +377,7 @@ describe("Issue 6-B — AG-TOOL-CALL execution loop + applyDiffReplaceInEditor",
     }
   });
 
-  // covers: BR-AG-DATA-003 — applyDiffReplaceInEditor: full success path
+  // covers: BR-AG-DATA-003
   it("applyDiffReplaceInEditor: originalText found → success: true; appliedRange and revision tokens correct (BR-AG-DATA-003)", () => {
     // "Hello world" → text node at PM pos 1..11
     // "world" starts at flatText index 6 → PM from=7; last char at index 10 → PM to=12 (exclusive)
@@ -413,7 +413,8 @@ afterEach(() => {
 
 describe("Issue 6-C — GreenAdditionDecoration + syncPendingDiffsWithDocument", () => {
 
-  // covers: BR-ED-STATE-006, BR-DE-UI-002 — decoration plugin must be read-only
+  // covers: BR-ED-STATE-006
+  // covers: BR-DE-UI-002
   it("GreenAdditionDecoration: plugin body contains Decoration.inline and does NOT mutate document (source check)", () => {
     const src = readFileSync(
       resolve("/Users/imatstarbucks/binder-mini/src/components/EditorArea.tsx"),
@@ -433,7 +434,7 @@ describe("Issue 6-C — GreenAdditionDecoration + syncPendingDiffsWithDocument",
     expect(pluginSection).not.toContain("setContent");
   });
 
-  // covers: BR-DE-UI-002 — null meta → empty decoration; undefined meta → map existing
+  // covers: BR-DE-UI-002
   it("GreenAdditionDecoration: apply() handles three meta cases: undefined → map, null → empty, object → new decoration (source check)", () => {
     const src = readFileSync(
       resolve("/Users/imatstarbucks/binder-mini/src/components/EditorArea.tsx"),
@@ -445,7 +446,7 @@ describe("Issue 6-C — GreenAdditionDecoration + syncPendingDiffsWithDocument",
     expect(src).toContain("Decoration.inline(from, to, {");
   });
 
-  // covers: BR-DE-STATE-012 — content change removes newText → EXPIRE_REQUESTED
+  // covers: BR-DE-STATE-012
   it("syncPendingDiffsWithDocument: preapplied diff expires when newText is no longer in content (BR-DE-STATE-012)", () => {
     const store = createDiffStoreInstance();
     // BASE_PARAMS.newText = "Hello Binder"
@@ -474,7 +475,7 @@ describe("Issue 6-C — GreenAdditionDecoration + syncPendingDiffsWithDocument",
     expect(store.getTerminalCards()[0].status).toBe("expired");
   });
 
-  // covers: BR-DE-STATE-012 — App.tsx handleEditorChange contains the expire guard (source check)
+  // covers: BR-DE-STATE-012
   it("App.tsx handleEditorChange: contains BR-DE-STATE-012 expire guard for allDiffs (source check)", () => {
     const src = readFileSync(
       resolve("/Users/imatstarbucks/binder-mini/src/App.tsx"),
@@ -496,7 +497,8 @@ describe("Issue 6-C — GreenAdditionDecoration + syncPendingDiffsWithDocument",
 
 describe("Issue 6-D — Accept / Reject / Expire full chains", () => {
 
-  // covers: BR-DE-STATE-010, BR-DE-STATE-011 — accept open-file full chain
+  // covers: BR-DE-STATE-010
+  // covers: BR-DE-STATE-011
   it("acceptDiff open-file: pending → preapplied → accepting → accepted → terminal (BR-DE-STATE-010/011)", () => {
     const store = createDiffStoreInstance();
     const diff = store.createDiff(BASE_PARAMS);
@@ -517,7 +519,7 @@ describe("Issue 6-D — Accept / Reject / Expire full chains", () => {
     expect(store.getDiffActor(diff.id)).toBeUndefined();
   });
 
-  // covers: BR-DE-STATE-010 — acceptDiff open-file: no disk write (source check)
+  // covers: BR-DE-STATE-010
   it("acceptDiff open-file: does NOT call writeWorkspaceFile or edSaveFile (BR-DE-STATE-010 source check)", () => {
     const src = readFileSync(
       resolve("/Users/imatstarbucks/binder-mini/src/App.tsx"),
@@ -534,7 +536,7 @@ describe("Issue 6-D — Accept / Reject / Expire full chains", () => {
     expect(acceptFn).not.toContain("edSaveFile");
   });
 
-  // covers: BR-DE-STATE-002 — reject open-file full chain
+  // covers: BR-DE-STATE-002
   it("rejectDiff open-file: pending → preapplied → rejecting → rejected → terminal (BR-DE-STATE-002)", () => {
     const store = createDiffStoreInstance();
     const diff = store.createDiff(BASE_PARAMS);
@@ -552,7 +554,7 @@ describe("Issue 6-D — Accept / Reject / Expire full chains", () => {
     expect(store.getTerminalCards()[0].status).toBe("rejected");
   });
 
-  // covers: BR-DE-STATE-002 — rejectDiff applies inverse replace to the target tab and handles failures
+  // covers: BR-DE-STATE-002
   it("rejectDiff open-file: targets the diff tab and records error on rollback failure (source check BR-DE-STATE-002)", () => {
     const src = readFileSync(
       resolve("/Users/imatstarbucks/binder-mini/src/App.tsx"),
@@ -570,7 +572,8 @@ describe("Issue 6-D — Accept / Reject / Expire full chains", () => {
     expect(rejectFn).toContain("return true");
   });
 
-  // covers: BR-DE-STATE-003 / BR-DE-STATE-012 — expire from preapplied state
+  // covers: BR-DE-STATE-003
+  // covers: BR-DE-STATE-012
   it("expireDiff: preapplied → expired → terminal; DiffStore removes pending entry (BR-DE-STATE-003/012)", () => {
     const store = createDiffStoreInstance();
     const diff = store.createDiff(BASE_PARAMS);
@@ -585,7 +588,7 @@ describe("Issue 6-D — Accept / Reject / Expire full chains", () => {
     expect(store.getDiff(diff.id)).toBeUndefined();
   });
 
-  // covers: BR-DE-STATE-013 — WORKSPACE_CLOSED expires all non-terminal diffs
+  // covers: BR-DE-STATE-013
   it("BR-DE-STATE-013: diffStore.clear() on WORKSPACE_CLOSED stops all actors and wipes pending+terminal maps", () => {
     const store = createDiffStoreInstance();
     const d1 = store.createDiff(BASE_PARAMS);
@@ -617,7 +620,7 @@ describe("Issue 6-E — workspace.db persistence + Inherit Flow (todo)", () => {
 
 describe("Issue 6-F — Composite scenarios + DiffCard UI + @GOV coverage", () => {
 
-  // covers: BR-DE-STATE-014 — tab close guard (source check)
+  // covers: BR-DE-STATE-014
   it("CLOSE_TAB guard: App.tsx handleTabDiscard checks for preapplied diff before closing tab (BR-DE-STATE-014 source check)", () => {
     const src = readFileSync(
       resolve("/Users/imatstarbucks/binder-mini/src/App.tsx"),
@@ -637,7 +640,8 @@ describe("Issue 6-F — Composite scenarios + DiffCard UI + @GOV coverage", () =
     expect(guardPos).toBeLessThan(closePos); // guard precedes direct close
   });
 
-  // covers: BR-DE-STATE-014, BR-DE-STATE-002 — reject-and-close must not mutate the active editor for another tab
+  // covers: BR-DE-STATE-014
+  // covers: BR-DE-STATE-002
   it("PreappliedTabCloseDialog reject path: does not switch active tab before rollback; rejectDiff targets tab content (source check)", () => {
     const src = readFileSync(
       resolve("/Users/imatstarbucks/binder-mini/src/App.tsx"),
@@ -651,7 +655,7 @@ describe("Issue 6-F — Composite scenarios + DiffCard UI + @GOV coverage", () =
     expect(closeRejectFn).toContain("rejectDiff(diff)");
   });
 
-  // covers: BR-DE-UI-001 — DiffCard actions must preserve clicked diffId through App handlers
+  // covers: BR-DE-UI-001
   it("DiffCard accept/reject: App.tsx handlers use the clicked diffId, not only activePreappliedDiff (source check)", () => {
     const src = readFileSync(
       resolve("/Users/imatstarbucks/binder-mini/src/App.tsx"),
@@ -664,7 +668,7 @@ describe("Issue 6-F — Composite scenarios + DiffCard UI + @GOV coverage", () =
     expect(src).toContain("onRejectDiff={(diffId) => handleRejectDiffById(diffId)}");
   });
 
-  // covers: BR-AG-DATA-002 — multi tool_use blocks are batched instead of overwriting earlier calls
+  // covers: BR-AG-DATA-002
   it("chat_stream multi-tool chain: Rust emits ToolCalls and chatActor handles toolCalls batch (source check)", () => {
     const rustSrc = readFileSync(
       resolve("/Users/imatstarbucks/binder-mini/src-tauri/src/lib.rs"),
@@ -682,7 +686,7 @@ describe("Issue 6-F — Composite scenarios + DiffCard UI + @GOV coverage", () =
     expect(chatSrc).toContain("await handleToolCalls(payload.calls)");
   });
 
-  // covers: BR-AG-DATA-003 — apply failure drives diffMachine error path in production source
+  // covers: BR-AG-DATA-003
   it("chatActor apply failure: creates a traceable diff and sends LOGICAL_STATE_APPLIED_FAILED (source check)", () => {
     const src = readFileSync(
       resolve("/Users/imatstarbucks/binder-mini/src/services/chatActor.ts"),
@@ -693,7 +697,7 @@ describe("Issue 6-F — Composite scenarios + DiffCard UI + @GOV coverage", () =
     expect(src).toContain("diffStore.moveToTerminal(pendingDiff.id");
   });
 
-  // covers: BR-DE-UI-001 — DiffCard terminal rendering (source check)
+  // covers: BR-DE-UI-001
   it("DiffCard: terminal status guard exists in source — accept/reject actions hidden for non-preapplied states (BR-DE-UI-001 source check)", () => {
     const src = readFileSync(
       resolve("/Users/imatstarbucks/binder-mini/src/components/DiffCard.tsx"),
@@ -703,7 +707,7 @@ describe("Issue 6-F — Composite scenarios + DiffCard UI + @GOV coverage", () =
     expect(src).toContain("preapplied");
   });
 
-  // covers: BR-DE-UI-002 — red deletion decoration confined to DiffCard (source check)
+  // covers: BR-DE-UI-002
   it("DiffCard contains --diff-del-bg; EditorArea does NOT contain --diff-del-bg (BR-DE-UI-002)", () => {
     const diffCardSrc = readFileSync(
       resolve("/Users/imatstarbucks/binder-mini/src/components/DiffCard.tsx"),
@@ -717,7 +721,8 @@ describe("Issue 6-F — Composite scenarios + DiffCard UI + @GOV coverage", () =
     expect(editorAreaSrc).not.toContain("--diff-del-bg");
   });
 
-  // covers: BR-AG-DATA-002, BR-AG-DATA-003 — @GOV annotation coverage
+  // covers: BR-AG-DATA-002
+  // covers: BR-AG-DATA-003
   it("chatActor.ts contains @GOV with BR-AG-DATA-002 and BR-AG-DATA-003 (BR-AG-DATA-002/003 source check)", () => {
     const src = readFileSync(
       resolve("/Users/imatstarbucks/binder-mini/src/services/chatActor.ts"),
@@ -728,7 +733,16 @@ describe("Issue 6-F — Composite scenarios + DiffCard UI + @GOV coverage", () =
     expect(src).toContain("BR-AG-DATA-003");
   });
 
-  // covers: BR-DE-PERSIST-001 — Cmd+S guard: accept before save (source check)
+  // covers: BR-DE-STATE-004
+  it("PendingDiff carries baseRevision field for closed-file accept hash check (BR-DE-STATE-004 source check)", () => {
+    const diff = createDiff(BASE_PARAMS);
+    // BR-DE-STATE-004: baseRevision must be present; closed-file accept checks DiskState hash against it
+    expect(diff.baseRevision).toBeDefined();
+    expect(diff.baseRevision).toMatch(/^[a-f0-9]{64}$/);
+    expect(diff.effectivePath).toBe("open-file");
+  });
+
+  // covers: BR-DE-PERSIST-001
   it("Cmd+S guard: handleSaveFile blocks save and sets PreappliedSaveDialog; handleAcceptAllAndSave accepts before writing (BR-DE-PERSIST-001 source check)", () => {
     const src = readFileSync(
       resolve("/Users/imatstarbucks/binder-mini/src/App.tsx"),

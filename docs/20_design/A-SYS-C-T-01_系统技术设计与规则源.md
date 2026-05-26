@@ -371,6 +371,16 @@ forbidden: diff卡片, diff消息, diff气泡
 code_identifier: DiffCard
 -->
 
+<!-- TERM
+term_id: TERM-DE-012
+chains: DE-ACCEPT-DIFF,DE-REJECT-DIFF
+zh: 批量操作栏
+en: DiffActionBar
+definition: ChatPanel 底部常驻批量操作栏；当 pending 或 preapplied 状态的 PendingDiff 数量 ≥ 1 时可见，展示"接受全部"和"拒绝全部"按钮；pending/preapplied 数量为 0 时隐藏；完整视觉规范见 SYS-C-UI-01 §4.3 和 §5.4。
+forbidden: 批量操作按钮, diff批量栏, 全部接受栏
+code_identifier: DiffActionBar
+-->
+
 ## 1. 模块注册
 
 <!-- MODULE
@@ -1095,6 +1105,7 @@ ChatInput 的 Enter 键触发发送时必须检查 IME 合成状态，实现必�
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-05-26 | v3.5 | §0 新增 TERM-DE-012（DiffActionBar，批量操作栏）；修正 editorActor.ts @GOV type IMPL→UTIL；删除 editorRegistry.ts 未注册链路 ED-DIFF-RENDER；修正 BlockIdExtension.ts boundary out= 抽象词 data |
 | 2026-05-25 | v3.4 | 补齐 ActiveFile 编辑上下文规则：新增 TERM-AG-015（LogicalStateSnapshot）和 BR-AG-DATA-004，明确 edit_current_editor_document 必须以 ED LogicalStateSnapshot 为上下文源，read_file/DiskState 不得替代当前编辑器逻辑态 |
 | 2026-05-25 | v3.3 | 补齐 Agent API key 持久化规则：新增 TERM-AG-013（ProviderCredential）和 BR-AG-PERSIST-002，明确 Provider API key 为应用级后端持久化凭据，跨应用重启与 Workspace 切换保持有效，前端只接收 apiKeyConfigured |
 | 2026-05-22 | v1.9 | 注册 Editor Markdown 读取保存转换规则 |
