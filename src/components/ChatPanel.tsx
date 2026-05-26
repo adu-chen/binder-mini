@@ -4,18 +4,20 @@
  * type: RB
  * chain: AG-SEND-MESSAGE, AG-TOOL-CALL, DE-CREATE-DIFF, DE-ACCEPT-DIFF, DE-REJECT-DIFF
  * rules: BR-AG-UI-001, BR-AG-SEC-001, BR-DE-UI-001, BR-DE-UI-002, BR-DE-UI-003
- * boundary: in=chatMachine state name and ChatMachineContext fields, DiffEntry list with sourceToolId per entry, and apiKeyConfigured boolean | out=ChatPanel rendering MessageList with per-message DiffCards, DiffActionBar above ChatInput, InputReferenceBar, ChatInput, and ProviderConfigPanel
+ * boundary: in=chatMachine state name, ChatMachineContext fields, InputReferenceDropPayload from drag/drop, DiffEntry list, and apiKeyConfigured boolean | out=ChatPanel rendering MessageList, DiffActionBar, InputReference DropZone, InputReferenceBar, ChatInput, and ProviderConfigPanel
  * term_ref: TERM-AG-002, TERM-AG-004, TERM-DE-001, TERM-DE-012
  */
 
+import { useState } from "react";
 import { MessageList } from "./MessageList";
 import type { DiffForRender } from "./MessageList";
 import { DiffActionBar } from "./DiffActionBar";
 import { InputReferenceBar } from "./InputReferenceBar";
 import { ChatInput } from "./ChatInput";
 import { ProviderConfigPanel } from "./ProviderConfigPanel";
-import type { AgentMessage, InputReference } from "../machines/chatMachine";
-import type { ProviderConfig } from "../types/agent";
+import type { AgentMessage } from "../machines/chatMachine";
+import type { InputReference, InputReferenceDropPayload, ProviderConfig } from "../types/agent";
+import { readInputReferenceDragPayload, consumePendingDragPayload } from "../utils/inputReferenceDrag";
 
 type ChatStateName =
   | "noWorkspace"
@@ -35,6 +37,7 @@ interface ChatPanelProps {
   diffs: DiffForRender[];
   providerConfig: ProviderConfig;
   errorMessage: string | null;
+  referenceError: string | null;
   onSend: (content: string) => void;
   onCancel: () => void;
   onRetry: () => void;
@@ -42,6 +45,9 @@ interface ChatPanelProps {
   onModelChange: (model: string) => void;
   onSaveApiKey: (key: string) => void;
   onRemoveReference: (index: number) => void;
+  onCreateTextReference: (content: string) => void;
+  onCreateUrlReference: (url: string) => void;
+  onDropInputReference: (payload: InputReferenceDropPayload) => void;
   onAcceptDiff: (diffId: string) => void;
   onRejectDiff: (diffId: string) => void;
   /** BR-DE-UI-003: batch-accept all pending/preapplied diffs. */
@@ -60,6 +66,7 @@ export function ChatPanel({
   diffs,
   providerConfig,
   errorMessage,
+  referenceError,
   onSend,
   onCancel,
   onRetry,
@@ -67,17 +74,46 @@ export function ChatPanel({
   onModelChange,
   onSaveApiKey,
   onRemoveReference,
+  onCreateTextReference,
+  onCreateUrlReference,
+  onDropInputReference,
   onAcceptDiff,
   onRejectDiff,
   onAcceptAll,
   onRejectAll,
 }: ChatPanelProps) {
   const isStreaming = STREAMING_STATES.has(stateName);
+  const [dragDepth, setDragDepth] = useState(0);
+  const isReferenceDragOver = dragDepth > 0;
 
   // BR-DE-UI-003: DiffActionBar shows only when pending/preapplied diffs exist.
   const nonTerminalCount = diffs.filter(
     (d) => d.status === "pending" || d.status === "preapplied",
   ).length;
+
+  function handleReferenceDragEnter(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragDepth((depth) => depth + 1);
+  }
+
+  function handleReferenceDragOver(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }
+
+  function handleReferenceDragLeave(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragDepth((depth) => Math.max(0, depth - 1));
+  }
+
+  function handleReferenceDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragDepth(0);
+    // Prefer the in-memory store (WKWebView bypass) over dataTransfer, which
+    // returns "" for custom MIME types in Tauri's WKWebView drop handlers.
+    const payload = consumePendingDragPayload() ?? readInputReferenceDragPayload(e.dataTransfer);
+    if (payload) onDropInputReference(payload);
+  }
 
   return (
     <div
@@ -164,15 +200,44 @@ export function ChatPanel({
             onRejectAll={onRejectAll}
           />
 
-          <InputReferenceBar references={inputReferences} onRemove={onRemoveReference} />
+          <section
+            onDragEnterCapture={handleReferenceDragEnter}
+            onDragOverCapture={handleReferenceDragOver}
+            onDragLeaveCapture={handleReferenceDragLeave}
+            onDropCapture={handleReferenceDrop}
+            style={{
+              flexShrink: 0,
+              outline: isReferenceDragOver ? "1px solid var(--accent)" : "none",
+              background: isReferenceDragOver ? "var(--bg-hover)" : undefined,
+            }}
+          >
+            {referenceError && (
+              <div
+                style={{
+                  margin: "6px 8px 0",
+                  padding: "5px 8px",
+                  border: "1px solid var(--danger)",
+                  color: "var(--danger)",
+                  fontSize: 12,
+                }}
+              >
+                {referenceError}
+              </div>
+            )}
 
-          <ChatInput
-            stateName={stateName}
-            providerConfigured={providerConfig.apiKeyConfigured}
-            modelConfigured={providerConfig.model.trim().length > 0}
-            onSend={onSend}
-            onCancel={onCancel}
-          />
+            <InputReferenceBar references={inputReferences} onRemove={onRemoveReference} />
+
+            <ChatInput
+              stateName={stateName}
+              providerConfigured={providerConfig.apiKeyConfigured}
+              modelConfigured={providerConfig.model.trim().length > 0}
+              hasInputReferences={inputReferences.length > 0}
+              onSend={onSend}
+              onCancel={onCancel}
+              onCreateTextReference={onCreateTextReference}
+              onCreateUrlReference={onCreateUrlReference}
+            />
+          </section>
 
           <ProviderConfigPanel
             provider={providerConfig.provider}

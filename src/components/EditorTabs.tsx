@@ -1,3 +1,5 @@
+import { writeInputReferenceDragPayload, setPendingDragPayload, clearPendingDragPayload } from "../utils/inputReferenceDrag";
+
 /**
  * @GOV
  * codes: BR-ED-STATE-003, BR-ED-STATE-005
@@ -42,13 +44,20 @@ export function EditorTabs({ tabs, activeTabId, onTabClick, onTabClose }: Editor
         return (
           <div
             key={tab.id}
+            draggable
+            onDragStart={(e) => {
+              const payload = { kind: "file" as const, filePath: tab.filePath };
+              writeInputReferenceDragPayload(e.dataTransfer, payload);
+              setPendingDragPayload(payload);
+            }}
+            onDragEnd={() => { clearPendingDragPayload(); }}
             style={{
               display: "flex",
               alignItems: "center",
               gap: 4,
               padding: "6px 10px 6px 12px",
               flexShrink: 0,
-              cursor: "pointer",
+              cursor: "grab",
               borderBottom: isActive ? "2px solid var(--accent)" : "2px solid transparent",
               background: isActive ? "var(--bg-elevated)" : "transparent",
               color: isActive ? "var(--text-primary)" : "var(--text-secondary)",
@@ -64,6 +73,7 @@ export function EditorTabs({ tabs, activeTabId, onTabClick, onTabClose }: Editor
               )}
             </span>
             <button
+              draggable={false}
               onClick={(e) => {
                 e.stopPropagation();
                 onTabClose(tab.id);

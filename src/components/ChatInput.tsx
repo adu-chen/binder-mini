@@ -4,7 +4,7 @@
  * type: RB
  * chain: AG-SEND-MESSAGE
  * rules: BR-AG-UI-001
- * boundary: in=chatMachine state name and inputReferences from chatMachine context | out=ChatInput textarea with send button enabled only in ready state with non-empty content and configured provider, and cancel button in sending/streaming/toolCalling states
+ * boundary: in=chatMachine state name, inputReferences count, paste text, and provider readiness | out=ChatInput textarea with paste-created InputReference callbacks and send/cancel controls
  * term_ref: TERM-AG-002
  */
 
@@ -24,8 +24,11 @@ interface ChatInputProps {
   stateName: ChatStateName;
   providerConfigured: boolean;
   modelConfigured: boolean;
+  hasInputReferences: boolean;
   onSend: (content: string) => void;
   onCancel: () => void;
+  onCreateTextReference: (content: string) => void;
+  onCreateUrlReference: (url: string) => void;
 }
 
 const ACTIVE_STATES: ReadonlySet<ChatStateName> = new Set([
@@ -39,8 +42,11 @@ export function ChatInput({
   stateName,
   providerConfigured,
   modelConfigured,
+  hasInputReferences,
   onSend,
   onCancel,
+  onCreateTextReference,
+  onCreateUrlReference,
 }: ChatInputProps) {
   const [draft, setDraft] = useState("");
   // BR-AG-UI-001: WebKit (Tauri WKWebView) fires compositionend BEFORE keydown,
@@ -57,7 +63,7 @@ export function ChatInput({
   // chatMachine handles SEND_MESSAGE from "error" by clearing the prior error first.
   const canSend =
     (stateName === "ready" || stateName === "error") &&
-    providerConfigured && modelConfigured && draft.trim().length > 0;
+    providerConfigured && modelConfigured && (draft.trim().length > 0 || hasInputReferences);
   const disabled = stateName === "noWorkspace";
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -67,7 +73,7 @@ export function ChatInput({
     // setTimeout(0) callback in onCompositionEnd fires as a macrotask — after this keydown.
     if (e.key === "Enter" && !isComposingRef.current && !e.shiftKey && canSend) {
       e.preventDefault();
-      const content = draft.trim();
+      const content = draft.trim() || "请基于引用内容处理。";
       setDraft("");
       onSend(content);
     }
@@ -75,9 +81,21 @@ export function ChatInput({
 
   function handleSend() {
     if (!canSend) return;
-    const content = draft.trim();
+    const content = draft.trim() || "请基于引用内容处理。";
     setDraft("");
     onSend(content);
+  }
+
+  function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const pasted = e.clipboardData.getData("text/plain");
+    if (!pasted.trim()) return;
+    e.preventDefault();
+    const trimmed = pasted.trim();
+    if (/^https?:\/\/\S+$/i.test(trimmed)) {
+      onCreateUrlReference(trimmed);
+    } else {
+      onCreateTextReference(pasted);
+    }
   }
 
   return (
@@ -97,6 +115,20 @@ export function ChatInput({
         onCompositionStart={() => { isComposingRef.current = true; }}
         onCompositionEnd={() => { setTimeout(() => { isComposingRef.current = false; }, 0); }}
         onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
+        onDragOver={(e) => {
+          // Allow drop cursor over the textarea so the section's onDropCapture
+          // receives the event. Without this, WKWebView may show a "forbidden"
+          // cursor and suppress the drop entirely.
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+        }}
+        onDrop={(e) => {
+          // Prevent Cocoa's NSTextView from natively inserting text/plain into
+          // the textarea. Reference creation is handled by the parent <section>'s
+          // capture-phase onDropCapture, which fires before this handler.
+          e.preventDefault();
+        }}
         placeholder={
           disabled
             ? "请先打开 Workspace"

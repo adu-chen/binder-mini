@@ -18,7 +18,8 @@ import type { MarkdownStorage } from "tiptap-markdown";
 import { Plugin, PluginKey } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
 import { BlockIdExtension, blockIdPluginKey } from "./extensions/BlockIdExtension";
-import { registerEditor, unregisterEditor } from "../stores/editorRegistry";
+import { getEditorSelectionReference, registerEditor, unregisterEditor } from "../stores/editorRegistry";
+import { writeInputReferenceDragPayload, setPendingDragPayload, clearPendingDragPayload } from "../utils/inputReferenceDrag";
 
 type EditorStateName =
   | "noWorkspace"
@@ -37,6 +38,7 @@ interface AppliedRange {
 
 interface EditorAreaProps {
   stateName: EditorStateName;
+  filePath?: string | null;
   content: string;
   fileType?: "md" | "txt" | "other";
   appliedRange: AppliedRange | null;
@@ -106,6 +108,7 @@ function isLocked(stateName: EditorStateName): boolean {
 
 export function EditorArea({
   stateName,
+  filePath,
   content,
   fileType = "md",
   appliedRange,
@@ -162,6 +165,7 @@ export function EditorArea({
   return (
     <TiptapEditorSurface
       stateName={stateName}
+      filePath={filePath}
       content={content}
       fileType={fileType}
       appliedRange={appliedRange}
@@ -172,6 +176,7 @@ export function EditorArea({
 
 function TiptapEditorSurface({
   stateName,
+  filePath,
   content,
   fileType = "md",
   appliedRange,
@@ -280,6 +285,21 @@ function TiptapEditorSurface({
 
   return (
     <div
+      onDragStart={(e) => {
+        if (!editor || !filePath) return;
+        const selection = getEditorSelectionReference(editor);
+        if (!selection) return;
+        const payload = {
+          kind: "selection" as const,
+          filePath,
+          content: selection.content,
+          displayName: selection.content,
+          anchor: selection.anchor,
+        };
+        writeInputReferenceDragPayload(e.dataTransfer, payload);
+        setPendingDragPayload(payload);
+      }}
+      onDragEnd={() => { clearPendingDragPayload(); }}
       style={{
         flex: 1,
         overflowY: "auto",
