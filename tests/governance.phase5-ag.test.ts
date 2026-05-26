@@ -15,6 +15,10 @@ function bootToReady(workspaceRoot = "/ws") {
   return actor;
 }
 
+function repoPath(path: string) {
+  return resolve(process.cwd(), path);
+}
+
 // covers: BR-AG-STATE-001
 it("chatMachine: WORKSPACE_OPENED → ready; workspaceRoot recorded in context (BR-AG-STATE-001)", () => {
   const actor = createActor(chatMachine).start();
@@ -153,7 +157,7 @@ it("chatMachine: ACTIVE_FILE_CHANGED appends system message in ready/streaming s
 describe("governance @GOV coverage for Phase 5", () => {
   it("chatActor.ts contains @GOV with BR-AG-SEC-001 and provider persistence rules", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/services/chatActor.ts"),
+      repoPath("src/services/chatActor.ts"),
       "utf8",
     );
     expect(src).toContain("@GOV");
@@ -167,7 +171,7 @@ describe("governance @GOV coverage for Phase 5", () => {
   // covers: BR-AG-PERSIST-002
   it("ipc.ts contains @GOV for save_api_key with BR-AG-SEC-001 and BR-AG-PERSIST-002", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/ipc.ts"),
+      repoPath("src/ipc.ts"),
       "utf8",
     );
     expect(src).toContain("saveApiKey");
@@ -179,7 +183,7 @@ describe("governance @GOV coverage for Phase 5", () => {
   // covers: BR-AG-UI-001
   it("ProviderConfigPanel exposes provider and model controls (BR-AG-UI-001 source check)", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/components/ProviderConfigPanel.tsx"),
+      repoPath("src/components/ProviderConfigPanel.tsx"),
       "utf8",
     );
     expect(src).toContain("onProviderChange");
@@ -192,7 +196,7 @@ describe("governance @GOV coverage for Phase 5", () => {
 
   it("ChatInput requires both API key and model before enabling send (BR-AG-UI-001 source check)", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/components/ChatInput.tsx"),
+      repoPath("src/components/ChatInput.tsx"),
       "utf8",
     );
     expect(src).toContain("modelConfigured");
@@ -202,7 +206,7 @@ describe("governance @GOV coverage for Phase 5", () => {
 
   it("App wires ProviderConfig state changes into ChatPanel (BR-AG-UI-001 source check)", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/App.tsx"),
+      repoPath("src/App.tsx"),
       "utf8",
     );
     expect(src).toContain("function handleProviderChange");
@@ -216,7 +220,7 @@ describe("governance @GOV coverage for Phase 5", () => {
   // covers: BR-AG-STATE-003
   it("Rust chat_stream dispatches by provider instead of hardcoding Anthropic (BR-AG-STATE-003 source check)", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src-tauri/src/lib.rs"),
+      repoPath("src-tauri/src/lib.rs"),
       "utf8",
     );
     expect(src).toContain('match provider_key.as_str()');
@@ -233,7 +237,7 @@ describe("governance @GOV coverage for Phase 5", () => {
   // covers: BR-AG-TOOL-001
   it("Rust chat_stream builds PromptRuntime context and exposes read/list/search tools", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src-tauri/src/lib.rs"),
+      repoPath("src-tauri/src/lib.rs"),
       "utf8",
     );
     expect(src).toContain("struct PromptRuntimeContext");
@@ -251,15 +255,15 @@ describe("governance @GOV coverage for Phase 5", () => {
   // covers: BR-AG-DATA-004
   it("Agent runtime carries ActiveFile LogicalStateSnapshot instead of relying on DiskState", () => {
     const typesSrc = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/types/agent.ts"),
+      repoPath("src/types/agent.ts"),
       "utf8",
     );
     const appSrc = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/App.tsx"),
+      repoPath("src/App.tsx"),
       "utf8",
     );
     const chatSrc = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/services/chatActor.ts"),
+      repoPath("src/services/chatActor.ts"),
       "utf8",
     );
 

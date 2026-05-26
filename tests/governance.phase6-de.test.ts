@@ -39,6 +39,10 @@ const BASE_PARAMS = {
   effectivePath: "open-file" as const,
 };
 
+function repoPath(path: string) {
+  return resolve(process.cwd(), path);
+}
+
 // ── ProseMirror mock editor factory ──────────────────────────────────────────
 // Uses @tiptap/pm/model (already a project dependency) to create a real
 // ProseMirror document so that doc.descendants() traversal is exercised
@@ -332,7 +336,7 @@ describe("Issue 6-B — AG-TOOL-CALL execution loop + applyDiffReplaceInEditor",
   // covers: BR-AG-DATA-002
   it("chatActor.ts: ToolResult message sets toolCallId = payload.id from SSE tool_call event (source check BR-AG-DATA-002)", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/services/chatActor.ts"),
+      repoPath("src/services/chatActor.ts"),
       "utf8",
     );
     // The ToolResult message construction must carry callId = Anthropic tool_use id.
@@ -417,7 +421,7 @@ describe("Issue 6-C — GreenAdditionDecoration + syncPendingDiffsWithDocument",
   // covers: BR-DE-UI-002
   it("GreenAdditionDecoration: plugin body contains Decoration.inline and does NOT mutate document (source check)", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/components/EditorArea.tsx"),
+      repoPath("src/components/EditorArea.tsx"),
       "utf8",
     );
     // Extract just the plugin definition block.
@@ -437,7 +441,7 @@ describe("Issue 6-C — GreenAdditionDecoration + syncPendingDiffsWithDocument",
   // covers: BR-DE-UI-002
   it("GreenAdditionDecoration: apply() handles three meta cases: undefined → map, null → empty, object → new decoration (source check)", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/components/EditorArea.tsx"),
+      repoPath("src/components/EditorArea.tsx"),
       "utf8",
     );
     expect(src).toContain("if (meta === undefined)");
@@ -478,7 +482,7 @@ describe("Issue 6-C — GreenAdditionDecoration + syncPendingDiffsWithDocument",
   // covers: BR-DE-STATE-012
   it("App.tsx handleEditorChange: contains BR-DE-STATE-012 expire guard for allDiffs (source check)", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/App.tsx"),
+      repoPath("src/App.tsx"),
       "utf8",
     );
     const fn = src.slice(
@@ -522,7 +526,7 @@ describe("Issue 6-D — Accept / Reject / Expire full chains", () => {
   // covers: BR-DE-STATE-010
   it("acceptDiff open-file: does NOT call writeWorkspaceFile or edSaveFile (BR-DE-STATE-010 source check)", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/App.tsx"),
+      repoPath("src/App.tsx"),
       "utf8",
     );
     const acceptFn = src.slice(
@@ -557,7 +561,7 @@ describe("Issue 6-D — Accept / Reject / Expire full chains", () => {
   // covers: BR-DE-STATE-002
   it("rejectDiff open-file: targets the diff tab and records error on rollback failure (source check BR-DE-STATE-002)", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/App.tsx"),
+      repoPath("src/App.tsx"),
       "utf8",
     );
     const rejectFn = src.slice(
@@ -623,7 +627,7 @@ describe("Issue 6-F — Composite scenarios + DiffCard UI + @GOV coverage", () =
   // covers: BR-DE-STATE-014
   it("CLOSE_TAB guard: App.tsx handleTabDiscard checks for preapplied diff before closing tab (BR-DE-STATE-014 source check)", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/App.tsx"),
+      repoPath("src/App.tsx"),
       "utf8",
     );
     const fn = src.slice(
@@ -644,7 +648,7 @@ describe("Issue 6-F — Composite scenarios + DiffCard UI + @GOV coverage", () =
   // covers: BR-DE-STATE-002
   it("PreappliedTabCloseDialog reject path: does not switch active tab before rollback; rejectDiff targets tab content (source check)", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/App.tsx"),
+      repoPath("src/App.tsx"),
       "utf8",
     );
     const closeRejectFn = src.slice(
@@ -658,7 +662,7 @@ describe("Issue 6-F — Composite scenarios + DiffCard UI + @GOV coverage", () =
   // covers: BR-DE-UI-001
   it("DiffCard accept/reject: App.tsx handlers use the clicked diffId, not only activePreappliedDiff (source check)", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/App.tsx"),
+      repoPath("src/App.tsx"),
       "utf8",
     );
     expect(src).toContain("function handleAcceptDiffById(diffId: string)");
@@ -671,11 +675,11 @@ describe("Issue 6-F — Composite scenarios + DiffCard UI + @GOV coverage", () =
   // covers: BR-AG-DATA-002
   it("chat_stream multi-tool chain: Rust emits ToolCalls and chatActor handles toolCalls batch (source check)", () => {
     const rustSrc = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src-tauri/src/lib.rs"),
+      repoPath("src-tauri/src/lib.rs"),
       "utf8",
     );
     const chatSrc = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/services/chatActor.ts"),
+      repoPath("src/services/chatActor.ts"),
       "utf8",
     );
     expect(rustSrc).toContain("ToolCalls { request_id: String, calls: Vec<ToolCallPayload> }");
@@ -689,7 +693,7 @@ describe("Issue 6-F — Composite scenarios + DiffCard UI + @GOV coverage", () =
   // covers: BR-AG-DATA-003
   it("chatActor apply failure: creates a traceable diff and sends LOGICAL_STATE_APPLIED_FAILED (source check)", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/services/chatActor.ts"),
+      repoPath("src/services/chatActor.ts"),
       "utf8",
     );
     expect(src).toContain("LOGICAL_STATE_APPLIED_FAILED");
@@ -700,7 +704,7 @@ describe("Issue 6-F — Composite scenarios + DiffCard UI + @GOV coverage", () =
   // covers: BR-DE-UI-001
   it("DiffCard: terminal status guard exists in source — accept/reject actions hidden for non-preapplied states (BR-DE-UI-001 source check)", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/components/DiffCard.tsx"),
+      repoPath("src/components/DiffCard.tsx"),
       "utf8",
     );
     expect(src).toContain("BR-DE-UI-001");
@@ -710,11 +714,11 @@ describe("Issue 6-F — Composite scenarios + DiffCard UI + @GOV coverage", () =
   // covers: BR-DE-UI-002
   it("DiffCard contains --diff-del-bg; EditorArea does NOT contain --diff-del-bg (BR-DE-UI-002)", () => {
     const diffCardSrc = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/components/DiffCard.tsx"),
+      repoPath("src/components/DiffCard.tsx"),
       "utf8",
     );
     const editorAreaSrc = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/components/EditorArea.tsx"),
+      repoPath("src/components/EditorArea.tsx"),
       "utf8",
     );
     expect(diffCardSrc).toContain("--diff-del-bg");
@@ -725,7 +729,7 @@ describe("Issue 6-F — Composite scenarios + DiffCard UI + @GOV coverage", () =
   // covers: BR-AG-DATA-003
   it("chatActor.ts contains @GOV with BR-AG-DATA-002 and BR-AG-DATA-003 (BR-AG-DATA-002/003 source check)", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/services/chatActor.ts"),
+      repoPath("src/services/chatActor.ts"),
       "utf8",
     );
     expect(src).toContain("@GOV");
@@ -745,7 +749,7 @@ describe("Issue 6-F — Composite scenarios + DiffCard UI + @GOV coverage", () =
   // covers: BR-DE-PERSIST-001
   it("Cmd+S guard: handleSaveFile blocks save and sets PreappliedSaveDialog; handleAcceptAllAndSave accepts before writing (BR-DE-PERSIST-001 source check)", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/App.tsx"),
+      repoPath("src/App.tsx"),
       "utf8",
     );
     // handleSaveFile must check for preapplied and show dialog.

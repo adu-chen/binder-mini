@@ -21,6 +21,10 @@ function bootToEditing(filePath = "/ws/a.md") {
   return actor;
 }
 
+function repoPath(path: string) {
+  return resolve(process.cwd(), path);
+}
+
 afterEach(() => {
   cleanup();
 });
@@ -162,7 +166,7 @@ describe("governance @GOV coverage metrics", () => {
     const { execSync } = require("node:child_process");
     const count = parseInt(
       execSync(
-        'grep -r "@GOV" /Users/imatstarbucks/binder-mini/src --include="*.ts" --include="*.tsx" -l | wc -l',
+        'grep -r "@GOV" src --include="*.ts" --include="*.tsx" -l | wc -l',
         { encoding: "utf8" },
       ).trim(),
       10,
@@ -173,7 +177,7 @@ describe("governance @GOV coverage metrics", () => {
 
   it("editorActor.ts contains @GOV annotation with ED chain rules", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/services/editorActor.ts"),
+      repoPath("src/services/editorActor.ts"),
       "utf8",
     );
     expect(src).toContain("@GOV");
@@ -184,9 +188,7 @@ describe("governance @GOV coverage metrics", () => {
 
   it("BlockIdExtension.ts contains @GOV annotation for BR-ED-DATA-002", () => {
     const src = readFileSync(
-      resolve(
-        "/Users/imatstarbucks/binder-mini/src/components/extensions/BlockIdExtension.ts",
-      ),
+      repoPath("src/components/extensions/BlockIdExtension.ts"),
       "utf8",
     );
     expect(src).toContain("@GOV");
@@ -198,7 +200,7 @@ describe("governance @GOV coverage metrics", () => {
   // covers: BR-ED-STATE-005
   it("EditorArea.tsx marks editor readonly when active diff is preapplied (BR-ED-STATE-005 source check)", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/components/EditorArea.tsx"),
+      repoPath("src/components/EditorArea.tsx"),
       "utf8",
     );
     // BR-ED-STATE-005: DisplayState is read-only derived; editor locked when preapplied
@@ -208,7 +210,7 @@ describe("governance @GOV coverage metrics", () => {
 
   it("EditorArea.tsx suppresses internal TipTap transactions during content sync (BR-ED-STATE-006 source check)", () => {
     const src = readFileSync(
-      resolve("/Users/imatstarbucks/binder-mini/src/components/EditorArea.tsx"),
+      repoPath("src/components/EditorArea.tsx"),
       "utf8",
     );
     expect(src).toContain("function TiptapEditorSurface");
