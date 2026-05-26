@@ -90,7 +90,9 @@ term_id: TERM-DE-003
 chains: DE-CREATE-DIFF,DE-ACCEPT-DIFF,DE-REJECT-DIFF
 zh: 差异定位引用
 en: DiffAnchorRef
-forbidden: diff锚点, 定位锚, anchor
+definition: PendingDiff 内部使用的定位辅助结构；originalText 仍是主定位器，DiffAnchorRef 只承载 startBlockId、startOffset、occurrenceIndex 等辅助坐标，不单独决定执行位置。
+forbidden: diff锚点, 定位锚, 独立anchor概念
+code_identifier: PendingDiff.anchor 字段允许存在，但类型必须是 DiffAnchorRef；不得把 anchor 当作独立概念使用。
 -->
 
 <!-- TERM
@@ -200,8 +202,173 @@ term_id: TERM-DE-008
 chains: DE-CREATE-DIFF,ED-DIFF-RENDER
 zh: 已应用范围
 en: appliedRange
-definition: diff 字符精确替换执行成功后，由 Editor Runtime 记录的 ProseMirror 绝对位置范围 {from, to}，标识 newText 在文档中的当前位置；用于 DiffDecoration 绑定绿增 overlay 和 syncPendingDiffsWithDocument 的 originalText 一致性检测。
+definition: diff 字符精确替换执行成功后，由 Editor Runtime 记录的 ProseMirror 绝对位置范围 {from, to}，标识 newText 在文档中的当前位置；用于 GreenAdditionDecoration 绑定绿增 overlay 和 syncPendingDiffsWithDocument 的 newText 一致性检测。
 forbidden: 位置范围, diff位置, 高亮范围
+-->
+
+<!-- TERM
+term_id: TERM-WS-005
+chains: WS-OPEN,WS-CLOSE,WS-FILE-MANAGE
+zh: 工作区状态机
+en: workspaceMachine
+definition: Workspace 生命周期与文件操作门禁的唯一状态机，覆盖 NoWorkspace、Loading、Active、Closing、Error；完整设计见 WS-M-P-02。
+forbidden: workspace状态机, 工作空间状态机, workspace machine
+-->
+
+<!-- TERM
+term_id: TERM-ED-003
+chains: ED-OPEN-FILE,ED-SAVE-FILE,ED-DIFF-RENDER
+zh: 编辑器状态机
+en: editorMachine
+definition: EditorTab 集合、activeTabId、dirty/save/readonly/error 状态的唯一状态机；完整设计见 ED-M-P-01。
+forbidden: editor状态机, 编辑状态机, 编辑器机器
+-->
+
+<!-- TERM
+term_id: TERM-DE-009
+chains: DE-CREATE-DIFF,DE-ACCEPT-DIFF,DE-REJECT-DIFF,DE-EXPIRE-DIFF
+zh: 差异状态机
+en: diffMachine
+definition: 每个 PendingDiff 实例对应的生命周期状态机，覆盖 pending、preapplied、accepting、rejecting、expired、accepted、rejected、error；状态事实由 diffStore 持久化，状态机实例不持久化。
+forbidden: diff状态机, 差异机器, pendingDiff状态机
+-->
+
+<!-- TERM
+term_id: TERM-ED-004
+chains: ED-OPEN-FILE,DE-CREATE-DIFF
+zh: 块标识
+en: BlockId
+definition: Editor Runtime 通过 BlockIdExtension 为可寻址块节点生成的 session 级 UUID；仅作为 originalText 定位辅助，不持久化到源文件，不由模型自行生成。
+forbidden: block id, block-id概念, 节点锚点
+code_identifier: BlockIdExtension, startBlockId, endBlockId, data-block-id
+-->
+
+<!-- TERM
+term_id: TERM-DE-010
+chains: DE-CREATE-DIFF,DE-ACCEPT-DIFF
+zh: 生效路径
+en: effectivePath
+definition: PendingDiff 当前接受语义的路径字段；open-file 表示 accept 只移除绿增不写 DiskState，closed-file 表示 accept 在 baseRevision 校验后写 DiskState。
+forbidden: accept路径, 执行路径, 打开链路标记
+-->
+
+<!-- TERM
+term_id: TERM-AG-006
+chains: AG-SEND-MESSAGE,AG-TOOL-CALL
+zh: 文档结构注入
+en: document_structure
+definition: PromptRuntime L0 层注入给模型的当前文档结构 XML 片段，包含由 Editor Runtime 生成的 block-id 属性；只提供定位辅助，不提供写权威。
+forbidden: 文档大纲, prompt文档结构, block列表
+-->
+
+<!-- TERM
+term_id: TERM-AG-007
+chains: AG-SEND-MESSAGE,AG-TOOL-CALL
+zh: 允许工具集
+en: allowedTools
+definition: PromptRuntime 根据 Workspace、ActiveFile、Provider 与上下文门禁计算出的 Provider 可见工具集合；模型只能调用该集合中的工具。
+forbidden: 工具白名单, 全部工具, 可用工具列表
+-->
+
+<!-- TERM
+term_id: TERM-AG-008
+chains: AG-TOOL-CALL
+zh: 工具调用
+en: ToolCall
+definition: Provider 流式响应中要求执行工具的结构化事件，必须携带 callId、toolName 和 arguments；进入本地执行前必须经过 allowedTools 与工具参数门禁。
+forbidden: tool_call原文, 模型动作, 工具请求
+-->
+
+<!-- TERM
+term_id: TERM-AG-009
+chains: AG-TOOL-CALL
+zh: 工具结果
+en: ToolResult
+definition: 工具执行完成后回流给 Provider 的结构化结果，必须携带 callId 并与 ToolExecution 关联；不得伪装为新的 user message。
+forbidden: 工具返回文本, 工具消息, user工具结果
+-->
+
+<!-- TERM
+term_id: TERM-AG-010
+chains: AG-SEND-MESSAGE
+zh: 对话消息
+en: AgentMessage
+definition: chatMachine 管理的用户、助手、系统消息记录；消息持久化到 workspace.db 的 chat_messages 表，工具结果通过 ToolResult 关联，不直接混入 user message。
+forbidden: chat message, 聊天记录项, 消息对象
+-->
+
+<!-- TERM
+term_id: TERM-AG-011
+chains: AG-SEND-MESSAGE
+zh: Provider配置
+en: ProviderConfig
+definition: AI Provider 类型、模型和 apiKeyConfigured 布尔状态的配置对象；API key 原文只允许后端安全存储持有，不进入前端结构或 Provider payload 日志。
+forbidden: 模型配置, API配置, key配置
+-->
+
+<!-- TERM
+term_id: TERM-AG-013
+chains: AG-SEND-MESSAGE
+zh: Provider凭据
+en: ProviderCredential
+definition: 应用级持久化的 Provider API key 凭据；按 Provider 类型保存，后端可读取明文用于请求 Provider，前端只可感知 apiKeyConfigured 状态。
+forbidden: 前端key, 工作区key, 聊天key
+-->
+
+<!-- TERM
+term_id: TERM-AG-012
+chains: AG-SEND-MESSAGE,AG-TOOL-CALL
+zh: 对话流事件
+en: chat-stream-event
+definition: 后端向前端发送 token、tool_call、tool_result、done、error 的统一事件通道；错误必须驱动 chatMachine 进入 error 或 ready 终态，不得静默丢弃。
+forbidden: SSE事件, stream事件, 聊天事件
+-->
+
+<!-- TERM
+term_id: TERM-WS-006
+chains: WS-SEARCH,WS-FILE-MANAGE
+zh: 搜索索引
+en: SearchIndex
+definition: Workspace 内基于 FTS5 的 search.db 索引能力，用于文件内容检索；索引写入必须受 Workspace 边界约束。
+forbidden: 搜索库, 索引库, search db
+code_identifier: search.db
+-->
+
+<!-- TERM
+term_id: TERM-AG-013
+chains: AG-SEND-MESSAGE
+zh: 对话消息表
+en: chat_messages
+definition: WorkspaceDatabase 中持久化 AgentMessage 的表；随 Workspace 打开恢复，随 Workspace 关闭落盘。
+forbidden: 聊天表, message表, 历史消息表
+-->
+
+<!-- TERM
+term_id: TERM-AG-014
+chains: AG-SEND-MESSAGE
+zh: 输入引用坐标
+en: InputReferenceAnchor
+definition: InputReference 内部携带的引用区域坐标，描述用户引用内容的来源位置；只用于上下文解释和失效检测，不作为 Diff 执行定位权威。
+forbidden: DocumentAnchorTarget, DocumentAnchor, 引用锚点
+-->
+
+<!-- TERM
+term_id: TERM-AG-015
+chains: AG-SEND-MESSAGE,AG-TOOL-CALL,DE-CREATE-DIFF
+zh: 逻辑态快照
+en: LogicalStateSnapshot
+definition: ED Runtime 在发送 Agent 请求或执行 edit_current_editor_document 前，从 ActiveFile LogicalState 读取的当前编辑器内容快照；该快照包含未保存用户编辑和已 preapplied 的 AI 修改，是当前打开文件内容编辑的上下文源，不等同于 DiskState 或 read_file 结果。
+forbidden: 磁盘快照, read_file内容, 当前文件文本
+-->
+
+<!-- TERM
+term_id: TERM-DE-011
+chains: DE-CREATE-DIFF,DE-ACCEPT-DIFF,DE-REJECT-DIFF,DE-EXPIRE-DIFF,AG-SEND-MESSAGE
+zh: 差异卡
+en: DiffCard
+definition: 聊天区消息中渲染 PendingDiff（非终态）或 TerminalDiffCard（终态）的 UI 组件；视觉状态由对应 diffMachine 状态决定；非终态（pending/preapplied）展示接受和拒绝操作入口，终态以降权样式（opacity: 0.6）只读展示；完整视觉规范见 SYS-C-UI-01 §5。
+forbidden: diff卡片, diff消息, diff气泡
+code_identifier: DiffCard
 -->
 
 ## 1. 模块注册
@@ -298,7 +465,7 @@ chain_id: ED-SAVE-FILE
 status: active
 -->
 
-`ED-SAVE-FILE` 描述编辑器保存当前文件内容的流程。
+`ED-SAVE-FILE` 描述编辑器保存 ActiveFile 内容的流程。
 
 <!-- CHAIN
 chain_id: AG-SEND-MESSAGE
@@ -568,7 +735,7 @@ InputReference 是结构化内容载体，通过 system prompt L1 层注入 Prov
 rule_id: BR-AG-TOOL-001
 主链路: AG-TOOL-CALL,WS-FILE-MANAGE
 域: DATA
-需求映射: REQ-AG-004
+需求映射: REQ-AG-004-B
 -->
 
 Agent 结构操作工具（create_file、create_folder、rename_file、move_file、delete_file）必须通过 WS 模块工具链执行；操作路径必须通过 Workspace 边界守卫（X-CONST-001），且遭遇 PathConflict 时必须返回冲突错误，不得静默覆盖。
@@ -661,10 +828,28 @@ DisplayState 只读派生规则：DisplayState 派生自 LogicalState 加绿增 
 rule_id: BR-AG-SEC-001
 主链路: AG-SEND-MESSAGE
 域: SEC
-需求映射: REQ-AG-007
+需求映射: REQ-AG-001-A,REQ-AG-007
 -->
 
 Provider API key 不得在前端持有、传递或出现在前端日志中；由后端安全存储读取，前端只感知 apiKeyConfigured 布尔状态；forbidden provider fields（apiKey 等）必须在后端组装 Provider payload 时过滤，不得透传给模型。
+
+<!-- RULE
+rule_id: BR-AG-PERSIST-002
+主链路: AG-SEND-MESSAGE
+域: PERSIST
+需求映射: REQ-AG-001-A
+-->
+
+ProviderCredential 必须在应用级后端存储中持久化，按 Provider 类型读写，跨应用重启、Workspace 关闭和 Workspace 切换保持有效；workspace.db、聊天历史、前端状态、前端日志和 Provider payload 调试输出不得保存或展示明文 API key。保存同一 Provider key 时必须覆盖旧值；读取配置状态时只返回 apiKeyConfigured，不返回明文 key。
+
+<!-- RULE
+rule_id: BR-AG-STATE-003
+主链路: AG-SEND-MESSAGE,AG-TOOL-CALL
+域: STATE
+需求映射: REQ-AG-007
+-->
+
+Provider 可见工具必须由 PromptRuntime 的 allowedTools 决定；allowedTools 必须根据 workspaceMachine 状态、ActiveFile 状态、Provider 能力和工具门禁动态计算；模型不得看到或调用 allowedTools 之外的工具，后端收到未授权 ToolCall 时必须返回结构化 tool error 并不得执行。
 
 <!-- RULE
 rule_id: BR-AG-STATE-002
@@ -730,6 +915,15 @@ rule_id: BR-AG-DATA-003
 内容编辑工具（edit_current_editor_document、update_file）必须使用 originalText（精确原文字符串）+ newText（替换内容）接口；系统通过 ProseMirror 文本搜索定位 originalText 后执行字符精确替换；originalText 找不到时返回结构化错误，不 fallback 为全量替换；不得使用全量内容替换整个文件。
 
 <!-- RULE
+rule_id: BR-AG-DATA-004
+主链路: AG-SEND-MESSAGE,AG-TOOL-CALL,DE-CREATE-DIFF
+域: DATA
+需求映射: REQ-AG-004,REQ-AG-007,REQ-ED-001,REQ-DE-001
+-->
+
+Agent 对 ActiveFile 执行内容编辑时，PromptRuntime 或 ToolRuntime 必须以 ED LogicalStateSnapshot 作为上下文源；LogicalStateSnapshot 必须来自当前活动 EditorTab 的 LogicalState，包含未保存用户编辑和已 preapplied 的 AI 修改。read_file、search_files、FTS5 索引和 DiskState 只能作为磁盘/工作区视角，不得替代 ActiveFile 的 LogicalStateSnapshot，也不得成为 edit_current_editor_document 生成 originalText 的唯一依据。若无法取得 ActiveFile LogicalStateSnapshot，edit_current_editor_document 必须返回结构化错误，不得转而读取磁盘并继续编辑。
+
+<!-- RULE
 rule_id: BR-ED-DATA-002
 主链路: ED-OPEN-FILE,DE-CREATE-DIFF
 域: DATA
@@ -754,7 +948,7 @@ rule_id: BR-DE-PERSIST-002
 需求映射: REQ-DE-007,REQ-DE-010
 -->
 
-PendingDiff 状态必须持久化到 workspace.db 的 pending_diffs 表；应用重启后，非终态 diff 记录根据当前文件内容和 baseRevision 校验自动恢复为 preapplied 或转为 expired；已是终态的 diff 记录仅保留供历史展示，不恢复执行状态。
+PendingDiff 状态必须持久化到 workspace.db 的 pending_diffs 表；应用重启后，非终态 diff 记录根据目标文件 DiskState 和 baseRevision 校验自动恢复为 preapplied 或转为 expired；已是终态的 diff 记录仅保留供历史展示，不恢复执行状态。
 
 <!-- RULE
 rule_id: BR-DE-STATE-013
@@ -773,6 +967,62 @@ rule_id: BR-DE-STATE-014
 -->
 
 关闭包含 preapplied 状态 diff 的 Editor Tab 前，必须提示用户选择批量接受（accept all）或批量拒绝（reject all）该文件所有 preapplied diff；未经选择不得直接关闭 Tab 并丢弃 preapplied 状态。
+
+<!-- RULE
+rule_id: BR-SYS-UI-001
+主链路: WS-OPEN,WS-CLOSE
+域: UI
+-->
+
+workspaceMachine 状态必须是所有 UI 面板可用性的唯一驱动来源；NoWorkspace 和 Loading 状态下，文件树操作、编辑器交互和 Agent 发送等功能性 UI 不可用；Error 状态下仅展示错误信息和恢复入口；不允许在 workspaceMachine 状态之外维护独立的面板可用性开关。
+
+<!-- RULE
+rule_id: BR-SYS-UI-002
+主链路: WS-OPEN
+域: UI
+-->
+
+三栏布局（FileTreePanel | EditorColumn | ChatPanel）必须始终维持；左栏与右栏各自提供独立 ResizeHandle，拖拽后的宽度必须通过 localStorage 持久化（key: binder-panel-left-width / binder-panel-right-width）；左栏宽度约束 180px–480px，右栏 260px–600px，中栏（EditorColumn）不得低于 360px。
+
+<!-- RULE
+rule_id: BR-DE-UI-001
+主链路: DE-ACCEPT-DIFF,DE-REJECT-DIFF,DE-EXPIRE-DIFF
+域: UI
+需求映射: REQ-DE-002,REQ-DE-003,REQ-DE-004
+-->
+
+diffMachine 状态必须驱动 DiffCard 的视觉状态和操作入口：非终态（pending / preapplied）必须展示接受和拒绝操作入口；终态（accepted / rejected / expired / error）必须以降权样式（opacity: 0.6，--text-secondary 文字）只读展示，不得出现任何操作入口；操作入口不得根据业务逻辑之外的 UI 状态自行隐藏或显示。
+
+<!-- RULE
+rule_id: BR-DE-UI-002
+主链路: ED-DIFF-RENDER,DE-CREATE-DIFF
+域: UI
+需求映射: REQ-ED-008,REQ-DE-001
+-->
+
+编辑器（EditorArea）内只允许渲染 GreenAdditionDecoration（newText 绿色背景高亮），不得在 EditorArea 中渲染 originalText 删除线或红色背景；红删与绿增对比双色视图只允许在 chat stream 的 DiffCard 内容区展示，不得出现在 EditorArea。
+
+<!-- RULE
+rule_id: BR-DE-UI-003
+主链路: DE-ACCEPT-DIFF,DE-REJECT-DIFF,AG-TOOL-CALL
+域: UI
+需求映射: REQ-DE-013,REQ-DE-002,REQ-DE-003
+-->
+
+DiffCard 渲染位置：chatMachine 必须在 TOOL_REQUESTED 事件时将带有 toolCallId 的 assistant 消息追加到 context.messages（action: finalizeToolRequestMessage），使 DiffCard 可通过 AgentMessage.toolCallId === PendingDiff.sourceToolId 关联到消息流中发起工具调用的 Assistant 消息；MessageBubble 在接收到关联 diff 时在气泡下方渲染 DiffCard，ChatPanel 层不得以独立固定块展示活跃 diff。
+
+DiffActionBar 渲染位置：ChatPanel 中 InputReferenceBar 上方必须渲染 DiffActionBar；当 allDiffs 中 status 为 pending 或 preapplied 的条数 ≥ 1 时可见，展示"接受全部 (N)"和"拒绝全部 (N)"两个操作入口；全部进入终态后自动隐藏。批量操作每条独立调用 acceptDiff / rejectDiff，失败项不阻止其他条执行。
+
+<!-- RULE
+rule_id: BR-AG-UI-001
+主链路: AG-SEND-MESSAGE
+域: UI
+需求映射: REQ-AG-001,REQ-AG-002,REQ-AG-008
+-->
+
+chatMachine 状态必须驱动 ChatInput 可用性与操作按钮渲染：发送按钮仅在 ready 状态且 userContent 非空且 Provider 已配置时可用；取消按钮仅在 sending / streaming / toolCalling 三个状态下渲染为可用状态；其他状态下两个按钮均不可用，不得绕过 chatMachine 状态自行控制按钮可用性。
+
+ChatInput 的 Enter 键触发发送时必须检查 IME 合成状态，实现必须使用 `compositionstart`/`compositionend` 事件维护 `isComposingRef`（useRef，非 useState），并在 `compositionend` 回调内通过 `setTimeout(0)` 延迟清除标志；`handleKeyDown` 以 `!isComposingRef.current` 作为第一个过滤条件，不依赖 `e.nativeEvent.isComposing`。原因：在 Tauri WKWebView（WebKit）环境中，`compositionend` 先于 `keydown` 触发，`e.nativeEvent.isComposing` 在确认 Enter 时已为 false，无法区分候选词确认和正常发送；`setTimeout(0)` 将 ref 清零推迟到当前同步任务（含后续 keydown）完成后，保证候选词确认 Enter 不触发发送。
 
 ## 7. 验收与测试入口
 
@@ -795,23 +1045,23 @@ rule_id: BR-DE-STATE-014
 
 `REQ-* -> SYS-C-T-02 -> SYS-C-T-01 已注册 RULE/CHAIN/CONSTRAINT -> @GOV 注释 -> 测试覆盖`
 
-## 9. Agent 候选规则（Phase 10-12，进入实现前升级为正式规则）
+## 9. Agent 已升级候选规则追踪（冻结基线）
 
-以下候选规则来自 `AG-M-T-01`，进入 Phase 10-12 代码实现前必须升级为正式 RULE 块、补充 `@GOV` 标注和测试覆盖。
+以下条目来自历史候选规则，目前均已升级、吸收或废弃为正式冻结基线的一部分。开发实现只能映射到已注册 RULE，不得映射到 `*-CAND-*`。
 
 | 候选规则 ID | 承接需求 | 建议链路 | 设计意图 | 状态 |
 |-------------|----------|----------|----------|------|
 | ~~AG-CAND-STATE-002~~ | REQ-AG-002 | AG-SEND-MESSAGE | 真实 Provider SSE 流必须在错误时终止并向 UI 返回可识别失败状态。 | **已升级 → BR-AG-STATE-002** |
 | ~~AG-CAND-DATA-002~~ | REQ-AG-003 | AG-TOOL-CALL | 工具结果必须在同一对话轮次内以 tool_result 形式回流，不得注入为 user message。 | **已升级 → BR-AG-DATA-002** |
 | ~~AG-CAND-DATA-003~~ | REQ-AG-007 | AG-SEND-MESSAGE | Provider API key 不得在前端持有、传递或出现在日志中；由后端安全存储读取。 | **已升级 → BR-AG-SEC-001** |
-| AG-CAND-STATE-003 | REQ-AG-007 | AG-SEND-MESSAGE | Agent 只能向 Provider 暴露 allowedTools 中的工具，不得暴露全部已注册工具。 | 待升级（Phase 12）|
+| ~~AG-CAND-STATE-003~~ | REQ-AG-007 | AG-SEND-MESSAGE | Agent 只能向 Provider 暴露 allowedTools 中的工具，不得暴露全部已注册工具。 | **已升级 → BR-AG-STATE-003** |
 | ~~AG-CAND-DATA-004~~ | REQ-AG-006 | AG-TOOL-CALL | InputReference 只注入 Provider 请求上下文，不触发任何文件副作用。 | **已吸收 → BR-AG-DATA-001（语义升级为结构化内容载体）** |
 | ~~AG-CAND-PERSIST-001~~ | REQ-AG-010,REQ-AG-011 | AG-SEND-MESSAGE | 聊天消息必须在 WORKSPACE_CLOSED 时持久化到 workspace.db，WORKSPACE_OPENED 时读取恢复；不得在切换 Workspace 时直接清空内存 messages 而不落盘。 | **已升级 → BR-AG-PERSIST-001** |
-| ~~AG-CAND-DATA-005~~ | REQ-AG-004 | AG-TOOL-CALL,DE-CREATE-DIFF | 内容编辑工具（edit_current_editor_document、update_file）必须使用 originalText（精确原文字符串）+ newText（替换内容）接口；系统通过 PM 文本搜索定位 originalText 后执行字符精确替换；不得使用全量 proposedText 替换整个文件内容；originalText 找不到时返回结构化错误，不 fallback 为全量替换。 | **已升级 → BR-AG-DATA-003** |
+| ~~AG-CAND-DATA-005~~ | REQ-AG-004 | AG-TOOL-CALL,DE-CREATE-DIFF | 内容编辑工具（edit_current_editor_document、update_file）必须使用 originalText（精确原文字符串）+ newText（替换内容）接口；系统通过 PM 文本搜索定位 originalText 后执行字符精确替换；不得使用全量内容替换整个文件内容；originalText 找不到时返回结构化错误，不 fallback 为全量替换。 | **已升级 → BR-AG-DATA-003** |
 
-## 10. Diff Review 候选规则（Phase 13，进入实现前升级为正式规则）
+## 10. Diff Review 已升级候选规则追踪（冻结基线）
 
-以下候选规则来自 `DE-M-T-01`，进入 Phase 13 代码实现前必须升级为正式 RULE 块、补充 `@GOV` 标注和测试覆盖。
+以下条目来自历史候选规则，目前均已升级为正式 RULE。开发实现只能映射到已注册 RULE，不得映射到 `*-CAND-*`。
 
 | 候选规则 ID | 承接需求 | 建议链路 | 设计意图 | 状态 |
 |-------------|----------|----------|----------|------|
@@ -821,19 +1071,32 @@ rule_id: BR-DE-STATE-014
 | ~~DE-CAND-PERSIST-002~~ | REQ-DE-007,REQ-DE-010 | DE-ACCEPT-DIFF、DE-REJECT-DIFF | PendingDiff 状态必须持久化到 workspace.db，应用重启后可恢复或转 expired。 | **已升级 → BR-DE-PERSIST-002** |
 | ~~DE-CAND-STATE-006~~ | REQ-DE-007,REQ-DE-009 | DE-EXPIRE-DIFF | Workspace 关闭时，所有非终态 PendingDiff 必须转 expired 并写入持久化存储。 | **已升级 → BR-DE-STATE-013** |
 
-## 11. Editor 候选规则（Phase 9 剩余项，进入实现前升级为正式规则）
+## 11. Editor 已升级候选规则追踪（冻结基线）
 
-以下候选规则来自 `ED-M-T-01`，进入 Phase 9 步骤 5-6 代码实现前必须升级为正式 RULE 块，且须先完成 DE-M-T-01 Phase 13-A 数据结构。
+以下条目来自历史候选规则，目前均已升级为正式 RULE。开发实现只能映射到已注册 RULE，不得映射到 `*-CAND-*`。
 
 | 候选规则 ID | 承接需求 | 建议链路 | 设计意图 | 状态 |
 |-------------|----------|----------|----------|------|
-| ~~ED-CAND-DATA-002~~ | REQ-ED-007 | ED-OPEN-FILE,DE-CREATE-DIFF | BlockId / Anchor 必须由 Editor Runtime 生成或校验，不由模型输出直接决定执行位置。 | **已升级 → BR-ED-DATA-002** |
-| ~~ED-CAND-STATE-004~~ | REQ-ED-008 | ED-DIFF-RENDER,DE-CREATE-DIFF | DiffDecoration 只能消费已验证 range/anchor；无法解析时不渲染伪高亮。 | **已升级 → BR-ED-STATE-006** |
+| ~~ED-CAND-DATA-002~~ | REQ-ED-007 | ED-OPEN-FILE,DE-CREATE-DIFF | BlockId / DiffAnchorRef 必须由 Editor Runtime 生成或校验，不由模型输出直接决定执行位置。 | **已升级 → BR-ED-DATA-002** |
+| ~~ED-CAND-STATE-004~~ | REQ-ED-008 | ED-DIFF-RENDER,DE-CREATE-DIFF | GreenAdditionDecoration 只能消费已验证 appliedRange；无法解析时不渲染伪高亮。 | **已升级 → BR-ED-STATE-006** |
+
+## 12. 冻结声明
+
+截至 2026-05-24，`docs/10_requirements` 与 `docs/20_design` 当前 A 状态文档作为开发计划输入基线冻结。
+
+冻结范围：
+
+1. `SYS-C-T-02` 已覆盖当前有效需求 ID（含 `REQ-AG-004-B`）。
+2. `SYS-C-T-01` 已注册开发实现所需 RULE / CHAIN / CONSTRAINT / TERM。
+3. 历史候选规则只作为追踪记录保留，不再作为代码实现映射目标。
+4. 新增或修改需求、规则、术语、状态机、协议时，必须先解冻并同步刷新 `SYS-C-T-01`、`SYS-C-T-02` 和对应专项设计文档。
 
 ## 变更记录
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-05-25 | v3.4 | 补齐 ActiveFile 编辑上下文规则：新增 TERM-AG-015（LogicalStateSnapshot）和 BR-AG-DATA-004，明确 edit_current_editor_document 必须以 ED LogicalStateSnapshot 为上下文源，read_file/DiskState 不得替代当前编辑器逻辑态 |
+| 2026-05-25 | v3.3 | 补齐 Agent API key 持久化规则：新增 TERM-AG-013（ProviderCredential）和 BR-AG-PERSIST-002，明确 Provider API key 为应用级后端持久化凭据，跨应用重启与 Workspace 切换保持有效，前端只接收 apiKeyConfigured |
 | 2026-05-22 | v1.9 | 注册 Editor Markdown 读取保存转换规则 |
 | 2026-05-22 | v1.8 | 注册 Editor dirty 关闭保护与状态栏规则 |
 | 2026-05-22 | v1.7 | 注册 Editor 多标签正式规则 |
@@ -852,3 +1115,9 @@ rule_id: BR-DE-STATE-014
 | 2026-05-24 | v2.6 | §6 新增 BR-ED-PERSIST-003（`.txt` 文件必须共用 TipTap 纯文本序列化路径，不得退回 textarea）；对应 REQ-ED-006，收敛 ED-M-T-01 v1.6 的 .txt 路径决策为正式规则 |
 | 2026-05-24 | v2.8 | §6 修正 BR-AG-DATA-001（InputReference 语义从"只读上下文"升级为"结构化内容载体"，写入仍须经 Diff Review 链路）；新增 BR-AG-TOOL-001（Agent 结构操作工具必须通过 WS 工具链 + PathConflict 守卫）；升级 AG-CAND-PERSIST-001 → BR-AG-PERSIST-001（消息持久化 + 终态卡片恢复）、AG-CAND-DATA-005 → BR-AG-DATA-003（originalText+newText 精确替换接口）、ED-CAND-DATA-002 → BR-ED-DATA-002（BlockIdExtension Runtime 生成规则）、ED-CAND-STATE-004 → BR-ED-STATE-006（GreenAdditionDecoration 验证渲染规则）、DE-CAND-PERSIST-002 → BR-DE-PERSIST-002（PendingDiff 持久化与重启恢复）、DE-CAND-STATE-006 → BR-DE-STATE-013（WORKSPACE_CLOSED 时全体非终态转 expired）；新增 BR-DE-STATE-014（含 preapplied diff 的 Tab 关闭前必须 accept/reject 处理）；AG-CAND-DATA-004 标记为已吸收（语义纳入更新后的 BR-AG-DATA-001） |
 | 2026-05-24 | v2.7 | §4 状态机设计入口表新增"完整设计文档"列；workspaceMachine → WS-M-P-02，editorMachine → ED-M-P-01（新建专项文档）；editorMachine 最小状态列表补充 noWorkspace 和 idle；diffMachine 状态列表对齐 DE-M-T-01 v1.6 正式状态名 |
+| 2026-05-24 | v2.9 | 审计修复：§0 补充 workspaceMachine、editorMachine、diffMachine、BlockId、effectivePath、document_structure、allowedTools、ToolCall、ToolResult、AgentMessage、ProviderConfig、chat-stream-event、SearchIndex、chat_messages 术语；DiffAnchorRef 术语说明 PendingDiff.anchor 是受控字段；appliedRange 定义修正为 newText 一致性检测 |
+| 2026-05-24 | v3.0 | 审计修复：AG-CAND-STATE-003 升级为 BR-AG-STATE-003，正式约束 PromptRuntime allowedTools 动态过滤和后端未授权 ToolCall 拒绝链路 |
+| 2026-05-24 | v3.1 | 冻结：§9-§11 候选规则章节改为已升级候选规则追踪口径；新增 §12 冻结声明，明确 docs/10_requirements 与 docs/20_design 当前 A 状态文档作为开发计划输入基线 |
+| 2026-05-26 | v3.4 | 新增 BR-DE-UI-003（DiffCard 内嵌 MessageBubble via toolCallId↔sourceToolId；DiffActionBar 常驻栏 REQ-DE-013）；BR-AG-UI-001 IME 描述修正为 isComposingRef+setTimeout(0) 方案（对齐 WebKit 事件顺序）|
+| 2026-05-26 | v3.3 | BR-AG-UI-001 补充 IME 合成兼容约束：Enter 键触发发送必须检查 e.nativeEvent.isComposing，isComposing=true 时不触发发送；需求映射新增 REQ-AG-002 |
+| 2026-05-24 | v3.2 | UI 设计规范治理同步（SYS-C-UI-01）：§0 新增 TERM-DE-011（DiffCard，差异卡 UI 组件，code_identifier: DiffCard）；§6 新增 5 条 UI 域正式规则：BR-SYS-UI-001（workspaceMachine 驱动面板可用性）、BR-SYS-UI-002（三栏布局 + ResizeHandle 持久化约束）、BR-DE-UI-001（diffMachine 驱动 DiffCard 视觉状态，REQ-DE-002/003/004）、BR-DE-UI-002（编辑器只渲染绿增，REQ-ED-008/REQ-DE-001）、BR-AG-UI-001（chatMachine 驱动 ChatInput 按钮，REQ-AG-001/008）|

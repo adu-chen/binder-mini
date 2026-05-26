@@ -97,7 +97,7 @@ TipTap/Markdown 选型只解决编辑器渲染和 Markdown 保存问题，不解
 后续约束：
 
 1. Markdown 字符偏移和 ProseMirror position 是不同坐标系。
-2. DiffDecoration 只能消费已验证 range/anchor。
+2. GreenAdditionDecoration 只能消费已验证 appliedRange。
 3. BlockId 由 Editor Runtime 生成或校验，不由模型输出直接决定执行位置。
 4. `tiptap-markdown` 输出 Markdown 可作为 DiskState / LogicalState 同步文本，但不能替代 PatchValidation。
 
@@ -106,23 +106,23 @@ TipTap/Markdown 选型只解决编辑器渲染和 Markdown 保存问题，不解
 1. 依赖安装 Issue：安装 TipTap 和 Markdown 适配依赖。
 2. EditorArea 运行时 Issue：`.md` tab 使用 TipTap + Markdown storage；`.txt` tab 共用同一 TipTap 实例，纯文本序列化。
 3. Markdown 转换测试 Issue：补读写往返和失败保护测试。
-4. BlockId 策略 Issue：确认 workspace.db 映射表或其他方案。
-5. DiffDecoration 骨架 Issue：接入 ProseMirror Decoration。
+4. BlockId 策略 Issue：按 BR-ED-DATA-002 实现 session 级 BlockIdExtension，不污染源文件。
+5. GreenAdditionDecoration 骨架 Issue：按 BR-ED-STATE-006 接入 ProseMirror Decoration。
 
 ## 8. 当前规则状态
 
-本方案承接候选规则：
+本方案承接正式规则：
 
-`ED-CAND-DATA-002`
+`BR-ED-PERSIST-002`、`BR-ED-PERSIST-003`、`BR-ED-DATA-002`、`BR-ED-STATE-006`
 
-候选规则意图：
+规则意图：
 
-Markdown 转换失败不得覆盖磁盘内容。
+Markdown 转换失败不得覆盖磁盘内容；txt 共用 TipTap 纯文本序列化路径；BlockId 由 Editor Runtime 生成；绿增只消费已验证 appliedRange。
 
-升级要求：
+实现要求：
 
-1. 运行时代码实现前，必须在 `SYS-C-T-01` 注册正式 RULE。
-2. 代码 `@GOV` 必须映射正式 RULE，不得映射候选规则。
+1. 运行时代码 `@GOV` 必须映射上述正式 RULE，不得映射候选规则。
+2. 修改 TipTap、BlockId 或绿增机制时，必须同步 `SYS-C-T-01` 和 `SYS-C-T-02`。
 3. 测试必须覆盖转换成功和失败保护。
 
 ## 变更记录
@@ -131,4 +131,5 @@ Markdown 转换失败不得覆盖磁盘内容。
 |------|------|---------|
 | 2026-05-22 | v1.0 | 初始版本，确认 TipTap/Markdown 技术选型 |
 | 2026-05-23 | v1.1 | 文档状态 R→A；§8 候选规则 ED-CAND-DATA-001→ED-CAND-DATA-002（对齐 SYS-C-T-01/T-02 注册编号） |
+| 2026-05-24 | v1.3 | 审计修复：§6/§7/§8 从候选规则口径升级为正式 RULE 口径；DiffDecoration 表述收敛为 GreenAdditionDecoration + appliedRange |
 | 2026-05-24 | v1.2 | 同步 ED-M-T-01 v1.6 决策：§1/§3/§4/§7 将 `.txt` 路径从"textarea"更新为"与 .md 共用 TipTap 实例，纯文本序列化"；从"暂不采用"表格移除已采用的 `.txt` TipTap 条目；§4 约束 3 更新为不得退回 textarea |

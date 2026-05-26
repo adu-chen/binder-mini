@@ -151,7 +151,7 @@ expireAllOnClose 在 Workspace 关闭时执行：
 - acceptDiff（已打开文件）：DE 通知 ED 移除 appliedRange 绿增 Decoration；LogicalState 不变；不写磁盘
 - acceptDiff（未打开文件）：DE 读取磁盘 DiskState，校验 baseRevision 后在 DiskState 中精确替换 originalText → newText（不全文覆盖）
 - preapplied → rejectDiff：diffMachine 向 editorMachine 发送 `ROLLBACK_LOGICAL_STATE { diffId, appliedRange, originalText }` 事件；editorMachine 在 appliedRange 精确回滚（newText → originalText）（详见 DE-M-T-01 §4.4）
-- Workspace 打开时：ED 可查询 diffStore 当前文件的 preapplied diff 展示绿增效果（Phase 9-F）
+- Workspace 打开时：ED 可查询 diffStore 中 ActiveFile 的 preapplied diff 展示绿增效果（Phase 9-F）
 
 ### 7.3 与 WS
 
@@ -167,3 +167,4 @@ expireAllOnClose 在 Workspace 关闭时执行：
 | 2026-05-24 | v1.1 | 三态模型重构：§3 acceptDiff 按两路径拆分（已打开：移除绿增不写磁盘；未打开：写 DiskState）；§4 约束 1 移除 mounted_pending；§5.2 恢复策略更新（preapplied 降级为 pending；去除 mounted_pending）；§6 不变量重写（新增条目 7：accept 不写 DiskState）；§7.2 DE→ED 协作更新（createDiff 即推送 proposedText；accept 移除绿增）|
 | 2026-05-24 | v1.2 | §2.1 PendingDiff 接口补充 effectivePath 字段（与 DE-M-T-01 §3.1 权威源对齐）；baseRevision 改为必填；§6 不变量 4/5 规则引用从候选（CAND）改为正式规则（BR-DE-STATE-004/005）；§7.2 reject 协议注释更新（ROLLBACK_LOGICAL_STATE 事件已确认，去除"待 Phase 13-B 确认"） |
 | 2026-05-24 | v1.3 | 精确编辑架构对齐（D-10）：§2.1 PendingDiff 字段更新（proposedText→newText 精确替换片段；originalText 语义改为主定位器；新增 appliedRange{from,to}；anchorRef→anchor 重命名，说明辅助定位关系）；§3 createDiff/acceptDiff/rejectDiff 操作语义重写（字符精确替换而非全文替换）；§5.1 DB schema 更新（proposed_text→new_text，新增 anchor_json，base_revision 改为必填）；§7.2 ED 协作描述更新（originalText+newText+appliedRange 传递链路，accept/reject 精确操作） |
+| 2026-05-24 | v1.4 | 审计修复：ED 协作表述使用 ActiveFile 术语，避免与 TERM-ED-002 冲突 |

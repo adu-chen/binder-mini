@@ -18,7 +18,7 @@ describe("Diff Review MVP service behavior", () => {
     expect(diff.status).toBe("pending");
     expect(diff.filePath).toBe("notes.md");
     expect(diff.originalText).toBe("hello");
-    expect(diff.proposedText).toContain("Binder Mini proposal: add summary");
+    expect(diff.newText).toContain("Binder Mini proposal: add summary");
   });
 
   // covers: BR-DE-STATE-001
@@ -30,7 +30,7 @@ describe("Diff Review MVP service behavior", () => {
     });
 
     expect(diff.originalText).toBe("");
-    expect(diff.proposedText).toContain("start draft");
+    expect(diff.newText).toContain("start draft");
   });
 
   // covers: BR-DE-PERSIST-001
@@ -42,7 +42,7 @@ describe("Diff Review MVP service behavior", () => {
     });
 
     const accepted = acceptPendingDiff(diff, "notes.md", "hello");
-    expect(accepted.content).toBe(diff.proposedText);
+    expect(accepted.content).toBe(diff.newText);
     expect(accepted.terminalCard.status).toBe("accepted");
   });
 

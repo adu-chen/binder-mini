@@ -139,7 +139,7 @@ LOGICAL_STATE_APPEARED（目标文件被打开，LogicalState 出现）
 
 ```
 acceptAllPending(filePath?)
-  → 获取所有 status === "pending" 的 diff（可按 filePath 过滤，如当前文件）
+  → 获取所有 status === "pending" 的 diff（可按 filePath 过滤，如 ActiveFile）
   → 按 createdAt 顺序逐条执行 acceptDiff
   → 每条 diff 独立走 accept 校验和状态机
   → 一条失败（转 expired 或 error）不阻止其余条继续执行
@@ -150,10 +150,10 @@ acceptAllPending(filePath?)
 
 ### 6.2 Cmd+S 保存触发绿增固化
 
-用户保存（Cmd+S）当前文件时，若该文件有 preapplied diff，必须弹出确认框（对齐 DE-M-D-01 §9）：
+用户保存（Cmd+S）ActiveFile 时，若该文件有 preapplied diff，必须弹出确认框（对齐 DE-M-D-01 §9）：
 
 - 确认框文案："保存所有更改（包含您的编辑和 [N] 处 AI 建议的修改）。" / [确认保存] [取消]
-- 用户点击"确认保存"：对当前文件所有 preapplied diff 批量执行 ACCEPT（移除绿增效果），全部 accept 确认后执行 Cmd+S 写盘（LogicalState → DiskState）。
+- 用户点击"确认保存"：对 ActiveFile 所有 preapplied diff 批量执行 ACCEPT（移除绿增效果），全部 accept 确认后执行 Cmd+S 写盘（LogicalState → DiskState）。
 - 用户点击"取消"：终止本次保存，不修改任何 diff 状态，dirty 标记保持。
 - 不影响其他文件的 diff。
 
@@ -194,3 +194,4 @@ Cmd+S 批量 accept 的原子性遵循跳过继续原则：有 diff accept 失�
 | 2026-05-24 | v1.3 | §4.3 继承流补充 effectivePath 升级（closed-file → open-file）和 ROLLBACK_LOGICAL_STATE 事件引用；§6.2 Cmd+S 确认框文案对齐 DE-M-T-01 §5-A 最新版本 |
 | 2026-05-24 | v1.4 | 精确编辑架构对齐（D-10）：§3.1 已打开文件链路图重写（originalText+newText+anchor? 入参，applyDiffReplaceInEditor 执行，appliedRange 记录，syncPendingDiffsWithDocument 检测）；§3.2 preapplied 进入条件更新（originalText 精确替换+appliedRange；originalText 找不到→LOGICAL_STATE_APPLIED_FAILED→error）；§3.3 accept 语义注释更新（accept 只移除 appliedRange 绿增，无需再推送内容）；§5.1 失效规则改为 syncPendingDiffsWithDocument 事务监听（doc.textBetween 检查）；§5.2 完整失效触发表更新（用户编辑/新 diff 均通过 originalText 不匹配检测）；§7 终态表更新（proposedText→newText/appliedRange 精确回滚语义） |
 | 2026-05-24 | v1.5 | 审计修复（自洽性）：§4.1 未打开文件 accept 步骤补充"DiskState 文本搜索 originalText → 精确替换为 newText"（G-02）；§4.2 新增 DiskState 文本写入协议约束（G-04：originalText 搜索+occurrenceIndex 消歧）；§4.3 继承流 proposedText 残留全部替换为精确替换语言（C-06/C-07）；§5.1 syncPendingDiffsWithDocument 比较目标修正为 `!== newText`（Apply-first 模型修正，B-01 对应协议文档）；§5.1/5.2 "originalText 不匹配"描述统一改为"appliedRange 位置 newText 不匹配" |
+| 2026-05-24 | v1.6 | 审计修复：保存确认协议使用 ActiveFile 术语，避免与 TERM-ED-002 冲突 |

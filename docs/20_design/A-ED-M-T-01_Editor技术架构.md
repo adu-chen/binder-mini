@@ -13,14 +13,14 @@
 
 ## 1. 目标
 
-将当前单 textarea / 单文件 Editor MVP 演进为可承载多文件编辑、Diff 定位和绿增展示的 Editor Runtime。
+将既有简化 Editor MVP 演进为可承载多文件编辑、Diff 定位和绿增展示的 Editor Runtime。
 
 Phase 9 技术目标：
 
 1. 多标签数据结构可表达每个打开文件的独立状态。
 2. dirty 标记、关闭保护和状态栏成为显式规则来源。
 3. TipTap/Markdown 方案先确认边界，再进入依赖和代码实现。
-4. BlockId / DocumentAnchor 由 Editor Runtime 生成或校验。
+4. BlockId / DiffAnchorRef 由 Editor Runtime 生成或校验。
 5. DiffDecoration 只消费已验证 range/anchor，渲染绿增效果，不自行全文搜索定位，编辑器内不显示红删。
 
 ## 2. 状态模型
@@ -143,7 +143,7 @@ TipTap 解析 Markdown 语法字符（`#`、`**` 等）为节点类型和属性�
 
 **转换层（blockOffsetToPMRange）**：Editor Runtime 负责将 `blockId + startOffset/endOffset` 翻译为 PM 绝对位置 `{from, to}`；模型只操作 blockId+offset，不感知 PM 坐标。
 
-**前置门禁**：BlockId 实现必须在 `DE-M-T-01` Diff Review v2 数据结构确认后进入（ED-CAND-DATA-002 升级为正式规则后执行）。
+**前置门禁**：BlockId 实现必须遵守 `BR-ED-DATA-002`；进入代码前需确认 `DE-M-T-01` Diff Review v2 数据结构和 `DiffAnchorRef` 协议已同步。
 
 ## 5. DiffDecoration 绿增
 
@@ -181,7 +181,7 @@ DiffDecoration 只负责 DisplayState 展示，不拥有 Diff 生命周期。
 - TipTap 自定义扩展命名为 `GreenAdditionDecoration`，负责在 ProseMirror 视图层注册 overlay decoration。
 - 绑定和移除绿增时以 `diffId` 为 key 区分不同 diff 的 overlay 注册；不使用文件路径或行号作为 overlay key。
 
-**前置门禁**：DiffDecoration 骨架实现必须在 BlockIdExtension（ED-CAND-DATA-002 正式规则化）完成后进入。
+**前置门禁**：GreenAdditionDecoration 骨架实现必须在 BlockIdExtension（BR-ED-DATA-002）完成后进入，并遵守 BR-ED-STATE-006 的 appliedRange 验证渲染规则。
 
 ## 5-A. 文档三态模型与 Dirty 状态
 
@@ -224,14 +224,14 @@ editorMachine 在以下场景向其他状态机发出事件：
 - LOGICAL_STATE_APPEARED 发送顺序：按 diff 创建时间（createdAt）升序，逐一顺序发送，不并行
 - ACTIVE_FILE_CHANGED 在 `noWorkspace` 态时 chatMachine 忽略（见 AG-M-P-04 §6.6）
 
-## 6. 候选规则
+## 6. 规则落地状态
 
-以下规则是 Phase 9 后续实现候选，尚未登记为 `SYS-C-T-01` 的正式 RULE。进入代码实现前必须升级为正式规则、补 `@GOV` owner 和测试覆盖。
+REQ-ED-007 / REQ-ED-008 已升级为 `SYS-C-T-01` 正式 RULE。进入代码实现前必须补 `@GOV` owner 和测试覆盖，不得继续以候选规则驱动实现。
 
 | 候选规则 | 候选链路 | 来源需求 | 规则意图 |
 |----------|----------|----------|----------|
-| ED-CAND-DATA-002 | ED-OPEN-FILE | REQ-ED-007 | BlockIdExtension 必须通过 appendTransaction 为 BLOCK_NODE_NAMES 节点分配 UUID v4；blockId 由 Editor Runtime 生成，不由模型输出直接决定；会话级有效，不持久化。 |
-| ED-CAND-STATE-004 | ED-DIFF-RENDER | REQ-ED-008 | DiffDecoration 只能消费 PendingDiff.appliedRange（已验证 PM 范围）；无法解析时不渲染伪高亮；编辑器内只渲染绿增（newText 字符精确高亮），不渲染红删。 |
+| ~~ED-CAND-DATA-002~~ | ED-OPEN-FILE | REQ-ED-007 | 已升级为 BR-ED-DATA-002：BlockIdExtension 必须通过 appendTransaction 为 BLOCK_NODE_NAMES 节点分配 UUID v4；BlockId 由 Editor Runtime 生成，不由模型输出直接决定；会话级有效，不持久化。 |
+| ~~ED-CAND-STATE-004~~ | ED-DIFF-RENDER | REQ-ED-008 | 已升级为 BR-ED-STATE-006：GreenAdditionDecoration 只能消费 PendingDiff.appliedRange（已验证 PM 范围）；无法解析时不渲染伪高亮；编辑器内只渲染绿增（newText 字符精确高亮），不渲染红删。 |
 
 已升级为正式规则：
 
@@ -239,8 +239,11 @@ editorMachine 在以下场景向其他状态机发出事件：
 |----------|--------|----------|----------|
 | BR-ED-STATE-002 | ED-OPEN-FILE | REQ-ED-003 | 多标签必须保留每个打开文件的独立内容、dirty 和状态；重复打开同一文件时复用既有标签。 |
 | BR-ED-STATE-003 | ED-SAVE-FILE | REQ-ED-004 | dirty 标签关闭或 Workspace 切换前必须确认、保存或阻断。 |
-| BR-ED-STATE-004 | ED-OPEN-FILE | REQ-ED-005 | 状态栏必须从 active tab 派生当前文件、保存状态和基础统计信息。 |
+| BR-ED-STATE-004 | ED-OPEN-FILE | REQ-ED-005 | 状态栏必须从 active tab 派生 ActiveFile、保存状态和基础统计信息。 |
 | BR-ED-PERSIST-002 | ED-OPEN-FILE、ED-SAVE-FILE | REQ-ED-006 | `.md` 必须通过 TipTap/Markdown 运行时维护 Markdown 文本；转换失败不得覆盖磁盘内容。 |
+| BR-ED-PERSIST-003 | ED-OPEN-FILE、ED-SAVE-FILE | REQ-ED-006 | `.txt` 必须与 `.md` 共用同一 TipTap 实例，采用纯文本序列化路径。 |
+| BR-ED-DATA-002 | ED-OPEN-FILE、DE-CREATE-DIFF | REQ-ED-007 | BlockIdExtension 由 Editor Runtime 生成和维护 BlockId；模型只能读取 document_structure 注入的 block-id。 |
+| BR-ED-STATE-006 | ED-DIFF-RENDER、DE-CREATE-DIFF | REQ-ED-008 | GreenAdditionDecoration 只能消费已验证 appliedRange 渲染绿增。 |
 
 ## 7. 验收标准
 
@@ -254,7 +257,7 @@ editorMachine 在以下场景向其他状态机发出事件：
 6. DiffDecoration 无 PendingDiff.appliedRange 时不渲染伪高亮；decoration 从 appliedRange 构建，不重新搜索。
 7. Accept（已打开文件路径）不写入 DiskState；DiskState 仅 Cmd+S 保存时更新。
 8. 编辑器内只显示绿增（newText 字符精确绿色高亮），不显示红色删除；红删绿增完整 diff 视图只在聊天消息流中展示。
-9. syncPendingDiffsWithDocument 检测 originalText 不匹配时自动触发 EXPIRE_REQUESTED；非 diff 区域编辑不触发。
+9. syncPendingDiffsWithDocument 检测 appliedRange 位置的 newText 不匹配时自动触发 EXPIRE_REQUESTED；非 diff 区域编辑不触发。
 
 ## 变更记录
 
@@ -272,3 +275,4 @@ editorMachine 在以下场景向其他状态机发出事件：
 | 2026-05-24 | v1.9 | §4 BlockId 策略重写（D-07）：BlockIdExtension 架构（appendTransaction + UUID v4 + BLOCK_NODE_NAMES）；§4.2 新增坐标系统说明（blockOffset vs PM position，Markdown 语法字符不计入 textContent）；§5 DiffDecoration 重写（D-08）：拆分为 §5.1/§5.2；appliedRange 作为 decoration 数据来源；applyDiffReplaceInEditor 执行机制；syncPendingDiffsWithDocument 监听协议；withSuppressedPendingContentSync 防误触；§6 ED-CAND-DATA-002/STATE-004 描述更新；§7 验收标准新增 9 |
 | 2026-05-24 | v2.0 | 审计修复：§5-A Dirty 状态表 proposedText 残留替换（C-08/C-09）："AI diff 应用" LogicalState 从"= proposedText"改为"含 newText（originalText 位置已精确替换）"；"Accept (open-file)" 从"不变（已是 proposedText）"改为"不变（已含 newText）" |
 | 2026-05-24 | v2.1 | §5-B 新增 editorMachine 出站事件文档（S-02 系统性审计修复）：ACTIVE_FILE_CHANGED（→ chatMachine，触发条件、约束引用 AG-M-P-04）；LOGICAL_STATE_APPEARED（→ diffMachine，触发条件、顺序化发送约束，引用 DE-M-T-01 §5.2）|
+| 2026-05-24 | v2.2 | 审计修复：§6 将 ED-CAND-DATA-002/ED-CAND-STATE-004 标记为已升级正式规则并补 BR-ED-DATA-002/BR-ED-STATE-006/BR-ED-PERSIST-003；BlockId/绿增门禁改为正式规则口径；失效检测验收从 originalText 不匹配修正为 appliedRange 位置 newText 不匹配 |

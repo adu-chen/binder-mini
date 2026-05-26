@@ -1,0 +1,101 @@
+/**
+ * @GOV
+ * codes: BR-AG-UI-001, BR-DE-UI-003
+ * type: RB
+ * chain: AG-SEND-MESSAGE, DE-ACCEPT-DIFF, DE-REJECT-DIFF
+ * rules: BR-AG-UI-001, BR-DE-UI-003
+ * boundary: in=AgentMessage list, streaming content string, and DiffEntry list with sourceToolId | out=scrollable MessageList with per-message DiffCards injected below the assistant bubble whose toolCallId matches diff.sourceToolId
+ * term_ref: TERM-AG-002, TERM-DE-001, TERM-DE-011
+ */
+
+import { useEffect, useMemo, useRef } from "react";
+import { MessageBubble } from "./MessageBubble";
+import type { DiffForBubble } from "./MessageBubble";
+import type { AgentMessage } from "../machines/chatMachine";
+import type { PendingDiffStatus } from "../machines/diffMachine";
+
+export interface DiffForRender extends DiffForBubble {
+  /** BR-DE-UI-003: links this entry to the assistant message via AgentMessage.toolCallId. */
+  sourceToolId: string;
+}
+
+interface MessageListProps {
+  messages: AgentMessage[];
+  streamingContent: string;
+  isStreaming: boolean;
+  allDiffs?: DiffForRender[];
+  onAcceptDiff?: (diffId: string) => void;
+  onRejectDiff?: (diffId: string) => void;
+}
+
+export function MessageList({
+  messages,
+  streamingContent,
+  isStreaming,
+  allDiffs,
+  onAcceptDiff,
+  onRejectDiff,
+}: MessageListProps) {
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length, streamingContent]);
+
+  // BR-DE-UI-003: group diffs by sourceToolId so each MessageBubble receives
+  // only the diffs whose sourceToolId matches the bubble's toolCallId.
+  const diffsByToolCallId = useMemo(() => {
+    const map = new Map<string, DiffForBubble[]>();
+    for (const d of allDiffs ?? []) {
+      const existing = map.get(d.sourceToolId) ?? [];
+      map.set(d.sourceToolId, [...existing, d]);
+    }
+    return map;
+  }, [allDiffs]);
+
+  if (messages.length === 0 && !isStreaming) {
+    return (
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "var(--text-muted)",
+          fontSize: 13,
+          userSelect: "none",
+        }}
+      >
+        发送消息开始对话
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        flex: 1,
+        overflowY: "auto",
+        padding: "12px 12px 4px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
+      {messages.map((msg) => (
+        <MessageBubble
+          key={msg.id}
+          role={msg.role}
+          content={msg.content}
+          diffs={msg.toolCallId ? diffsByToolCallId.get(msg.toolCallId) : undefined}
+          onAcceptDiff={onAcceptDiff}
+          onRejectDiff={onRejectDiff}
+        />
+      ))}
+      {isStreaming && streamingContent && (
+        <MessageBubble role="assistant" content={streamingContent} isStreaming />
+      )}
+      <div ref={bottomRef} />
+    </div>
+  );
+}

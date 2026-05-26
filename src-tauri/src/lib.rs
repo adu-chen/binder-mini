@@ -1,11 +1,11 @@
-use rusqlite::{params, Connection, OptionalExtension};
+use futures_util::StreamExt;
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::DefaultHasher;
 use std::fs;
-use std::hash::{Hash, Hasher};
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
 #[derive(Serialize)]
@@ -81,6 +81,53 @@ struct WorkspaceMutationResult {
     conflict: Option<PathConflict>,
 }
 
+/*
+ * @GOV
+ * codes: BR-DE-PERSIST-002
+ * type: IMPL
+ * chain: DE-CREATE-DIFF, DE-ACCEPT-DIFF, DE-REJECT-DIFF, DE-EXPIRE-DIFF
+ * rules: BR-DE-PERSIST-002
+ * boundary: in=PendingDiffRecord and workspace_root path | out=pending_diffs row upserted to WorkspaceDatabase
+ * term_ref: TERM-WS-002, TERM-DE-001, TERM-DE-005
+ */
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PendingDiffRecord {
+    id: String,
+    file_path: String,
+    original_text: String,
+    new_text: String,
+    summary: String,
+    status: String,
+    effective_path: String,
+    source_tool_id: String,
+    base_revision: String,
+    applied_range_from: Option<i64>,
+    applied_range_to: Option<i64>,
+    created_at: i64,
+}
+
+/*
+ * @GOV
+ * codes: BR-AG-PERSIST-001
+ * type: IMPL
+ * chain: WS-CLOSE, AG-SEND-MESSAGE, WS-OPEN
+ * rules: BR-AG-PERSIST-001
+ * boundary: in=AgentMessage list and workspace_root path | out=chat_messages table upserted to WorkspaceDatabase
+ * term_ref: TERM-WS-002, TERM-AG-010, TERM-AG-013
+ */
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ChatMessageRecord {
+    id: String,
+    role: String,
+    content: String,
+    stream_status: Option<String>,
+    tool_call_id: Option<String>,
+    created_at: i64,
+    session_id: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SearchResult {
@@ -88,21 +135,6 @@ struct SearchResult {
     preview: String,
 }
 
-/*
- * @GOV
- * codes: BR-WS-DATA-005-DATA-WS-WS-SEARCH-001
- * type: DATA
- * chain: WS-SEARCH
- * rules: BR-WS-DATA-005
- * boundary: in=Workspace text files and workspace.db FTS5 index | out=current Workspace scoped search results with recursive fallback
- */
-struct SearchIndexDocument {
-    path: String,
-    content: String,
-    mtime_ms: u64,
-    size_bytes: u64,
-    content_hash: String,
-}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -240,11 +272,38 @@ fn current_unix_seconds() -> u64 {
         .unwrap_or(0)
 }
 
+fn chat_debug_log(app: &tauri::AppHandle, line: &str) {
+    println!("{line}");
+    let Ok(config_dir) = app.path().app_config_dir() else {
+        return;
+    };
+    if fs::create_dir_all(&config_dir).is_err() {
+        return;
+    }
+    let log_path = config_dir.join("chat-debug.log");
+    let Ok(mut file) = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+    else {
+        return;
+    };
+    let _ = writeln!(file, "{} {}", current_unix_seconds(), line);
+}
+
+fn chat_debug_error(app: &tauri::AppHandle, line: &str) {
+    eprintln!("{line}");
+    chat_debug_log(app, line);
+}
+
 fn initialize_workspace_metadata(root_path: &Path) -> Result<WorkspaceMetadata, String> {
     let binder_dir = root_path.join(".binder");
     fs::create_dir_all(&binder_dir).map_err(|error| error.to_string())?;
-    let workspace_database_path = binder_dir.join("workspace.db");
+    let workspace_database_path = workspace_database_path(root_path);
     open_workspace_database(&workspace_database_path)?;
+    let search_database_path = search_database_path(root_path);
+    initialize_search_database(&search_database_path)?;
+    rebuild_search_index(root_path)?;
     Ok(WorkspaceMetadata {
         workspace_database_path: workspace_database_path.to_string_lossy().to_string(),
         workspace_database_initialized: workspace_database_path.is_file(),
@@ -255,13 +314,20 @@ fn workspace_database_path(root_path: &Path) -> PathBuf {
     root_path.join(".binder").join("workspace.db")
 }
 
+fn search_database_path(root_path: &Path) -> PathBuf {
+    root_path.join(".binder").join("search.db")
+}
+
 fn open_workspace_database(database_path: &Path) -> Result<Connection, String> {
     if let Some(parent) = database_path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     let connection = Connection::open(database_path).map_err(|error| error.to_string())?;
     match initialize_workspace_database_schema(&connection) {
-        Ok(()) => Ok(connection),
+        Ok(()) => {
+            migrate_workspace_database_schema(&connection);
+            Ok(connection)
+        }
         Err(schema_error) => {
             drop(connection);
             if database_path.exists() {
@@ -273,86 +339,132 @@ fn open_workspace_database(database_path: &Path) -> Result<Connection, String> {
             initialize_workspace_database_schema(&connection).map_err(|error| {
                 format!("failed to initialize workspace database after recovery: {schema_error}; {error}")
             })?;
+            migrate_workspace_database_schema(&connection);
             Ok(connection)
         }
     }
 }
 
+/// Add columns introduced in Phase 6 to pre-existing pending_diffs tables.
+/// ALTER TABLE ADD COLUMN returns an error when the column already exists — we ignore those.
+/// NOT NULL columns require a DEFAULT so existing rows stay valid.
+fn migrate_workspace_database_schema(connection: &Connection) {
+    let migrations: &[&str] = &[
+        "ALTER TABLE pending_diffs ADD COLUMN summary TEXT NOT NULL DEFAULT '';",
+        "ALTER TABLE pending_diffs ADD COLUMN effective_path TEXT NOT NULL DEFAULT 'open-file';",
+        "ALTER TABLE pending_diffs ADD COLUMN source_tool_id TEXT NOT NULL DEFAULT '';",
+        "ALTER TABLE pending_diffs ADD COLUMN base_revision TEXT NOT NULL DEFAULT '';",
+        "ALTER TABLE pending_diffs ADD COLUMN applied_range_from INTEGER;",
+        "ALTER TABLE pending_diffs ADD COLUMN applied_range_to INTEGER;",
+    ];
+    for stmt in migrations {
+        // Silence "duplicate column name" errors — they mean the column already exists.
+        let _ = connection.execute_batch(stmt);
+    }
+}
+
+/*
+ * @GOV
+ * codes: BR-WS-STATE-002-IMPL-WS-WS-OPEN-001
+ * type: IMPL
+ * chain: WS-OPEN
+ * rules: BR-WS-STATE-002
+ * boundary: in=workspace_root path | out=workspace.db schema (workspace_settings, pending_diffs, terminal_diff_cards, chat_messages)
+ */
 fn initialize_workspace_database_schema(connection: &Connection) -> Result<(), String> {
     connection
         .execute_batch(
             r#"
-            CREATE TABLE IF NOT EXISTS search_index_meta (
+            CREATE TABLE IF NOT EXISTS workspace_settings (
                 key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
+                value TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS search_documents (
-                path TEXT PRIMARY KEY,
-                mtime_ms INTEGER NOT NULL,
-                size_bytes INTEGER NOT NULL,
-                content_hash TEXT NOT NULL
+            CREATE TABLE IF NOT EXISTS pending_diffs (
+                id TEXT PRIMARY KEY,
+                file_path TEXT NOT NULL,
+                original_text TEXT NOT NULL,
+                new_text TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                status TEXT NOT NULL,
+                effective_path TEXT NOT NULL CHECK(effective_path IN ('open-file','closed-file')),
+                source_tool_id TEXT NOT NULL,
+                base_revision TEXT NOT NULL,
+                applied_range_from INTEGER,
+                applied_range_to INTEGER,
+                created_at INTEGER NOT NULL
             );
-            CREATE VIRTUAL TABLE IF NOT EXISTS search_documents_fts
-            USING fts5(path UNINDEXED, content, tokenize = 'unicode61');
+            CREATE TABLE IF NOT EXISTS terminal_diff_cards (
+                id TEXT PRIMARY KEY,
+                diff_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                message TEXT NOT NULL,
+                resolved_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id TEXT PRIMARY KEY,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                stream_status TEXT,
+                tool_call_id TEXT,
+                created_at INTEGER NOT NULL,
+                session_id TEXT NOT NULL
+            );
+            "#,
+        )
+        .map_err(|error| error.to_string())
+}
+
+/*
+ * @GOV
+ * codes: BR-WS-DATA-005-IMPL-WS-WS-OPEN-002
+ * type: IMPL
+ * chain: WS-OPEN,WS-SEARCH
+ * rules: BR-WS-DATA-005
+ * boundary: in=search_db_path | out=search.db FTS5 schema (search_index table)
+ */
+fn initialize_search_database(search_db_path: &Path) -> Result<(), String> {
+    if let Some(parent) = search_db_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let connection = Connection::open(search_db_path).map_err(|error| error.to_string())?;
+    connection
+        .execute_batch(
+            r#"
+            CREATE VIRTUAL TABLE IF NOT EXISTS search_index
+            USING fts5(file_path UNINDEXED, file_name, content, tokenize = 'unicode61');
             "#,
         )
         .map_err(|error| error.to_string())
 }
 
 fn rebuild_search_index(root_path: &Path) -> Result<(), String> {
-    let database_path = workspace_database_path(root_path);
-    let mut connection = open_workspace_database(&database_path)?;
-    let mut documents = Vec::new();
-    collect_search_index_documents(root_path, root_path, &mut documents)?;
+    let search_db_path = search_database_path(root_path);
+    initialize_search_database(&search_db_path)?;
+    let mut connection = Connection::open(&search_db_path).map_err(|error| error.to_string())?;
+    let mut documents: Vec<(String, String, String)> = Vec::new();
+    collect_search_documents(root_path, root_path, &mut documents)?;
     let transaction = connection
         .transaction()
         .map_err(|error| error.to_string())?;
     transaction
-        .execute("DELETE FROM search_documents_fts", [])
+        .execute("DELETE FROM search_index", [])
         .map_err(|error| error.to_string())?;
-    transaction
-        .execute("DELETE FROM search_documents", [])
-        .map_err(|error| error.to_string())?;
-    for document in documents {
+    for (file_path, file_name, content) in documents {
         transaction
             .execute(
-                "INSERT INTO search_documents (path, mtime_ms, size_bytes, content_hash) VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    &document.path,
-                    document.mtime_ms,
-                    document.size_bytes,
-                    &document.content_hash
-                ],
-            )
-            .map_err(|error| error.to_string())?;
-        transaction
-            .execute(
-                "INSERT INTO search_documents_fts (path, content) VALUES (?1, ?2)",
-                params![&document.path, &document.content],
+                "INSERT INTO search_index (file_path, file_name, content) VALUES (?1, ?2, ?3)",
+                params![file_path, file_name, content],
             )
             .map_err(|error| error.to_string())?;
     }
-    transaction
-        .execute(
-            "INSERT INTO search_index_meta (key, value) VALUES ('index_version', '1')
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            [],
-        )
-        .map_err(|error| error.to_string())?;
-    transaction
-        .execute(
-            "INSERT INTO search_index_meta (key, value) VALUES ('last_rebuild_at_ms', ?1)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![current_unix_seconds().saturating_mul(1000).to_string()],
-        )
-        .map_err(|error| error.to_string())?;
     transaction.commit().map_err(|error| error.to_string())
 }
 
-fn collect_search_index_documents(
+fn collect_search_documents(
     root: &Path,
     current: &Path,
-    documents: &mut Vec<SearchIndexDocument>,
+    documents: &mut Vec<(String, String, String)>,
 ) -> Result<(), String> {
     for entry in fs::read_dir(current).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
@@ -362,42 +474,24 @@ fn collect_search_index_documents(
         }
         let file_type = entry.file_type().map_err(|error| error.to_string())?;
         if file_type.is_dir() {
-            collect_search_index_documents(root, &path, documents)?;
+            collect_search_documents(root, &path, documents)?;
         } else if file_type.is_file() {
             let Ok(content) = fs::read_to_string(&path) else {
                 continue;
             };
-            let metadata = entry.metadata().map_err(|error| error.to_string())?;
-            let relative_path = path
+            let file_path = path
                 .strip_prefix(root)
                 .map_err(|error| error.to_string())?
                 .to_string_lossy()
                 .to_string();
-            documents.push(SearchIndexDocument {
-                path: relative_path,
-                content_hash: content_hash(&content),
-                content,
-                mtime_ms: file_mtime_ms(&metadata),
-                size_bytes: metadata.len(),
-            });
+            let file_name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            documents.push((file_path, file_name, content));
         }
     }
     Ok(())
-}
-
-fn file_mtime_ms(metadata: &fs::Metadata) -> u64 {
-    metadata
-        .modified()
-        .ok()
-        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or(0)
-}
-
-fn content_hash(content: &str) -> String {
-    let mut hasher = DefaultHasher::new();
-    content.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
 }
 
 fn read_workspace_entries(
@@ -726,6 +820,183 @@ fn path_conflict(target: &Path, relative_path: &str) -> PathConflict {
     }
 }
 
+/*
+ * @GOV
+ * codes: BR-DE-PERSIST-002
+ * type: IMPL
+ * chain: DE-CREATE-DIFF, DE-ACCEPT-DIFF, DE-REJECT-DIFF, DE-EXPIRE-DIFF
+ * rules: BR-DE-PERSIST-002
+ * boundary: in=PendingDiffRecord and workspace_root path | out=pending_diffs row upserted to WorkspaceDatabase
+ * term_ref: TERM-WS-002, TERM-DE-001, TERM-DE-005
+ */
+#[tauri::command]
+fn save_pending_diff(workspace_root: String, diff: PendingDiffRecord) -> Result<(), String> {
+    let db_path = workspace_database_path(&PathBuf::from(&workspace_root));
+    let conn = open_workspace_database(&db_path)?;
+    conn.execute(
+        "INSERT OR REPLACE INTO pending_diffs \
+         (id, file_path, original_text, new_text, summary, status, effective_path, \
+          source_tool_id, base_revision, applied_range_from, applied_range_to, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        params![
+            diff.id, diff.file_path, diff.original_text, diff.new_text,
+            diff.summary, diff.status, diff.effective_path, diff.source_tool_id,
+            diff.base_revision, diff.applied_range_from, diff.applied_range_to, diff.created_at
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+/*
+ * @GOV
+ * codes: BR-DE-PERSIST-002
+ * type: IMPL
+ * chain: DE-ACCEPT-DIFF, DE-REJECT-DIFF, DE-EXPIRE-DIFF
+ * rules: BR-DE-PERSIST-002
+ * boundary: in=diff_id string and status string | out=pending_diffs.status updated in WorkspaceDatabase
+ * term_ref: TERM-WS-002, TERM-DE-001
+ */
+#[tauri::command]
+fn update_diff_status(workspace_root: String, diff_id: String, status: String) -> Result<(), String> {
+    let db_path = workspace_database_path(&PathBuf::from(&workspace_root));
+    let conn = Connection::open(&db_path).map_err(|error| error.to_string())?;
+    conn.execute(
+        "UPDATE pending_diffs SET status = ?2 WHERE id = ?1",
+        params![diff_id, status],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+/*
+ * @GOV
+ * codes: BR-DE-PERSIST-002, BR-WS-STATE-002
+ * type: IMPL
+ * chain: WS-OPEN, DE-CREATE-DIFF
+ * rules: BR-DE-PERSIST-002, BR-WS-STATE-002
+ * boundary: in=workspace_root path | out=PendingDiffRecord list of non-terminal PendingDiff rows from WorkspaceDatabase
+ * term_ref: TERM-WS-002, TERM-DE-001, TERM-DE-005
+ */
+#[tauri::command]
+fn load_diffs_from_workspace(workspace_root: String) -> Result<Vec<PendingDiffRecord>, String> {
+    let db_path = workspace_database_path(&PathBuf::from(&workspace_root));
+    if !db_path.is_file() {
+        return Ok(Vec::new());
+    }
+    let conn = Connection::open(&db_path).map_err(|error| error.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, file_path, original_text, new_text, summary, status, effective_path, \
+             source_tool_id, base_revision, applied_range_from, applied_range_to, created_at \
+             FROM pending_diffs \
+             WHERE status NOT IN ('accepted', 'rejected', 'expired', 'error')",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(PendingDiffRecord {
+                id: row.get(0)?,
+                file_path: row.get(1)?,
+                original_text: row.get(2)?,
+                new_text: row.get(3)?,
+                summary: row.get(4)?,
+                status: row.get(5)?,
+                effective_path: row.get(6)?,
+                source_tool_id: row.get(7)?,
+                base_revision: row.get(8)?,
+                applied_range_from: row.get(9)?,
+                applied_range_to: row.get(10)?,
+                created_at: row.get(11)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    let mut records = Vec::new();
+    for row in rows {
+        records.push(row.map_err(|error| error.to_string())?);
+    }
+    Ok(records)
+}
+
+/*
+ * @GOV
+ * codes: BR-AG-PERSIST-001
+ * type: IMPL
+ * chain: WS-CLOSE, AG-SEND-MESSAGE
+ * rules: BR-AG-PERSIST-001
+ * boundary: in=AgentMessage list and workspace_root path | out=chat_messages table upserted to WorkspaceDatabase
+ * term_ref: TERM-WS-002, TERM-AG-010, TERM-AG-013
+ */
+#[tauri::command]
+fn save_chat_messages(workspace_root: String, messages: Vec<ChatMessageRecord>) -> Result<(), String> {
+    if messages.is_empty() {
+        return Ok(());
+    }
+    let db_path = workspace_database_path(&PathBuf::from(&workspace_root));
+    let mut conn = open_workspace_database(&db_path)?;
+    let tx = conn.transaction().map_err(|error| error.to_string())?;
+    tx.execute(
+        "DELETE FROM chat_messages WHERE session_id = ?1",
+        params![workspace_root],
+    )
+    .map_err(|error| error.to_string())?;
+    for msg in &messages {
+        tx.execute(
+            "INSERT INTO chat_messages \
+             (id, role, content, stream_status, tool_call_id, created_at, session_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                msg.id, msg.role, msg.content, msg.stream_status,
+                msg.tool_call_id, msg.created_at, workspace_root
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    tx.commit().map_err(|error| error.to_string())
+}
+
+/*
+ * @GOV
+ * codes: BR-AG-PERSIST-001
+ * type: IMPL
+ * chain: WS-OPEN, AG-SEND-MESSAGE
+ * rules: BR-AG-PERSIST-001
+ * boundary: in=workspace_root path | out=ChatMessageRecord list ordered by created_at from WorkspaceDatabase chat_messages
+ * term_ref: TERM-WS-002, TERM-AG-010, TERM-AG-013
+ */
+#[tauri::command]
+fn load_chat_messages(workspace_root: String) -> Result<Vec<ChatMessageRecord>, String> {
+    let db_path = workspace_database_path(&PathBuf::from(&workspace_root));
+    if !db_path.is_file() {
+        return Ok(Vec::new());
+    }
+    let conn = Connection::open(&db_path).map_err(|error| error.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, role, content, stream_status, tool_call_id, created_at, session_id \
+             FROM chat_messages WHERE session_id = ?1 ORDER BY created_at ASC",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = stmt
+        .query_map(params![workspace_root], |row| {
+            Ok(ChatMessageRecord {
+                id: row.get(0)?,
+                role: row.get(1)?,
+                content: row.get(2)?,
+                stream_status: row.get(3)?,
+                tool_call_id: row.get(4)?,
+                created_at: row.get(5)?,
+                session_id: row.get(6)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    let mut records = Vec::new();
+    for row in rows {
+        records.push(row.map_err(|error| error.to_string())?);
+    }
+    Ok(records)
+}
+
 #[tauri::command]
 fn search_files(workspace_root: String, query: String) -> Result<Vec<SearchResult>, String> {
     let trimmed_query = query.trim().to_string();
@@ -744,22 +1015,25 @@ fn search_files(workspace_root: String, query: String) -> Result<Vec<SearchResul
 }
 
 fn search_files_with_index(root: &Path, query: &str) -> Result<Vec<SearchResult>, String> {
-    let database_path = workspace_database_path(root);
-    let connection = open_workspace_database(&database_path)?;
+    let search_db_path = search_database_path(root);
+    if !search_db_path.is_file() {
+        rebuild_search_index(root)?;
+    }
+    let connection = Connection::open(&search_db_path).map_err(|error| error.to_string())?;
     if search_index_needs_rebuild(&connection)? {
         drop(connection);
         rebuild_search_index(root)?;
     }
-    let connection = open_workspace_database(&database_path)?;
+    let connection = Connection::open(&search_db_path).map_err(|error| error.to_string())?;
     let fts_query = build_fts_query(query);
     if fts_query.is_empty() {
         return Ok(Vec::new());
     }
     let mut statement = connection
         .prepare(
-            "SELECT path, snippet(search_documents_fts, 1, '', '', '...', 18)
-             FROM search_documents_fts
-             WHERE search_documents_fts MATCH ?1
+            "SELECT file_path, snippet(search_index, 2, '', '', '...', 18)
+             FROM search_index
+             WHERE search_index MATCH ?1
              LIMIT 20",
         )
         .map_err(|error| error.to_string())?;
@@ -783,15 +1057,12 @@ fn search_files_with_index(root: &Path, query: &str) -> Result<Vec<SearchResult>
 }
 
 fn search_index_needs_rebuild(connection: &Connection) -> Result<bool, String> {
-    let last_rebuild_at_ms = connection
-        .query_row(
-            "SELECT value FROM search_index_meta WHERE key = 'last_rebuild_at_ms'",
-            [],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()
+    let count: i64 = connection
+        .query_row("SELECT count(*) FROM search_index LIMIT 1", [], |row| {
+            row.get(0)
+        })
         .map_err(|error| error.to_string())?;
-    Ok(last_rebuild_at_ms.is_none())
+    Ok(count == 0)
 }
 
 fn build_fts_query(query: &str) -> String {
@@ -850,9 +1121,24 @@ fn resolve_workspace_path(workspace_root: &str, relative_path: &str) -> Result<P
         return Err("file target is outside Workspace".to_string());
     }
     let target_path = root.join(relative);
-    let comparable_path = target_path
-        .canonicalize()
-        .unwrap_or_else(|_| target_path.clone());
+    // Resolve symlinks before the containment check.
+    // For existing paths, canonicalize resolves all symlink components.
+    // For non-existent paths (new files), canonicalize the parent directory —
+    // a symlinked parent would otherwise pass the starts_with check undetected.
+    let comparable_path = if target_path.exists() {
+        target_path.canonicalize().map_err(|e| e.to_string())?
+    } else {
+        let parent = target_path
+            .parent()
+            .ok_or_else(|| "invalid path: no parent".to_string())?;
+        let file_name = target_path
+            .file_name()
+            .ok_or_else(|| "invalid path: no file name".to_string())?;
+        let canonical_parent = parent
+            .canonicalize()
+            .unwrap_or_else(|_| parent.to_path_buf());
+        canonical_parent.join(file_name)
+    };
     if !comparable_path.starts_with(&root) {
         return Err("file target is outside Workspace".to_string());
     }
@@ -908,6 +1194,904 @@ fn collect_search_results(
     Ok(())
 }
 
+// ── Provider / Chat commands ────────────────────────────────────────────────
+
+/// BR-AG-SEC-001: Allowlist of accepted provider identifiers for API key storage.
+/// Prevents path traversal via crafted provider strings (e.g. "../../etc/passwd").
+const ALLOWED_PROVIDERS: &[&str] = &["anthropic", "openai", "deepseek"];
+
+fn validate_provider(provider: &str) -> Result<String, String> {
+    let lower = provider.to_lowercase();
+    if ALLOWED_PROVIDERS.contains(&lower.as_str()) {
+        Ok(lower)
+    } else {
+        Err(format!("unknown provider: {}", provider))
+    }
+}
+
+/// BR-AG-SEC-001 / BR-AG-PERSIST-002: API key is stored only in Rust-side
+/// app_config_dir as an application-level ProviderCredential.
+/// Raw key never crosses the IPC boundary back to TypeScript.
+#[tauri::command]
+fn save_api_key(app: tauri::AppHandle, provider: String, api_key: String) -> Result<(), String> {
+    let provider_key = validate_provider(&provider)?;
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| error.to_string())?;
+    fs::create_dir_all(&config_dir).map_err(|error| error.to_string())?;
+    let key_path = config_dir.join(format!("{}.key", provider_key));
+    fs::write(&key_path, api_key.trim().as_bytes()).map_err(|error| error.to_string())
+}
+
+/// BR-AG-SEC-001 / BR-AG-PERSIST-002: Returns only a boolean; raw key never returned.
+#[tauri::command]
+fn is_api_key_configured(app: tauri::AppHandle, provider: String) -> Result<bool, String> {
+    let provider_key = validate_provider(&provider)?;
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| error.to_string())?;
+    let key_path = config_dir.join(format!("{}.key", provider_key));
+    if !key_path.exists() {
+        return Ok(false);
+    }
+    let content = fs::read_to_string(&key_path).map_err(|error| error.to_string())?;
+    Ok(!content.trim().is_empty())
+}
+
+fn load_api_key(app: &tauri::AppHandle, provider: &str) -> Result<String, String> {
+    let provider_key = validate_provider(provider)?;
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| error.to_string())?;
+    let key_path = config_dir.join(format!("{}.key", provider_key));
+    let key = fs::read_to_string(&key_path).map_err(|_| "API key not configured".to_string())?;
+    let trimmed = key.trim().to_string();
+    if trimmed.is_empty() {
+        return Err("API key not configured".to_string());
+    }
+    Ok(trimmed)
+}
+
+#[derive(Clone)]
+struct PromptRuntimeContext {
+    workspace_root: String,
+    active_file_path: Option<String>,
+    active_file_mode: Option<String>,
+    active_file_dirty: Option<bool>,
+    pending_diff_count: Option<u32>,
+    active_file_logical_state_snapshot: Option<String>,
+    active_file_snapshot_truncated: Option<bool>,
+    /// Pre-built XML string from extractDocumentStructure() on the frontend.
+    /// Injected as L0 ④ in system prompt for .md files (AG-M-P-02 §3 ④).
+    document_structure: Option<String>,
+}
+
+fn workspace_name(workspace_root: &str) -> String {
+    Path::new(workspace_root)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("Workspace")
+        .to_string()
+}
+
+fn allowed_tool_names(runtime: &PromptRuntimeContext) -> Vec<&'static str> {
+    let mut tools = vec!["read_file", "list_files", "search_files"];
+    if runtime.active_file_path.is_some()
+        && runtime.active_file_mode.as_deref() == Some("editable")
+        && runtime.active_file_logical_state_snapshot.is_some()
+    {
+        tools.push("edit_current_editor_document");
+    }
+    tools
+}
+
+fn cdata_safe(content: &str) -> String {
+    content.replace("]]>", "]]]]><![CDATA[>")
+}
+
+fn build_system_prompt(runtime: &PromptRuntimeContext) -> String {
+    let mut lines = vec![
+        "You are a coding assistant for the Binder Mini workspace editor.".to_string(),
+        format!("Current workspace: {}", workspace_name(&runtime.workspace_root)),
+        "Use workspace tools to inspect files instead of guessing project content.".to_string(),
+    ];
+
+    if let Some(active_file) = &runtime.active_file_path {
+        let mode = runtime.active_file_mode.as_deref().unwrap_or("unknown");
+        let dirty = if runtime.active_file_dirty.unwrap_or(false) { "dirty" } else { "clean" };
+        let pending = runtime.pending_diff_count.unwrap_or(0);
+        lines.push(format!(
+            "Active file: {} [{}] [{}] [{} pending diffs]",
+            active_file, mode, dirty, pending
+        ));
+    } else {
+        lines.push("Active file: none".to_string());
+    }
+
+    if let (Some(active_file), Some(snapshot)) = (
+        &runtime.active_file_path,
+        &runtime.active_file_logical_state_snapshot,
+    ) {
+        let dirty = if runtime.active_file_dirty.unwrap_or(false) { "true" } else { "false" };
+        let truncated = if runtime.active_file_snapshot_truncated.unwrap_or(false) { "true" } else { "false" };
+        lines.push(format!(
+            "<active_file_logical_state file=\"{}\" dirty=\"{}\" truncated=\"{}\">",
+            active_file, dirty, truncated
+        ));
+        lines.push("<![CDATA[".to_string());
+        lines.push(cdata_safe(snapshot));
+        lines.push("]]>".to_string());
+        lines.push("</active_file_logical_state>".to_string());
+    }
+
+    // L0 ④ — document_structure (AG-M-P-02 §3 ④); provided by frontend extractDocumentStructure()
+    if let Some(doc_structure) = &runtime.document_structure {
+        if !doc_structure.trim().is_empty() {
+            lines.push(doc_structure.clone());
+        }
+    }
+
+    lines.push("Tool constraints:".to_string());
+    lines.push("- read_file/list_files/search_files inspect files inside the current Workspace boundary from DiskState.".to_string());
+    lines.push("- edit_current_editor_document targets the runtime ActiveFile only; ignore any model-supplied filePath as execution authority.".to_string());
+    lines.push("- CRITICAL — originalText must be PLAIN TEXT only. The editor stores content as plain text nodes; Markdown syntax characters are structural markers and are NOT stored as text.".to_string());
+    lines.push("  Strip ALL Markdown syntax from originalText: heading markers (#), bold/italic markers (**, *, _), list markers (-, *, +, numbers), code fences (```), blockquote (>), etc.".to_string());
+    lines.push("  Examples: '# Welcome' → originalText='Welcome'  |  '**important**' → originalText='important'  |  '- list item' → originalText='list item'".to_string());
+    lines.push("  The <active_file_logical_state> CDATA shows Markdown formatting so you can understand document structure and style context. Do NOT copy those syntax characters into originalText.".to_string());
+    lines.push("- For ActiveFile edits, extract originalText from <active_file_logical_state> after stripping Markdown syntax. Do not use read_file/DiskState as the edit source.".to_string());
+    lines.push("- newText is the plain text replacement. Provide only the text content; do not wrap with Markdown syntax characters.".to_string());
+    lines.push("- update_file: only for files NOT currently open in the editor. MUST call read_file first to get the file content, then extract originalText (plain text, no Markdown syntax chars).".to_string());
+    lines.push("- Do not replace the whole file. Always provide a precise originalText fragment.".to_string());
+    lines.push("- API keys, absolute system paths, and internal credential storage are never available to the model.".to_string());
+
+    lines.join("\n")
+}
+
+fn anthropic_tools(runtime: &PromptRuntimeContext) -> Vec<serde_json::Value> {
+    let mut tools = Vec::new();
+    for name in allowed_tool_names(runtime) {
+        match name {
+            "read_file" => tools.push(serde_json::json!({
+                "name": "read_file",
+                "description": "Read a text file inside the current Workspace.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": { "filePath": { "type": "string", "description": "Workspace-relative file path." } },
+                    "required": ["filePath"]
+                }
+            })),
+            "list_files" => tools.push(serde_json::json!({
+                "name": "list_files",
+                "description": "List files and folders inside a Workspace directory.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": { "dirPath": { "type": "string", "description": "Workspace-relative directory path. Empty means Workspace root." } }
+                }
+            })),
+            "search_files" => tools.push(serde_json::json!({
+                "name": "search_files",
+                "description": "Search text files inside the current Workspace.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": { "query": { "type": "string", "description": "Search query." } },
+                    "required": ["query"]
+                }
+            })),
+            "edit_current_editor_document" => tools.push(serde_json::json!({
+                "name": "edit_current_editor_document",
+                "description": "Precisely replace a plain-text fragment in the runtime ActiveFile. The target file is determined by Binder Mini runtime, not by tool arguments. IMPORTANT: originalText and newText must be plain text — strip all Markdown syntax characters (# * ** _ - ` > etc.) before using as originalText.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "originalText": {
+                            "type": "string",
+                            "description": "Exact plain-text fragment to find and replace. Must NOT contain Markdown syntax characters. Extract from <active_file_logical_state> after stripping Markdown markers. Example: for '# Hello World' use 'Hello World', not '# Hello World'."
+                        },
+                        "newText": {
+                            "type": "string",
+                            "description": "Plain-text replacement fragment (not the whole file). Must NOT contain Markdown syntax characters."
+                        },
+                        "summary": {
+                            "type": "string",
+                            "description": "Short human-readable description of this edit."
+                        },
+                        "startBlockId": {
+                            "type": "string",
+                            "description": "Optional. The block-id of the block containing originalText, from <document_structure>. Helps disambiguate when originalText appears multiple times."
+                        },
+                        "startOffset": {
+                            "type": "integer",
+                            "description": "Optional. Character offset of originalText within the block's plain text (0-based, no Markdown syntax chars). Use together with startBlockId."
+                        },
+                        "occurrenceIndex": {
+                            "type": "integer",
+                            "description": "Optional. 0-based index of which occurrence to replace when originalText appears multiple times in the document. Default: 0 (first occurrence)."
+                        }
+                    },
+                    "required": ["originalText", "newText", "summary"]
+                }
+            })),
+            _ => {}
+        }
+    }
+    tools
+}
+
+fn openai_tools(runtime: &PromptRuntimeContext) -> Vec<serde_json::Value> {
+    anthropic_tools(runtime)
+        .into_iter()
+        .filter_map(|tool| {
+            Some(serde_json::json!({
+                "type": "function",
+                "function": {
+                    "name": tool["name"].as_str()?,
+                    "description": tool["description"].as_str().unwrap_or(""),
+                    "parameters": tool["input_schema"].clone()
+                }
+            }))
+        })
+        .collect()
+}
+
+#[derive(Clone, Serialize)]
+struct ToolCallPayload {
+    id: String,
+    name: String,
+    input_json: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+enum ChatStreamEvent {
+    Token { request_id: String, token: String },
+    /// BR-AG-DATA-002: emitted when Anthropic returns a tool_use block.
+    /// TypeScript executes the tool and sends the result back as role="tool" in the same turn.
+    ToolCall {
+        request_id: String,
+        /// Anthropic-assigned tool_use id; must equal ToolResult.callId (BR-AG-DATA-002).
+        id: String,
+        name: String,
+        /// Fully-accumulated JSON string of the tool input.
+        /// Explicit rename overrides enum-level rename_all="camelCase" so TypeScript
+        /// receives "input_json" (matching ChatStreamEvent type) not "inputJson".
+        #[serde(rename = "input_json")]
+        input_json: String,
+    },
+    ToolCalls { request_id: String, calls: Vec<ToolCallPayload> },
+    Done { request_id: String },
+    Failed { request_id: String, message: String },
+}
+
+/// BR-AG-DATA-002: message payload from TypeScript.
+/// role="tool" messages carry toolCallId and are converted to Anthropic tool_result format.
+/// role="assistant" messages with toolCallId have content as a JSON array of tool_use blocks.
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ChatMessagePayload {
+    role: String,
+    content: String,
+    /// Anthropic tool_use id; present on role="tool" and role="assistant" tool_use messages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<String>,
+}
+
+fn emit_tool_calls(app: &tauri::AppHandle, request_id: &str, calls: Vec<ToolCallPayload>) {
+    if calls.len() == 1 {
+        let call = calls.into_iter().next().unwrap();
+        let _ = app.emit(
+            "chat-stream-event",
+            ChatStreamEvent::ToolCall {
+                request_id: request_id.to_string(),
+                id: call.id,
+                name: call.name,
+                input_json: call.input_json,
+            },
+        );
+    } else {
+        let _ = app.emit(
+            "chat-stream-event",
+            ChatStreamEvent::ToolCalls {
+                request_id: request_id.to_string(),
+                calls,
+            },
+        );
+    }
+}
+
+/// BR-AG-STATE-002: SSE stream from selected provider.
+/// Emits "chat-stream-event" Tauri events for each token, done, or failure.
+/// BR-AG-SEC-001: API key loaded from Rust app_config_dir, never passed from TypeScript.
+/// BR-AG-STATE-003: model is validated against supported set before request.
+#[tauri::command]
+async fn chat_stream(
+    app: tauri::AppHandle,
+    request_id: String,
+    workspace_root: String,
+    messages: Vec<ChatMessagePayload>,
+    provider_type: String,
+    model: String,
+    active_file_path: Option<String>,
+    active_file_mode: Option<String>,
+    active_file_dirty: Option<bool>,
+    pending_diff_count: Option<u32>,
+    active_file_logical_state_snapshot: Option<String>,
+    active_file_snapshot_truncated: Option<bool>,
+    document_structure: Option<String>,
+) -> Result<(), String> {
+    let runtime = PromptRuntimeContext {
+        workspace_root,
+        active_file_path,
+        active_file_mode,
+        active_file_dirty,
+        pending_diff_count,
+        active_file_logical_state_snapshot,
+        active_file_snapshot_truncated,
+        document_structure,
+    };
+    chat_debug_log(&app, &format!(
+        "[chat_stream] start request_id={} provider={} model={} messages={} active_file={}",
+        request_id,
+        provider_type,
+        model,
+        messages.len(),
+        runtime.active_file_path.as_deref().unwrap_or("none")
+    ));
+    let provider_key = match validate_provider(&provider_type) {
+        Ok(provider) => provider,
+        Err(e) => {
+            chat_debug_error(&app, &format!("[chat_stream] provider invalid request_id={} error={}", request_id, e));
+            let _ = app.emit("chat-stream-event", ChatStreamEvent::Failed { request_id, message: e });
+            return Ok(());
+        }
+    };
+
+    // Load key — if missing emit Failed and return
+    let api_key = match load_api_key(&app, &provider_key) {
+        Ok(k) => k,
+        Err(e) => {
+            chat_debug_error(&app, &format!("[chat_stream] api key missing request_id={} provider={}", request_id, provider_key));
+            let _ = app.emit("chat-stream-event", ChatStreamEvent::Failed { request_id, message: e });
+            return Ok(());
+        }
+    };
+
+    match provider_key.as_str() {
+        "anthropic" => anthropic_chat_stream(app, request_id, api_key, messages, model, runtime).await,
+        "openai" => {
+            openai_compatible_chat_stream(
+                app,
+                request_id,
+                api_key,
+                messages,
+                model,
+                "https://api.openai.com/v1/chat/completions",
+                runtime,
+            )
+            .await
+        }
+        "deepseek" => {
+            openai_compatible_chat_stream(
+                app,
+                request_id,
+                api_key,
+                messages,
+                model,
+                "https://api.deepseek.com/chat/completions",
+                runtime,
+            )
+            .await
+        }
+        _ => Ok(()),
+    }
+}
+
+async fn anthropic_chat_stream(
+    app: tauri::AppHandle,
+    request_id: String,
+    api_key: String,
+    messages: Vec<ChatMessagePayload>,
+    model: String,
+    runtime: PromptRuntimeContext,
+) -> Result<(), String> {
+    // Convert messages to Anthropic API format.
+    // BR-AG-DATA-002: role="tool" → Anthropic tool_result (role="user" with content array).
+    // role="assistant" with tool_call_id → content is JSON array of tool_use blocks.
+    // System messages are excluded from history; PromptRuntime L0 is sent via Anthropic system.
+    let filtered_messages: Vec<&ChatMessagePayload> = messages
+        .iter()
+        .filter(|m| m.role == "user" || m.role == "assistant" || m.role == "tool")
+        .collect();
+    let mut api_messages: Vec<serde_json::Value> = Vec::new();
+    let mut idx = 0;
+    while idx < filtered_messages.len() {
+        let m = filtered_messages[idx];
+        if m.role == "tool" {
+            let mut blocks: Vec<serde_json::Value> = Vec::new();
+            while idx < filtered_messages.len() && filtered_messages[idx].role == "tool" {
+                let tool_msg = filtered_messages[idx];
+                let tool_use_id = tool_msg.tool_call_id.as_deref().unwrap_or("");
+                blocks.push(serde_json::json!({
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "content": tool_msg.content
+                }));
+                idx += 1;
+            }
+            api_messages.push(serde_json::json!({ "role": "user", "content": blocks }));
+            continue;
+        }
+
+        if m.role == "assistant" && m.tool_call_id.is_some() {
+            let blocks: serde_json::Value = serde_json::from_str(&m.content)
+                .unwrap_or_else(|_| serde_json::json!([]));
+            api_messages.push(serde_json::json!({ "role": "assistant", "content": blocks }));
+        } else {
+            api_messages.push(serde_json::json!({ "role": m.role, "content": m.content }));
+        }
+        idx += 1;
+    }
+
+    if api_messages.is_empty() {
+        let _ = app.emit(
+            "chat-stream-event",
+            ChatStreamEvent::Failed {
+                request_id: request_id.clone(),
+                message: "No user/assistant messages to send".to_string(),
+            },
+        );
+        return Ok(());
+    }
+
+    let body = serde_json::json!({
+        "model": model,
+        "max_tokens": 8192,
+        "stream": true,
+        "system": build_system_prompt(&runtime),
+        "tools": anthropic_tools(&runtime),
+        "messages": api_messages
+    });
+
+    // ── PROMPT BUILD LOG ────────────────────────────────────────────────────────
+    // Prints the fully-constructed request body (system, tools, messages) to
+    // stdout and the chat-debug.log file before every Anthropic model call.
+    chat_debug_log(&app, &format!(
+        "\n╔══ PROMPT BUILD [anthropic] request_id={} model={} ══╗\n{}\n╚══ END PROMPT BUILD ══╝",
+        request_id,
+        model,
+        serde_json::to_string_pretty(&body).unwrap_or_else(|e| format!("<serialize error: {e}>"))
+    ));
+
+    let client = reqwest::Client::new();
+    let response = match client
+        .post("https://api.anthropic.com/v1/messages")
+        .header("x-api-key", &api_key)
+        .header("anthropic-version", "2023-06-01")
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            let _ = app.emit(
+                "chat-stream-event",
+                ChatStreamEvent::Failed {
+                    request_id: request_id.clone(),
+                    message: e.to_string(),
+                },
+            );
+            return Ok(());
+        }
+    };
+
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let body_text = response.text().await.unwrap_or_default();
+        let _ = app.emit(
+            "chat-stream-event",
+            ChatStreamEvent::Failed {
+                request_id: request_id.clone(),
+                message: format!("HTTP {}: {}", status, body_text),
+            },
+        );
+        return Ok(());
+    }
+
+    // Parse SSE line-by-line.
+    // Tracks in-progress tool_use block: when Anthropic returns a tool_use content block,
+    // we accumulate its input_json across multiple input_json_delta events, then on
+    // message_stop emit a ToolCall event (BR-AG-DATA-002) instead of Done.
+    let mut byte_stream = response.bytes_stream();
+    let mut line_buffer = String::new();
+
+    // Tool-use accumulation state. Anthropic can return multiple tool_use blocks
+    // in one assistant message; keep each block instead of overwriting earlier ones.
+    let mut pending_tools: Vec<ToolCallPayload> = Vec::new();
+    let mut active_tool_index: Option<usize> = None;
+
+    while let Some(chunk) = byte_stream.next().await {
+        let chunk = match chunk {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = app.emit(
+                    "chat-stream-event",
+                    ChatStreamEvent::Failed {
+                        request_id: request_id.clone(),
+                        message: e.to_string(),
+                    },
+                );
+                return Ok(());
+            }
+        };
+
+        line_buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+        loop {
+            let Some(newline_pos) = line_buffer.find('\n') else {
+                break;
+            };
+            let raw_line = line_buffer[..newline_pos]
+                .trim_end_matches('\r')
+                .to_string();
+            line_buffer.drain(..=newline_pos);
+
+            if !raw_line.starts_with("data: ") {
+                continue;
+            }
+            let data = &raw_line[6..];
+            if data == "[DONE]" {
+                let _ = app.emit(
+                    "chat-stream-event",
+                    ChatStreamEvent::Done { request_id: request_id.clone() },
+                );
+                return Ok(());
+            }
+
+            let Ok(json) = serde_json::from_str::<serde_json::Value>(data) else {
+                continue;
+            };
+
+            match json["type"].as_str() {
+                // Text token from assistant text block.
+                Some("content_block_delta") => {
+                    let delta_type = json["delta"]["type"].as_str().unwrap_or("");
+                    if delta_type == "text_delta" {
+                        if let Some(text) = json["delta"]["text"].as_str() {
+                            let _ = app.emit(
+                                "chat-stream-event",
+                                ChatStreamEvent::Token {
+                                    request_id: request_id.clone(),
+                                    token: text.to_string(),
+                                },
+                            );
+                        }
+                    } else if delta_type == "input_json_delta" {
+                        // BR-AG-DATA-002: accumulate tool input JSON.
+                        if let Some(partial) = json["delta"]["partial_json"].as_str() {
+                            if let Some(tool_index) = active_tool_index {
+                                if let Some(tool) = pending_tools.get_mut(tool_index) {
+                                    tool.input_json.push_str(partial);
+                                }
+                            }
+                        }
+                    }
+                }
+                // Start of a new content block. If it is a tool_use block, record id + name.
+                Some("content_block_start") => {
+                    let block = &json["content_block"];
+                    if block["type"].as_str() == Some("tool_use") {
+                        pending_tools.push(ToolCallPayload {
+                            id: block["id"].as_str().unwrap_or("").to_string(),
+                            name: block["name"].as_str().unwrap_or("").to_string(),
+                            input_json: String::new(),
+                        });
+                        active_tool_index = Some(pending_tools.len() - 1);
+                    } else {
+                        active_tool_index = None;
+                    }
+                }
+                // message_stop: if we accumulated a tool_use block, emit ToolCall;
+                // otherwise emit Done.
+                Some("message_stop") => {
+                    if !pending_tools.is_empty() {
+                        let calls = std::mem::take(&mut pending_tools);
+                        emit_tool_calls(&app, &request_id, calls);
+                    } else {
+                        let _ = app.emit(
+                            "chat-stream-event",
+                            ChatStreamEvent::Done { request_id: request_id.clone() },
+                        );
+                    }
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Stream ended without explicit stop.
+    let _ = app.emit("chat-stream-event", ChatStreamEvent::Done { request_id });
+    Ok(())
+}
+
+fn openai_compatible_messages(messages: &[ChatMessagePayload]) -> Vec<serde_json::Value> {
+    messages
+        .iter()
+        .filter_map(|m| {
+            if m.role == "tool" {
+                return Some(serde_json::json!({
+                    "role": "tool",
+                    "tool_call_id": m.tool_call_id.as_deref().unwrap_or(""),
+                    "content": m.content
+                }));
+            }
+
+            if m.role == "assistant" && m.tool_call_id.is_some() {
+                let blocks: serde_json::Value = serde_json::from_str(&m.content)
+                    .unwrap_or_else(|_| serde_json::json!([]));
+                let mut content_parts: Vec<String> = Vec::new();
+                let mut tool_calls: Vec<serde_json::Value> = Vec::new();
+                if let Some(items) = blocks.as_array() {
+                    for item in items {
+                        match item["type"].as_str() {
+                            Some("text") => {
+                                if let Some(text) = item["text"].as_str() {
+                                    content_parts.push(text.to_string());
+                                }
+                            }
+                            Some("tool_use") => {
+                                let id = item["id"].as_str().unwrap_or("");
+                                let name = item["name"].as_str().unwrap_or("");
+                                let arguments = serde_json::to_string(
+                                    item.get("input").unwrap_or(&serde_json::Value::Null),
+                                )
+                                .unwrap_or_else(|_| "{}".to_string());
+                                tool_calls.push(serde_json::json!({
+                                    "id": id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": name,
+                                        "arguments": arguments
+                                    }
+                                }));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                let content = if content_parts.is_empty() {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::Value::String(content_parts.join(""))
+                };
+                return Some(serde_json::json!({
+                    "role": "assistant",
+                    "content": content,
+                    "tool_calls": tool_calls
+                }));
+            }
+
+            if m.role == "user" || m.role == "assistant" || m.role == "system" {
+                Some(serde_json::json!({ "role": m.role, "content": m.content }))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+async fn openai_compatible_chat_stream(
+    app: tauri::AppHandle,
+    request_id: String,
+    api_key: String,
+    messages: Vec<ChatMessagePayload>,
+    model: String,
+    endpoint: &str,
+    runtime: PromptRuntimeContext,
+) -> Result<(), String> {
+    let mut api_messages = openai_compatible_messages(&messages);
+    api_messages.insert(0, serde_json::json!({
+        "role": "system",
+        "content": build_system_prompt(&runtime)
+    }));
+    if api_messages.is_empty() {
+        chat_debug_error(&app, &format!(
+            "[chat_stream] openai-compatible empty messages request_id={} endpoint={}",
+            request_id,
+            endpoint
+        ));
+        let _ = app.emit(
+            "chat-stream-event",
+            ChatStreamEvent::Failed {
+                request_id: request_id.clone(),
+                message: "No messages to send".to_string(),
+            },
+        );
+        return Ok(());
+    }
+
+    let body = serde_json::json!({
+        "model": model,
+        "stream": true,
+        "tools": openai_tools(&runtime),
+        "messages": api_messages
+    });
+
+    // ── PROMPT BUILD LOG ────────────────────────────────────────────────────────
+    // Prints the fully-constructed request body (system message, tools, messages)
+    // to stdout and the chat-debug.log file before every OpenAI-compatible model call.
+    chat_debug_log(&app, &format!(
+        "\n╔══ PROMPT BUILD [openai-compat] request_id={} endpoint={} model={} ══╗\n{}\n╚══ END PROMPT BUILD ══╝",
+        request_id,
+        endpoint,
+        model,
+        serde_json::to_string_pretty(&body).unwrap_or_else(|e| format!("<serialize error: {e}>"))
+    ));
+
+    let client = reqwest::Client::new();
+    let response = match client
+        .post(endpoint)
+        .bearer_auth(&api_key)
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            chat_debug_error(&app, &format!("[chat_stream] openai-compatible request error request_id={} error={}", request_id, e));
+            let _ = app.emit(
+                "chat-stream-event",
+                ChatStreamEvent::Failed {
+                    request_id: request_id.clone(),
+                    message: e.to_string(),
+                },
+            );
+            return Ok(());
+        }
+    };
+
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let body_text = response.text().await.unwrap_or_default();
+        chat_debug_error(&app, &format!(
+            "[chat_stream] openai-compatible http error request_id={} status={} body={}",
+            request_id,
+            status,
+            body_text
+        ));
+        let _ = app.emit(
+            "chat-stream-event",
+            ChatStreamEvent::Failed {
+                request_id: request_id.clone(),
+                message: format!("HTTP {}: {}", status, body_text),
+            },
+        );
+        return Ok(());
+    }
+
+    let mut byte_stream = response.bytes_stream();
+    let mut line_buffer = String::new();
+    let mut pending_tools: Vec<ToolCallPayload> = Vec::new();
+
+    while let Some(chunk) = byte_stream.next().await {
+        let chunk = match chunk {
+            Ok(c) => c,
+            Err(e) => {
+                chat_debug_error(&app, &format!("[chat_stream] openai-compatible stream error request_id={} error={}", request_id, e));
+                let _ = app.emit(
+                    "chat-stream-event",
+                    ChatStreamEvent::Failed {
+                        request_id: request_id.clone(),
+                        message: e.to_string(),
+                    },
+                );
+                return Ok(());
+            }
+        };
+
+        line_buffer.push_str(&String::from_utf8_lossy(&chunk));
+        loop {
+            let Some(newline_pos) = line_buffer.find('\n') else {
+                break;
+            };
+            let raw_line = line_buffer[..newline_pos]
+                .trim_end_matches('\r')
+                .to_string();
+            line_buffer.drain(..=newline_pos);
+
+            if !raw_line.starts_with("data: ") {
+                continue;
+            }
+            let data = &raw_line[6..];
+            if data == "[DONE]" {
+                if pending_tools.is_empty() {
+                    chat_debug_log(&app, &format!("[chat_stream] openai-compatible done request_id={}", request_id));
+                    let _ = app.emit(
+                        "chat-stream-event",
+                        ChatStreamEvent::Done { request_id: request_id.clone() },
+                    );
+                } else {
+                    chat_debug_log(&app, &format!(
+                        "[chat_stream] openai-compatible tool_calls request_id={} count={}",
+                        request_id,
+                        pending_tools.len()
+                    ));
+                    emit_tool_calls(&app, &request_id, std::mem::take(&mut pending_tools));
+                }
+                return Ok(());
+            }
+
+            let Ok(json) = serde_json::from_str::<serde_json::Value>(data) else {
+                continue;
+            };
+            let Some(choice) = json["choices"].as_array().and_then(|choices| choices.first()) else {
+                continue;
+            };
+            let delta = &choice["delta"];
+            if let Some(content) = delta["content"].as_str() {
+                let _ = app.emit(
+                    "chat-stream-event",
+                    ChatStreamEvent::Token {
+                        request_id: request_id.clone(),
+                        token: content.to_string(),
+                    },
+                );
+            }
+
+            if let Some(tool_calls) = delta["tool_calls"].as_array() {
+                for call_delta in tool_calls {
+                    let index = call_delta["index"].as_u64().unwrap_or(0) as usize;
+                    while pending_tools.len() <= index {
+                        pending_tools.push(ToolCallPayload {
+                            id: String::new(),
+                            name: String::new(),
+                            input_json: String::new(),
+                        });
+                    }
+                    if let Some(tool) = pending_tools.get_mut(index) {
+                        if let Some(id) = call_delta["id"].as_str() {
+                            tool.id = id.to_string();
+                        }
+                        if let Some(name) = call_delta["function"]["name"].as_str() {
+                            tool.name = name.to_string();
+                        }
+                        if let Some(arguments) = call_delta["function"]["arguments"].as_str() {
+                            tool.input_json.push_str(arguments);
+                        }
+                    }
+                }
+            }
+
+            if choice["finish_reason"].as_str() == Some("tool_calls") && !pending_tools.is_empty() {
+                chat_debug_log(&app, &format!(
+                    "[chat_stream] openai-compatible tool_calls request_id={} count={}",
+                    request_id,
+                    pending_tools.len()
+                ));
+                emit_tool_calls(&app, &request_id, std::mem::take(&mut pending_tools));
+                return Ok(());
+            }
+        }
+    }
+
+    if pending_tools.is_empty() {
+        chat_debug_log(&app, &format!("[chat_stream] openai-compatible eof done request_id={}", request_id));
+        let _ = app.emit("chat-stream-event", ChatStreamEvent::Done { request_id });
+    } else {
+        chat_debug_log(&app, &format!(
+            "[chat_stream] openai-compatible eof tool_calls request_id={} count={}",
+            request_id,
+            pending_tools.len()
+        ));
+        emit_tool_calls(&app, &request_id, pending_tools);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -927,20 +2111,33 @@ mod tests {
         fs::create_dir_all(root.join("docs")).expect("fixture workspace should be created");
 
         let metadata = initialize_workspace_metadata(&root).expect("metadata should initialize");
-        let connection = Connection::open(&metadata.workspace_database_path)
+        let ws_connection = Connection::open(&metadata.workspace_database_path)
             .expect("workspace database should open as sqlite");
-        let table_count: i64 = connection
+        let business_table_count: i64 = ws_connection
             .query_row(
-                "SELECT count(*) FROM sqlite_master WHERE name = 'search_documents_fts'",
+                "SELECT count(*) FROM sqlite_master WHERE name IN
+                 ('workspace_settings','pending_diffs','terminal_diff_cards','chat_messages')",
                 [],
                 |row| row.get(0),
             )
-            .expect("fts table should be queryable");
+            .expect("business tables should be queryable");
+        let search_db_path = search_database_path(&root);
+        let search_connection =
+            Connection::open(&search_db_path).expect("search database should open");
+        let fts_table_count: i64 = search_connection
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name = 'search_index'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("search_index table should be queryable");
         let entries = read_workspace_entries(&root, &root).expect("entries should load");
 
         assert!(metadata.workspace_database_initialized);
         assert!(PathBuf::from(metadata.workspace_database_path).is_file());
-        assert_eq!(table_count, 1);
+        assert!(search_db_path.is_file());
+        assert_eq!(business_table_count, 4);
+        assert_eq!(fts_table_count, 1);
         assert!(entries.iter().all(|entry| entry.name != ".binder"));
 
         fs::remove_dir_all(root).expect("fixture workspace should be removed");
@@ -1194,6 +2391,159 @@ mod tests {
         fs::remove_dir_all(root).expect("fixture workspace should be removed");
     }
 
+    fn make_diff(id: &str, status: &str) -> PendingDiffRecord {
+        PendingDiffRecord {
+            id: id.to_string(),
+            file_path: "notes.md".to_string(),
+            original_text: "old".to_string(),
+            new_text: "new".to_string(),
+            summary: "test".to_string(),
+            status: status.to_string(),
+            effective_path: "open-file".to_string(),
+            source_tool_id: "t1".to_string(),
+            base_revision: "rev1".to_string(),
+            applied_range_from: None,
+            applied_range_to: None,
+            created_at: 1_000,
+        }
+    }
+
+    #[test]
+    fn test_save_and_load_pending_diff() {
+        let root = test_workspace_root("save-diff");
+        fs::create_dir_all(&root).expect("fixture workspace should be created");
+        initialize_workspace_metadata(&root).expect("metadata should initialize");
+        let root_string = root.to_string_lossy().to_string();
+
+        save_pending_diff(root_string.clone(), make_diff("d1", "pending"))
+            .expect("diff should be saved");
+        let loaded = load_diffs_from_workspace(root_string).expect("diffs should load");
+
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, "d1");
+        assert_eq!(loaded[0].status, "pending");
+        assert_eq!(loaded[0].file_path, "notes.md");
+        assert_eq!(loaded[0].base_revision, "rev1");
+
+        fs::remove_dir_all(root).expect("fixture workspace should be removed");
+    }
+
+    #[test]
+    fn test_update_diff_status() {
+        let root = test_workspace_root("update-diff");
+        fs::create_dir_all(&root).expect("fixture workspace should be created");
+        initialize_workspace_metadata(&root).expect("metadata should initialize");
+        let root_string = root.to_string_lossy().to_string();
+
+        save_pending_diff(root_string.clone(), make_diff("d2", "pending"))
+            .expect("diff should be saved");
+        update_diff_status(root_string.clone(), "d2".to_string(), "expired".to_string())
+            .expect("status should update");
+        let loaded = load_diffs_from_workspace(root_string).expect("diffs should load");
+
+        // expired is a terminal status; load_diffs_from_workspace excludes it
+        assert_eq!(loaded.len(), 0);
+
+        fs::remove_dir_all(root).expect("fixture workspace should be removed");
+    }
+
+    #[test]
+    fn test_load_excludes_terminal_diffs() {
+        let root = test_workspace_root("terminal-diff");
+        fs::create_dir_all(&root).expect("fixture workspace should be created");
+        initialize_workspace_metadata(&root).expect("metadata should initialize");
+        let root_string = root.to_string_lossy().to_string();
+
+        save_pending_diff(root_string.clone(), make_diff("d-accepted", "accepted"))
+            .expect("accepted diff should be saved");
+        save_pending_diff(root_string.clone(), make_diff("d-rejected", "rejected"))
+            .expect("rejected diff should be saved");
+        save_pending_diff(root_string.clone(), make_diff("d-pending", "pending"))
+            .expect("pending diff should be saved");
+        let loaded = load_diffs_from_workspace(root_string).expect("diffs should load");
+
+        // Only the non-terminal diff should be returned
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, "d-pending");
+
+        fs::remove_dir_all(root).expect("fixture workspace should be removed");
+    }
+
+    #[test]
+    fn test_save_and_load_chat_messages() {
+        let root = test_workspace_root("chat-messages");
+        fs::create_dir_all(&root).expect("fixture workspace should be created");
+        initialize_workspace_metadata(&root).expect("metadata should initialize");
+        let root_string = root.to_string_lossy().to_string();
+
+        let messages = vec![
+            ChatMessageRecord {
+                id: "m1".to_string(), role: "user".to_string(),
+                content: "hello".to_string(), stream_status: None, tool_call_id: None,
+                created_at: 1_000, session_id: root_string.clone(),
+            },
+            ChatMessageRecord {
+                id: "m2".to_string(), role: "assistant".to_string(),
+                content: "world".to_string(), stream_status: Some("done".to_string()),
+                tool_call_id: None, created_at: 2_000, session_id: root_string.clone(),
+            },
+            ChatMessageRecord {
+                id: "m3".to_string(), role: "user".to_string(),
+                content: "again".to_string(), stream_status: None, tool_call_id: None,
+                created_at: 3_000, session_id: root_string.clone(),
+            },
+        ];
+        save_chat_messages(root_string.clone(), messages).expect("messages should be saved");
+        let loaded = load_chat_messages(root_string).expect("messages should load");
+
+        assert_eq!(loaded.len(), 3);
+        assert_eq!(loaded[0].id, "m1");
+        assert_eq!(loaded[1].id, "m2");
+        assert_eq!(loaded[2].id, "m3");
+        assert_eq!(loaded[1].stream_status, Some("done".to_string()));
+
+        fs::remove_dir_all(root).expect("fixture workspace should be removed");
+    }
+
+    #[test]
+    fn test_save_chat_messages_replaces_same_session() {
+        let root = test_workspace_root("chat-replace");
+        fs::create_dir_all(&root).expect("fixture workspace should be created");
+        initialize_workspace_metadata(&root).expect("metadata should initialize");
+        let root_string = root.to_string_lossy().to_string();
+
+        let batch1 = vec![
+            ChatMessageRecord {
+                id: "old1".to_string(), role: "user".to_string(),
+                content: "batch one".to_string(), stream_status: None, tool_call_id: None,
+                created_at: 1_000, session_id: root_string.clone(),
+            },
+        ];
+        let batch2 = vec![
+            ChatMessageRecord {
+                id: "new1".to_string(), role: "user".to_string(),
+                content: "batch two a".to_string(), stream_status: None, tool_call_id: None,
+                created_at: 2_000, session_id: root_string.clone(),
+            },
+            ChatMessageRecord {
+                id: "new2".to_string(), role: "assistant".to_string(),
+                content: "batch two b".to_string(), stream_status: None, tool_call_id: None,
+                created_at: 3_000, session_id: root_string.clone(),
+            },
+        ];
+        save_chat_messages(root_string.clone(), batch1).expect("batch1 should be saved");
+        save_chat_messages(root_string.clone(), batch2).expect("batch2 should be saved");
+        let loaded = load_chat_messages(root_string).expect("messages should load");
+
+        // Only the second batch should remain (DELETE + INSERT per spec)
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].id, "new1");
+        assert_eq!(loaded[1].id, "new2");
+        assert!(!loaded.iter().any(|m| m.id == "old1"));
+
+        fs::remove_dir_all(root).expect("fixture workspace should be removed");
+    }
+
     #[test]
     fn structure_mutations_refresh_search_index() {
         let root = test_workspace_root("search-structure");
@@ -1224,6 +2574,13 @@ mod tests {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            #[cfg(debug_assertions)]
+            if let Some(webview) = app.get_webview_window("main") {
+                webview.open_devtools();
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             health_check,
             open_workspace,
@@ -1237,7 +2594,15 @@ pub fn run() {
             rename_workspace_item,
             move_workspace_item,
             delete_workspace_item,
-            search_files
+            search_files,
+            save_pending_diff,
+            update_diff_status,
+            load_diffs_from_workspace,
+            save_chat_messages,
+            load_chat_messages,
+            save_api_key,
+            is_api_key_configured,
+            chat_stream
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Binder Mini");

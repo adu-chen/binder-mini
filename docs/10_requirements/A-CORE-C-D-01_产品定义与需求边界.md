@@ -35,7 +35,7 @@ Binder Mini 是面向 GitHub 开源开发的本地优先 AI 文档编辑器最�
 
 - 用户可以打开并编辑 md/txt 文件。
 - 非 md/txt 文件可作为只读文本打开。
-- 用户保存时，编辑器内容写入当前文件。
+- 用户保存时，编辑器内容写入 ActiveFile。
 
 ### 3.3 Agent
 
@@ -66,7 +66,7 @@ MVP 通过以下场景视为完成：
 1. 打开本地 workspace。
 2. 打开并编辑 md/txt 文件。
 3. 配置 Provider 并发送对话。
-4. Agent 对当前文件生成 pending diff。
+4. Agent 对 ActiveFile 生成 PendingDiff。
 5. 用户接受 diff 后文件内容变化。
 6. 用户拒绝 diff 后文件内容不变化。
 

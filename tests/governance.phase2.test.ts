@@ -1,8 +1,9 @@
+import { createActor } from "xstate";
 import { describe, expect, it } from "vitest";
-import { createAgentMachineDefinition } from "../src/machines/agentMachine";
-import { createDiffMachineDefinition } from "../src/machines/diffMachine";
-import { createEditorMachineDefinition } from "../src/machines/editorMachine";
-import { createWorkspaceMachineDefinition } from "../src/machines/workspaceMachine";
+import { chatMachine } from "../src/machines/chatMachine";
+import { diffMachine } from "../src/machines/diffMachine";
+import { editorMachine } from "../src/machines/editorMachine";
+import { workspaceMachine } from "../src/machines/workspaceMachine";
 import {
   canRecordAgentMessage,
   canSendAgentMessage,
@@ -27,7 +28,12 @@ describe("Phase 2 governance skeleton", () => {
     const workspace = { rootPath: "/tmp/ws", displayName: "ws", status: "active" as const };
     expect(isWorkspaceTarget(workspace, { workspaceRoot: "/tmp/ws", relativePath: "a.md" })).toBe(true);
     expect(isWorkspaceTarget(workspace, { workspaceRoot: "/tmp/ws", relativePath: "../a.md" })).toBe(false);
-    expect(createWorkspaceMachineDefinition().initial).toBe("noWorkspace");
+
+    const wsActor = createActor(workspaceMachine).start();
+    expect(wsActor.getSnapshot().value).toBe("NoWorkspace");
+    wsActor.send({ type: "OPEN_WORKSPACE", workspaceRoot: "/tmp/ws" });
+    expect(wsActor.getSnapshot().value).toBe("Loading");
+
     expect(isWorkspaceSnapshotInitialized({
       workspace,
       entries: [{ name: "docs", relativePath: "docs", kind: "directory", children: [] }],
@@ -62,7 +68,14 @@ describe("Phase 2 governance skeleton", () => {
   it("keeps Editor save readiness tied to editable dirty documents", () => {
     expect(canSaveEditorDocument({ workspaceRoot: "/tmp/ws", filePath: "a.md", content: "x", mode: "editable", dirty: true })).toBe(true);
     expect(canSaveEditorDocument({ workspaceRoot: "/tmp/ws", filePath: "a.bin", content: "x", mode: "readonly", dirty: true })).toBe(false);
-    expect(createEditorMachineDefinition().states.loading.LOAD_READONLY).toBe("readonly");
+
+    const edActor = createActor(editorMachine).start();
+    edActor.send({ type: "WORKSPACE_OPENED", workspaceRoot: "/tmp/ws" });
+    expect(edActor.getSnapshot().value).toBe("idle");
+    edActor.send({ type: "OPEN_FILE", filePath: "a.bin" });
+    expect(edActor.getSnapshot().value).toBe("loading");
+    edActor.send({ type: "FILE_LOADED", filePath: "a.bin", fileType: "other", content: "" });
+    expect(edActor.getSnapshot().value).toBe("readonly");
   });
 
   // covers: BR-AG-STATE-001
@@ -74,25 +87,42 @@ describe("Phase 2 governance skeleton", () => {
     expect(canRecordAgentMessage("inspect workspace")).toBe(true);
     expect(isReadonlyInputReference({ id: "r1", mode: "readonly", target: { workspaceRoot: "/tmp/ws", relativePath: "a.md" } })).toBe(true);
     expect(createPendingToolExecution("read_file").status).toBe("pending");
-    expect(createAgentMachineDefinition().states.idle.SEND_REQUESTED).toBe("validatingProvider");
+
+    const chatActor = createActor(chatMachine).start();
+    expect(chatActor.getSnapshot().value).toBe("noWorkspace");
+    chatActor.send({ type: "WORKSPACE_OPENED", workspaceRoot: "/tmp/ws" });
+    expect(chatActor.getSnapshot().value).toBe("ready");
+    chatActor.send({ type: "SEND_MESSAGE", userContent: "hello", inputReferences: [] });
+    expect(chatActor.getSnapshot().value).toBe("validatingProvider");
   });
 
   // covers: BR-DE-STATE-001
   // covers: BR-DE-PERSIST-001
   // covers: BR-DE-STATE-002
   // covers: BR-DE-STATE-003
+  // covers: BR-DE-DATA-001
   it("keeps PendingDiff execution and terminal cards explicit", () => {
-    expect(canExecutePendingDiff({ id: "d1", filePath: "a.md", originalText: "a", proposedText: "b", status: "pending", summary: "change" })).toBe(true);
+    // BR-DE-DATA-001: required traceable fields included in test literal (Phase 6-A upgrade)
+    expect(canExecutePendingDiff({
+      id: "d1", filePath: "a.md", originalText: "a", newText: "b",
+      status: "pending", summary: "change",
+      sourceToolId: "tool-1", baseRevision: "abc123", createdAt: 0, effectivePath: "open-file",
+    })).toBe(true);
     expect(createTerminalDiffCard("d1", "accepted").status).toBe("accepted");
-    expect(createDiffMachineDefinition().states.pending.ACCEPT_REQUESTED).toBe("accepting");
+
+    // Phase 6-A: diffMachine initial state is "pending" (no "none" state; machine creation = DIFF_CREATED)
+    const diffActor = createActor(diffMachine).start();
+    expect(diffActor.getSnapshot().value).toBe("pending");
+    diffActor.send({ type: "ACCEPT_REQUESTED" });
+    expect(diffActor.getSnapshot().value).toBe("accepting");
   });
 
   // covers: BR-SYS-GOV-001
   // covers: BR-CORE-GOV-001
   it("keeps core chains represented by machine definitions", () => {
-    expect(createWorkspaceMachineDefinition().id).toBe("workspaceMachine");
-    expect(createEditorMachineDefinition().id).toBe("editorMachine");
-    expect(createAgentMachineDefinition().id).toBe("agentMachine");
-    expect(createDiffMachineDefinition().id).toBe("diffMachine");
+    expect(workspaceMachine.id).toBe("workspaceMachine");
+    expect(editorMachine.id).toBe("editorMachine");
+    expect(chatMachine.id).toBe("chatMachine");
+    expect(diffMachine.id).toBe("diffMachine");
   });
 });

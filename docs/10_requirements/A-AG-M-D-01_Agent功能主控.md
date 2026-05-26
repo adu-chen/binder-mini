@@ -34,13 +34,14 @@ Agent 需求必须满足以下原则：
 | 需求 ID | 名称 | 需求描述 | 验收口径 |
 |---------|------|----------|----------|
 | REQ-AG-001 | Provider 配置 | 用户可以配置 AI Provider 类型、模型和 API key；支持 Anthropic（claude-*）、OpenAI（gpt-*）、DeepSeek（deepseek-*）三个供应商。 | Provider 配置完整（类型、模型、key 已设置）时方可发送消息；配置缺失时返回明确错误；三个供应商均可在配置界面选择并切换。 |
-| REQ-AG-002 | 消息发送与流式响应 | 用户可以向 Agent 发送对话消息，Agent 以流式方式返回响应。 | 消息成功提交后响应开始流式展示；流式中断或 Provider 错误时 UI 可识别失败状态。 |
+| REQ-AG-001-A | API key 持久化 | 用户保存 Provider API key 后，应用重启、关闭并重新打开 Workspace 后仍应保留该 Provider 的已配置状态；API key 持久化范围为应用级 Provider 配置，不绑定单一 Workspace。 | 重启应用后，已保存 key 的 Provider 显示 `apiKeyConfigured=true`，可直接发起模型请求；切换 Workspace 不清空 key；前端、日志、workspace.db 和 Provider payload 调试输出均不得出现明文 key；用户重新保存 key 时覆盖旧值。 |
+| REQ-AG-002 | 消息发送与流式响应 | 用户可以向 Agent 发送对话消息，Agent 以流式方式返回响应。 | 消息成功提交后响应开始流式展示；流式中断或 Provider 错误时 UI 可识别失败状态；Enter 键触发发送时必须兼容中文输入法（IME）——IME 合成阶段（isComposing = true）按下 Enter 确认候选词时不得触发发送，只有 isComposing = false 时的 Enter 才触发发送。 |
 | REQ-AG-003 | 只读与检索工具 | Agent 可在 Workspace 边界内调用只读工具读取文件、列举目录、搜索文件；并可调用互联网搜索工具检索外部信息。 | read_file、list_files、search_files、web_search 的工具结果在同一对话轮次内返回；Workspace 工具路径越界时拒绝执行；web_search 不受 Workspace 边界约束。 |
-| REQ-AG-004 | 内容编辑工具 | Agent 对已打开文件（edit_current_editor_document）或未打开文件（update_file）的内容编辑必须生成 PendingDiff，不得直接写入目标文件。 | 内容编辑工具调用结果必须出现在 Diff Review 链路；目标文件内容在 PendingDiff 被接受前不得变化。 |
+| REQ-AG-004 | 内容编辑工具 | Agent 对已打开文件（edit_current_editor_document）或未打开文件（update_file）的内容编辑必须生成 PendingDiff，不得直接写入目标文件。已打开文件编辑必须以 ED LogicalStateSnapshot 为上下文源，不得以 DiskState/read_file 结果替代当前编辑器内容。 | 内容编辑工具调用结果必须出现在 Diff Review 链路；目标文件内容在 PendingDiff 被接受前不得变化；当 ActiveFile 存在未保存编辑时，Agent 仍能基于当前编辑器 LogicalState 执行精确替换。 |
 | REQ-AG-004-B | 结构操作工具 | Agent 可在 Workspace 内执行文件结构操作：创建文件（create_file，支持必填 content 参数直接写入文件内容，写盘不经 Diff Review）、创建目录（create_folder）、重命名（rename_file）、移动（move_file）、删除（delete_file）。 | 结构操作不经过 Diff Review，直接执行磁盘操作；PathConflict 检查前置（create/rename/move 时）；操作成功后文件树刷新；越界或冲突时返回明确错误，不产生磁盘副作用。 |
 | REQ-AG-005 | 工具执行记录 | 每次工具调用必须记录工具名称、输入边界、执行状态和结果摘要。 | 工具执行记录在对话消息流中可见；成功/失败状态可区分；错误原因可读。 |
 | REQ-AG-006 | InputReference | 用户可通过拖拽或选区操作将 Workspace 文件、编辑器内容片段或文本作为引用附加到 Agent 请求；引用作为结构化内容载体传递，包含引用标签、内容快照和精确坐标（blockId、lineRange、textOffset）。 | 引用内容以结构化 XML 块注入 Provider payload；Agent 自行判断引用是编辑对象还是参考上下文；若作为编辑对象则通过 Diff Review 执行；引用不直接触发文件写入；消息发送成功后清空，Workspace 切换后失效。 |
-| REQ-AG-007 | Prompt Runtime | Agent 请求必须包含当前操作上下文（Workspace、active file），并过滤模型不应接触的敏感字段。 | Provider payload 中不含 API key；只有 allowedTools 中的工具可被模型调用；请求内容可调试审计。 |
+| REQ-AG-007 | Prompt Runtime | Agent 请求必须包含当前操作上下文（Workspace、ActiveFile、ActiveFile LogicalStateSnapshot），并过滤模型不应接触的敏感字段。 | Provider payload 中不含 API key；只有 allowedTools 中的工具可被模型调用；请求内容可调试审计；ActiveFile 编辑上下文来自 ED LogicalState，不来自磁盘读取工具。 |
 | REQ-AG-008 | 取消流式响应 | 用户可在消息发送、SSE 流式响应或工具调用执行的任意阶段主动取消本次请求。 | 取消后 chatMachine 回到 ready 状态，输入区恢复可发送；已生成的部分流内容在 UI 中保留展示；不追加完整轮次到历史；工具调用若未完成则中止并标记 cancelled。 |
 | REQ-AG-009 | Chat 状态机 | Agent 对话链路必须由 chatMachine 状态机驱动，覆盖会话生命周期、Provider 校验、发送、流式、工具调用、取消和错误恢复全链路。 | chatMachine 明确声明所有合法状态和转移事件；不存在无状态机驱动的中间状态；状态转移可通过 XState devtools 审计。 |
 | REQ-AG-010 | 聊天历史持久化 | 聊天记录持久化于 workspace.db，应用重新打开时读取并显示当前 Workspace 的历史消息；提供清空历史功能。 | 应用重启后历史消息按时间顺序展示；历史中关联的 diff 卡片只显示终态，不显示可执行 pending 操作按钮；清空历史需二次确认，执行后当前 Workspace 聊天记录从 DB 删除。 |
@@ -50,7 +51,7 @@ Agent 需求必须满足以下原则：
 
 1. Agent 对话链路必须由 chatMachine 状态机驱动，不得有游离于状态机之外的中间状态。
 2. Provider 错误、网络中断和超时（单次工具调用超时 10 秒）必须可被 UI 区分，不得停在假执行状态；超时后工具进入 error 状态，chatMachine 回 ready。
-3. API key 不得出现在日志、调试输出或 UI 中；MVP 阶段存储在 localStorage，Keychain 作为后续安全增强。
+3. API key 必须应用级持久化，跨应用重启和 Workspace 切换保持有效；不得出现在日志、调试输出或 UI 中；前端只保存 `apiKeyConfigured` 等非敏感状态，明文 key 由后端安全存储或应用配置目录持有，Keychain 作为后续安全增强。
 4. 工具调用结果必须以 provider-native `role=tool` + `tool_call_id` 结构回流同一对话轮次，不得伪装成 user message 注入历史。
 5. allowedTools 采用场景动态过滤，由 PromptRuntime 根据当前 Workspace 和操作上下文决定，不是全局静态配置。
 6. Agent 在同一 Workspace 会话内的工具调用边界必须随 Workspace 状态变化而重置。
@@ -63,18 +64,27 @@ Agent 需求必须满足以下原则：
 
 ## 6. 与 binder-core 的颗粒度差异
 
-binder-core 已具备真实 SSE Provider、tool_calls 协议、多配置 Provider、Prompt Runtime 和 Input References 等完整实现。本项目不直接搬运代码，而是按 Binder Mini 规则体系重新拆分：
+binder-core 已具备真实 SSE Provider、tool_calls 协议、多配置 Provider、Prompt Runtime 和 Input References 等能力。本项目不直接搬运代码，而是按 Binder Mini 规则体系重新拆分。以下条目是能力拆分顺序索引，不表达当前实现完成度：
 
-1. 先完成 Provider 配置和模拟流响应（已有 MVP）。
-2. 补充真实 Provider SSE 协议。
-3. 扩展工具矩阵（含写操作工具路由 Diff Review）。
-4. 补充 Prompt Runtime 和 InputReference 正式实现。
+1. Provider 配置和流式响应。
+2. 真实 Provider SSE 协议。
+3. 工具矩阵（含写操作工具路由 Diff Review）。
+4. Prompt Runtime 和 InputReference。
 
 ## 7. 需求标注块
 
 <!-- REQ
 req_id: REQ-AG-001
 name: Provider 配置
+module: AG
+chains: AG-SEND-MESSAGE
+priority: P0
+status: active
+-->
+
+<!-- REQ
+req_id: REQ-AG-001-A
+name: API key 持久化
 module: AG
 chains: AG-SEND-MESSAGE
 priority: P0
@@ -191,11 +201,26 @@ status: active
 | S03 | AG | API key | 安全存储 API key（不暴露前端）| 存储确认 | S04 | ERR-02（存储失败）|
 | S04 | AG | Provider 配置（不含 key）| 更新 chatMachine Provider 状态 | ready+valid 状态 | DONE | — |
 
+### REQ-AG-001-A API key 持久化流程（AG-PROVIDER-KEY-PERSIST-FLOW）
+
+| step_id | actor | input | action | output | next_step | exception |
+|---------|-------|-------|--------|--------|-----------|-----------|
+| S01 | User | Provider 类型 + API key | 点击保存 Provider key | 保存请求 | S02 | — |
+| S02 | SYS | Provider 类型 + API key | 后端写入应用级 Provider 凭据存储 | 持久化成功 | S03 | ERR-01（写入失败 → UI 显示保存失败，旧配置不变）|
+| S03 | AG | 持久化成功事件 | 更新前端 ProviderConfig 非敏感状态 | `apiKeyConfigured=true` | DONE | — |
+| S04 | SYS | 应用启动 / Workspace 打开 | 从后端 Provider 凭据存储读取已配置状态，不返回明文 key | ProviderConfig 列表 | S05 | ERR-02（读取失败 → `apiKeyConfigured=false` 并显示配置不可用）|
+| S05 | AG | ProviderConfig 列表 | 恢复 Provider 选择和发送门禁 | ready + provider configured | DONE | — |
+
+持久化边界：
+- 明文 API key 不进入 React state、localStorage、workspace.db、聊天历史或日志。
+- Provider key 按 Provider 类型保存；用户再次保存同一 Provider key 时覆盖旧值。
+- Workspace 切换、关闭、重新打开不得清空应用级 Provider key。
+
 ### REQ-AG-002 消息发送与流式响应流程（AG-SEND-MESSAGE-FLOW）
 
 | step_id | actor | input | action | output | next_step | exception |
 |---------|-------|-------|--------|--------|-----------|-----------|
-| S01 | User | 消息文本 + 可选 InputReference | 触发"发送"操作 | 发送请求 | S02 | — |
+| S01 | User | 消息文本 + 可选 InputReference | 触发"发送"操作（Enter 键或发送按钮）| 发送请求 | S02 | ERR-00（IME 合成阶段 Enter：isComposing = true，不触发发送，不进入 S02）|
 | S02 | AG | chatMachine 状态 | 检查 Provider 配置有效 + 非 sending 状态 | 门禁结果 | S03（通过）| ERR-01（Provider 无效）/ ERR-02（正在发送）|
 | S03 | AG | 消息 + PromptRuntime 上下文 | 组装 Provider payload（system prompt、history、tools）| Provider payload | S04 | ERR-03（payload 组装失败）|
 | S04 | SYS | Provider payload | 调用 Tauri `send_chat_message` command → SSE 连接 | SSE 流开始 | S05 | ERR-04（网络错误 → ERR 状态）|
@@ -218,7 +243,7 @@ status: active
 ### REQ-AG-004 内容编辑工具流程
 
 内容编辑工具有两条路径，均路由 Diff Review：
-- **edit_current_editor_document**（已打开文件）：通过 ED 获取 active 文件 originalText 快照，创建 PendingDiff
+- **edit_current_editor_document**（已打开文件）：通过 ED 获取 ActiveFile 的 LogicalStateSnapshot，模型基于该快照生成 originalText，系统创建 PendingDiff
 - **update_file**（未打开文件）：通过磁盘读取文件内容作为 originalText，直接创建 PendingDiff（不经 ED）
 
 以下流程描述 edit_current_editor_document 路径（AG-EDIT-TOOL-FLOW）；update_file 路径见 DE-CREATE-DIFF-CLOSED-FLOW。
@@ -227,9 +252,9 @@ status: active
 
 | step_id | actor | input | action | output | next_step | exception |
 |---------|-------|-------|--------|--------|-----------|-----------|
-| S01 | AG | tool_call（edit_current_editor_document）| 接收内容编辑工具调用 | 工具参数（proposedText、summary）| S02 | — |
-| S02 | AG | ED active 文件状态 | 获取当前编辑器活跃文件路径和内容（originalText 快照）| filePath + originalText | S03 | ERR-01（无 active 文件 → 工具拒绝）|
-| S03 | DE | filePath + originalText + proposedText + summary + sourceToolId | 创建 PendingDiff | PendingDiff | S04 | ERR-02（DE 创建失败）|
+| S01 | AG | tool_call（edit_current_editor_document）| 接收内容编辑工具调用 | 工具参数（originalText、newText、summary）| S02 | — |
+| S02 | AG | ED ActiveFile 状态 | 获取当前编辑器活跃文件路径和 LogicalStateSnapshot；该快照包含未保存用户编辑和已 preapplied 修改 | filePath + LogicalStateSnapshot | S03 | ERR-01（无 active 文件或无法取得 LogicalStateSnapshot → 工具拒绝）|
+| S03 | DE | filePath + originalText（来自 LogicalStateSnapshot 的精确片段）+ newText + summary + sourceToolId | 创建 PendingDiff，并在 ActiveFile LogicalState 中执行精确替换 | PendingDiff + appliedRange | S04 | ERR-02（DE 创建失败或 originalText 在 LogicalState 中找不到）|
 | S04 | AG | PendingDiff 创建成功 | 返回 tool_result（diff 已提交审查）| tool_result | DONE（继续 SSE 流）| — |
 
 ### REQ-AG-004-B 结构操作工具流程（AG-STRUCTURAL-TOOL-FLOW）
@@ -249,16 +274,20 @@ status: active
 
 ### REQ-AG-006 InputReference（P1）
 
-用户可通过拖拽（Workspace 文件节点或 Editor Tab 拖入输入框）或在编辑器中选区后附加引用。引用支持 4 种类型：`workspace_file`、`editor_content`（含选区坐标）、`plain_text`、`url`。
+用户可通过拖拽（Workspace 文件节点或 Editor Tab 拖入输入框）或在编辑器中选区后附加引用。引用支持 4 种类型：`workspace_file`、`editor_content`、`plain_text`、`url`。
 
 引用作为结构化内容载体传递，包含：
 - **referenceTag**：引用来源标签（文件名、引用类型）
 - **contentSnapshot**：引用时刻的内容快照
-- **精确坐标**：`blockId`（TipTap 节点 ID）、`lineRange`（行号范围）、`textOffset`（字符偏移）——三者根据引用类型提供，可部分为空
+- **精确坐标（anchor）**：`blockId`（TipTap 节点 ID）、`startOffset`/`endOffset`（块内纯文本字符偏移）——仅在 `editor_content` 携带有效选区时存在，其余类型 anchor 为 null
 
-Agent 根据引用类型和坐标信息自行判断引用语义：
-- `editor_content` 类型且包含坐标 → 优先视为精准编辑目标，通过 Diff Review 执行定点修改
-- `workspace_file` 类型 → 通常视为参考上下文（Agent 也可决定将其作为编辑对象调用 update_file）
+`editor_content` 当前支持两种入口，行为不同：
+- **已实现**：专用"引用 ActiveFile"按钮或拖拽 EditorTab → 全文快照，anchor 为 null；Agent 视为文件级背景参考
+- **设计预留（未实现）**：编辑器内文本选区附加引用 → 局部内容快照，anchor 有效；Agent 可视为精准编辑目标，anchor 信息可作为 `edit_current_editor_document` 的 `startBlockId`/`startOffset` 辅助参数
+
+Agent 根据引用类型和 anchor 状态自行判断引用语义：
+- `editor_content` 且 anchor 有效 → 优先视为精准编辑目标，通过 Diff Review 执行定点修改
+- `editor_content` anchor 为 null，或 `workspace_file` → 通常视为参考上下文（Agent 也可决定将其作为编辑对象调用 update_file）
 - `plain_text` / `url` → 作为背景参考
 
 `url` 类型注意：系统只传递 URL 字符串，不发起 fetch 请求，不获取页面内容；模型如需读取页面内容，须自行调用 web_search 工具；模型不得声称已读取页面内容。
@@ -267,7 +296,9 @@ Agent 根据引用类型和坐标信息自行判断引用语义：
 
 ### REQ-AG-007 Prompt Runtime（P1）
 
-Provider payload 在后端（Rust/SYS 层）组装，system prompt 按 L0（系统基线+Workspace 上下文）→ L1（InputReference XML）→ L2（历史片段）→ L3（当前用户消息）四层结构组装；allowedTools 由 PromptRuntime 场景动态决定，不向模型暴露未授权工具；API key、Workspace 绝对路径等禁止字段在后端组装时过滤，不进入 payload；组装结果可通过调试接口审计。
+Provider payload 在后端（Rust/SYS 层）组装，system prompt 按 L0（系统基线+Workspace 上下文+ActiveFile LogicalStateSnapshot）→ L1（InputReference XML）→ L2（历史片段）→ L3（当前用户消息）四层结构组装；allowedTools 由 PromptRuntime 场景动态决定，不向模型暴露未授权工具；API key、Workspace 绝对路径等禁止字段在后端组装时过滤，不进入 payload；组装结果可通过调试接口审计。
+
+ActiveFile LogicalStateSnapshot 是当前打开文档编辑的上下文源。read_file、search_files 和 Workspace 索引提供 DiskState/工作区视角，只能作为补充检索上下文；当用户要求修改当前文档时，不得以磁盘读取结果替代 LogicalStateSnapshot。
 
 ### REQ-AG-008 取消流式响应（P1）
 
@@ -337,11 +368,12 @@ chatMachine 覆盖 Agent 对话会话全链路，必须包含以下状态：
 
 | 类别 | 决策 |
 |------|------|
-| **API key 存储** | MVP 阶段：`localStorage["binder-ai-configs"]` 存储 Provider 配置（含 key）。Keychain（系统级安全存储）作为后续安全增强，不作为 MVP 主链。workspace.db 不保存 API key。对齐 binder-core MVP 决策。 |
-| **allowedTools 过滤粒度** | 场景动态过滤：allowedTools 由 PromptRuntime 根据当前 Workspace 状态和操作上下文决定，不是按 Provider 类型全局静态配置。对齐 binder-core 目标设计方向；Phase 12 开始实现。 |
+| **API key 存储** | API key 是应用级 Provider 凭据，必须跨应用重启持久化；前端不得持有明文 key，只保存 Provider 类型、模型和 `apiKeyConfigured` 等非敏感状态；明文 key 由后端安全存储或应用配置目录持有。workspace.db 不保存 API key。 |
+| **allowedTools 过滤粒度** | 场景动态过滤：allowedTools 由 PromptRuntime 根据当前 Workspace 状态、ActiveFile 状态和操作上下文决定，不是按 Provider 类型全局静态配置。 |
 | **工具调用超时** | 单次工具调用超时 10 秒。超时后工具进入 `error` 终态，chatMachine 回 ready，SSE 流不中断（工具结果以 error 类型回流）。 |
 | **取消流式响应** | 新增 REQ-AG-008，chatMachine 引入 `cancelling` 状态；取消后已生成的部分流内容在 UI 保留，不追加完整轮次历史。 |
 | **tool_result 注入位置** | provider-native `role=tool` + `tool_call_id` 结构，回流到同一对话轮次（不作为 user message）。Provider Adapter 负责将统一内部格式转换为各 Provider 原生格式（OpenAI vs Anthropic content block）。对齐 binder-core BR-AG-PROMPT-003。 |
+| **IME 合成与 Enter 键兼容** | ChatInput 必须兼容中文输入法（IME）的候选词确认流程：用户按 Enter 确认候选词时不得触发发送，只有随后再按 Enter 才发送。实现必须使用 `compositionstart`/`compositionend` 事件维护 `isComposingRef`（useRef，非 useState），并在 `compositionend` 回调内通过 `setTimeout(0)` 延迟清除标志。延迟是必须的：在 Tauri WKWebView（WebKit）环境中，`compositionend` 先于 `keydown` 触发，直接清除会使 `keydown` 拿到 `false`；`setTimeout(0)` 将清除推迟到当前同步任务（含后续 `keydown`）执行完毕后。`handleKeyDown` 以 `!isComposingRef.current` 作为第一个过滤条件，不依赖 `e.nativeEvent.isComposing`（该属性在 WebKit 中于确认 Enter 时已为 false，无法区分）。 |
 
 ## 10. 跨模块交互声明
 
@@ -349,16 +381,22 @@ chatMachine 覆盖 Agent 对话会话全链路，必须包含以下状态：
 |------|----------|----------|------|
 | AG → WS | 只读工具调用（read_file、list_files、search_files）| workspaceRoot + filePath → 文件内容/目录列表/搜索结果 | 路径必须在 workspaceRoot 内；WS 未 active 时工具拒绝执行 |
 | AG → WS | 结构操作工具调用（create_file / create_folder / rename_file / move_file / delete_file）| workspaceRoot + 操作类型 + 路径参数 → 文件系统操作结果 | 路径边界校验和 PathConflict 检查必须通过；AG 不得绕过 WS 层直接操作文件系统 |
-| AG → DE | 内容编辑工具调用（edit_current_editor_document / update_file）| proposedText + originalText + sourceToolId → PendingDiff | AG 只能请求 DE 创建 diff，不得直接写文件 |
-| AG → ED | 获取当前编辑器活跃文件上下文 | active filePath + originalText 快照 | 只读读取；不直接修改 ED 状态 |
+| AG → DE | 内容编辑工具调用（edit_current_editor_document / update_file）| originalText + newText + sourceToolId → PendingDiff | AG 只能请求 DE 创建 diff，不得直接写文件 |
+| AG → ED | 获取 ActiveFile 上下文 | activeFilePath + LogicalStateSnapshot | 只读读取；不直接修改 ED 状态；LogicalStateSnapshot 是 edit_current_editor_document 的上下文源 |
 | AG → SYS | web_search 工具调用 | 搜索查询参数 → 互联网搜索结果摘要 | 不受 WS 边界约束；网络不可用时返回工具 error result |
 | AG → DB | 聊天消息持久化 | 每轮 AgentMessage → workspace.db chat_messages 表 | 按 workspaceId 分区；不跨 Workspace 共享；Workspace 切换时读取对应分区 |
+| AG → SYS | Provider key 持久化 | Provider 类型 + API key → 应用级 Provider 凭据存储 | 后端持有明文 key；前端只接收 `apiKeyConfigured`；workspace.db 不保存 key |
 | WS → AG | Workspace 关闭时通知 AG | workspaceMachine → Closing | AG 必须终止当前 SSE 流；工具调用边界随 WS 状态重置 |
 
 ## 变更记录
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-05-26 | v1.9 | REQ-AG-002 验收口径补充 IME 兼容约束（isComposing = true 时 Enter 不触发发送）；AG-SEND-MESSAGE-FLOW S01 异常列补充 ERR-00（IME 合成阶段静默忽略）；§9 新增"IME 合成与 Enter 键兼容"决策约束 |
+| 2026-05-25 | v1.7 | 补齐 ActiveFile 编辑上下文需求：REQ-AG-004/007 明确 edit_current_editor_document 必须以 ED LogicalStateSnapshot 为上下文源，read_file/DiskState 不得替代当前编辑器逻辑态 |
+| 2026-05-26 | v1.8 | REQ-AG-006 对齐设计文档 AG-M-P-03 v1.4：editor_content 入口区分已实现（按钮/TabDrag，全文快照，anchor=null）和设计预留（文本选区，anchor 有效）；anchor 字段重命名为 blockId/startOffset/endOffset（对齐 InputReferenceAnchor）；Agent 语义判断规则改为"anchor 是否有效"而非"类型是否为 editor_content" |
+| 2026-05-25 | v1.6 | 补齐 REQ-AG-001-A API key 持久化需求：明确应用级持久化、跨重启恢复、Workspace 切换不清空、前端不持有明文 key、workspace.db 不保存 key；新增 Provider key 持久化流程和跨模块交互 |
+| 2026-05-25 | v1.5 | 治理修复：API key 存储口径改为前端不持有明文 key；allowedTools 决策移除阶段性实现描述；§6 能力拆分改为顺序索引，不表达实现完成度 |
 | 2026-05-23 | v1.0 | 初始版本，定义 Agent 功能需求颗粒度和 REQ-AG-* ID |
 | 2026-05-23 | v1.1 | 新增 §7 需求标注块、§8 功能流程表、§9 问题暴露清单、§10 跨模块交互声明（G1 合规修复）|
 | 2026-05-23 | v1.2 | 新增 REQ-AG-008（取消流式响应）、REQ-AG-009（Chat 状态机）；§4 非功能要求补充 chatMachine 强制、10s 超时、场景动态 allowedTools、provider-native tool_result；§8 同步补全新 REQ 标注块；§9 将所有 NEEDS_HUMAN_DECISION 替换为已决策约束（对齐 binder-core）|

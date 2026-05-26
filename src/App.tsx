@@ -1,850 +1,687 @@
-import { useEffect, useState } from "react";
-import { MarkdownEditor } from "./components/MarkdownEditor";
-import { createAgentMachineDefinition } from "./machines/agentMachine";
-import { createDiffMachineDefinition } from "./machines/diffMachine";
-import { createEditorMachineDefinition } from "./machines/editorMachine";
-import { createWorkspaceMachineDefinition } from "./machines/workspaceMachine";
-import {
-  canRecordAgentMessage,
-  canSendAgentMessage,
-  completeToolExecution,
-  createAssistantStreamMessage,
-  createPendingToolExecution,
-  createUserAgentMessage,
-  executeListFilesTool,
-  executeReadFileTool,
-  executeSearchFilesTool,
-  normalizeProviderConfig,
-  streamAssistantResponse,
-} from "./services/agentService";
-import {
-  acceptPendingDiff,
-  createPendingDiffFromCurrentEditor,
-  createTerminalDiffCard,
-  rejectPendingDiff,
-  shouldExpirePendingDiff,
-} from "./services/diffService";
-import {
-  activateEditorTab,
-  canSaveEditorDocument,
-  closeEditorTab,
-  createEmptyEditorSession,
-  createEditorStatusBarModel,
-  getActiveEditorDocument,
-  hasDirtyEditorTabs,
-  openEditorTab,
-  openEditorDocument,
-  saveEditorDocument,
-  updateActiveEditorContent,
-  upsertEditorTab,
-  usesMarkdownEditor,
-} from "./services/editorService";
-import type { AgentMessage, ProviderConfig, ToolExecution } from "./types/agent";
-import type { PendingDiff, TerminalDiffCard } from "./types/diff";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { createTerminalDiffCard } from "./services/diffService";
 import {
   canChangeWorkspace,
   createWorkspaceFile,
   createWorkspaceFolder,
   deleteWorkspaceItem,
   isPathConflict,
-  listRecentWorkspaces,
-  moveWorkspaceItem,
-  normalizeRecentWorkspaces,
-  openWorkspace,
   renameWorkspaceItem,
   sortWorkspaceEntries,
 } from "./services/workspaceService";
-import type { EditorSession } from "./types/editor";
-import type {
-  RecentWorkspace,
-  WorkspaceEntry,
-  WorkspaceMutationResult,
-  WorkspaceSnapshot,
-} from "./types/workspace";
+import { useWorkspaceActor } from "./services/workspaceActor";
+import { useEditorActor } from "./services/editorActor";
+import { useChatActor } from "./services/chatActor";
+import { diffStore } from "./stores/diffStore";
+import { extractDocumentStructure } from "./stores/editorRegistry";
+import { useWorkspaceSearch } from "./hooks/useWorkspaceSearch";
+import { MainLayout } from "./components/MainLayout";
+import { FileTreePanel } from "./components/FileTreePanel";
+import { EditorColumn } from "./components/EditorColumn";
+import { ChatPanel } from "./components/ChatPanel";
+import { WorkspaceCloseGuardDialog } from "./components/WorkspaceCloseGuardDialog";
+import { PreappliedSaveDialog } from "./components/PreappliedSaveDialog";
+import { PreappliedTabCloseDialog } from "./components/PreappliedTabCloseDialog";
+import type { ProviderConfig } from "./types/agent";
+import type { PendingDiff, TerminalDiffCard } from "./types/diff";
+import type { WorkspaceMutationResult } from "./types/workspace";
+import type { PendingDiffStatus } from "./machines/diffMachine";
+import type { ChatMessageRecord } from "./ipc";
+import { saveApiKey, isApiKeyConfigured } from "./ipc";
+
+const MAX_ACTIVE_FILE_LOGICAL_STATE_SNAPSHOT = 12_000;
 
 /**
  * @GOV
- * codes: BR-SYS-GOV-001-RB-SYS-WS-OPEN-001,
- *        BR-CORE-GOV-001-RB-SYS-WS-OPEN-001
+ * codes: BR-SYS-UI-001, BR-SYS-UI-002, BR-WS-STATE-001, BR-WS-STATE-002, BR-WS-STATE-003, BR-WS-PERSIST-001, BR-WS-DATA-005, BR-ED-STATE-001, BR-ED-STATE-002, BR-ED-STATE-003, BR-ED-STATE-004, BR-ED-PERSIST-001, BR-ED-PERSIST-002, BR-ED-PERSIST-003, BR-ED-STATE-005, BR-ED-STATE-006, BR-AG-SEC-001, BR-AG-UI-001, BR-AG-PERSIST-001, BR-AG-PERSIST-002, BR-AG-DATA-004, BR-DE-PERSIST-001, BR-DE-STATE-014, BR-DE-UI-001, BR-DE-UI-002
  * type: RB
- * chain: WS-OPEN, ED-OPEN-FILE, AG-SEND-MESSAGE, DE-CREATE-DIFF
- * rules: BR-SYS-GOV-001, BR-CORE-GOV-001
- * boundary: in=registered machine definitions | out=application shell sections | delegate=workspaceMachine,editorMachine,agentMachine,diffMachine
+ * chain: WS-OPEN, WS-CLOSE, WS-FILE-MANAGE, WS-SEARCH, ED-OPEN-FILE, ED-SAVE-FILE, AG-SEND-MESSAGE, AG-TOOL-CALL, DE-CREATE-DIFF, DE-ACCEPT-DIFF, DE-REJECT-DIFF, DE-EXPIRE-DIFF
+ * rules: BR-SYS-UI-001, BR-SYS-UI-002, BR-WS-STATE-001, BR-WS-STATE-002, BR-WS-STATE-003, BR-WS-PERSIST-001, BR-WS-DATA-005, BR-ED-STATE-001, BR-ED-STATE-002, BR-ED-STATE-003, BR-ED-STATE-004, BR-ED-PERSIST-001, BR-ED-PERSIST-002, BR-ED-PERSIST-003, BR-ED-STATE-005, BR-ED-STATE-006, BR-AG-SEC-001, BR-AG-UI-001, BR-AG-PERSIST-001, BR-AG-PERSIST-002, BR-AG-DATA-004, BR-DE-PERSIST-001, BR-DE-STATE-014, BR-DE-UI-001, BR-DE-UI-002
+ * boundary: in=Tauri IPC command results and user interaction events | out=three-column MainLayout delegating to FileTreePanel, EditorColumn, ChatPanel with WorkspaceCloseGuardDialog overlay
+ * term_ref: TERM-CORE-001, TERM-WS-001, TERM-WS-005, TERM-ED-001, TERM-ED-003, TERM-AG-002, TERM-AG-004, TERM-AG-015, TERM-DE-001
  */
 export default function App() {
-  const [workspaceSnapshot, setWorkspaceSnapshot] =
-    useState<WorkspaceSnapshot | null>(null);
-  const [recentWorkspaces, setRecentWorkspaces] = useState<RecentWorkspace[]>([]);
-  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
-  const [newWorkspaceItemPath, setNewWorkspaceItemPath] = useState("");
-  const [structureSourcePath, setStructureSourcePath] = useState("");
-  const [structureTargetPath, setStructureTargetPath] = useState("");
-  const [editorSession, setEditorSession] = useState<EditorSession>(() =>
-    createEmptyEditorSession(),
-  );
-  const [editorError, setEditorError] = useState<string | null>(null);
+  // ── editorMachine actor (Issue 4-A) ───────────────────────────
+  const {
+    edActor: _edActor,
+    edValue,
+    edTabs,
+    edActiveTabId,
+    edErrorMessage,
+    activeContent,
+    onWorkspaceOpened: edOnWorkspaceOpened,
+    onWorkspaceClosed: edOnWorkspaceClosed,
+    openFile: edOpenFile,
+    saveFile: edSaveFile,
+    setContent: edSetContent,
+    applyDiffReplaceInTab: edApplyDiffReplaceInTab,
+    closeTab: edCloseTab,
+    switchTab: edSwitchTab,
+  } = useEditorActor();
+
+  // ── workspaceMachine actor (Issue 3-A) ─────────────────────────
+  const {
+    wsActor,
+    wsValue,
+    workspaceSnapshot,
+    recentWorkspaces,
+    openWorkspaceFlow,
+    confirmCloseFlow,
+  } = useWorkspaceActor({
+    onWorkspaceOpened: (workspaceRoot) => {
+      edOnWorkspaceOpened(workspaceRoot);
+      void chatOnWorkspaceOpened(workspaceRoot);
+    },
+    onWorkspaceClosed: () => {
+      edOnWorkspaceClosed();
+      void chatOnWorkspaceClosed();
+      setShowPreappliedSaveDialog(false);
+      setPreappliedCloseTabId(null);
+      // BR-DE-STATE-013: all non-terminal PendingDiffs cleared — diffStore.clear() stops
+      // all per-diff actors and notifies subscribers, which re-renders allDiffs as [].
+      diffStore.clear();
+    },
+  });
+
+  // ── Workspace close guard ───────────────────────────────────────
+  const [showCloseGuard, setShowCloseGuard] = useState(false);
+
+  // ── PathConflict error banner (BR-WS-DATA-002, BR-AG-TOOL-001) ─
+  const conflictTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [conflictError, setConflictError] = useState<string | null>(null);
+
+  function showConflictError(message: string) {
+    if (conflictTimeoutRef.current) clearTimeout(conflictTimeoutRef.current);
+    setConflictError(message);
+    conflictTimeoutRef.current = setTimeout(() => setConflictError(null), 3000);
+  }
+
+  // ── Agent / Chat (Issue 5-A) ────────────────────────────────────
+  const {
+    chatValue,
+    chatMessages,
+    chatStreamingContent,
+    chatErrorMessage,
+    onWorkspaceOpened: chatOnWorkspaceOpened,
+    onWorkspaceClosed: chatOnWorkspaceClosed,
+    sendMessage: chatSendMessage,
+    cancelMessage: chatCancelMessage,
+    retryMessage: chatRetryMessage,
+    notifyActiveFileChanged,
+  } = useChatActor();
+
   const [providerConfig, setProviderConfig] = useState<ProviderConfig>({
-    provider: "openai",
-    model: "",
+    provider: "anthropic",
+    model: "claude-opus-4-5",
     apiKeyConfigured: false,
   });
-  const [agentInput, setAgentInput] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
-  const [toolExecutions, setToolExecutions] = useState<ToolExecution[]>([]);
-  const [agentError, setAgentError] = useState<string | null>(null);
-  const [agentStreaming, setAgentStreaming] = useState(false);
-  const [pendingDiff, setPendingDiff] = useState<PendingDiff | null>(null);
-  const [terminalDiffCards, setTerminalDiffCards] = useState<TerminalDiffCard[]>(
-    [],
-  );
-  const machines = [
-    createWorkspaceMachineDefinition(),
-    createEditorMachineDefinition(),
-    createAgentMachineDefinition(),
-    createDiffMachineDefinition(),
-  ];
-  const editorDocument = getActiveEditorDocument(editorSession);
-  const editorStatus = createEditorStatusBarModel(editorDocument);
+
+  const defaultModels: Record<ProviderConfig["provider"], string> = {
+    anthropic: "claude-opus-4-5",
+    openai: "gpt-4.1",
+    deepseek: "deepseek-chat",
+  };
 
   useEffect(() => {
-    void listRecentWorkspaces()
-      .then((workspaces) => setRecentWorkspaces(normalizeRecentWorkspaces(workspaces)))
-      .catch((error) => setWorkspaceError(error instanceof Error ? error.message : String(error)));
-  }, []);
+    void isApiKeyConfigured(providerConfig.provider).then((configured) =>
+      setProviderConfig((current) =>
+        current.provider === providerConfig.provider
+          ? { ...current, apiKeyConfigured: configured }
+          : current,
+      ),
+    );
+  }, [providerConfig.provider]);
 
-  function canLeaveCurrentWorkspace(): boolean {
+  function handleProviderChange(provider: ProviderConfig["provider"]) {
+    setProviderConfig((current) => ({
+      provider,
+      model: defaultModels[provider],
+      apiKeyConfigured: current.provider === provider ? current.apiKeyConfigured : false,
+    }));
+  }
+
+  function handleModelChange(model: string) {
+    setProviderConfig((current) => ({ ...current, model }));
+  }
+
+  // ── Diff — reactive via diffStore (BR-DE-STATE-001, BR-DE-STATE-013) ──────
+  // useSyncExternalStore gives React a stable snapshot reference between mutations.
+  const allDiffs = useSyncExternalStore(
+    (cb) => diffStore.subscribe(cb),
+    () => diffStore.getAllDiffs(),
+  );
+  const terminalDiffCards = useSyncExternalStore(
+    (cb) => diffStore.subscribe(cb),
+    () => diffStore.getTerminalCards(),
+  );
+
+  // BR-DE-PERSIST-001: guard Cmd+S when a preapplied diff is present in the active tab.
+  const [showPreappliedSaveDialog, setShowPreappliedSaveDialog] = useState(false);
+  // BR-DE-STATE-014: guard tab-close when a preapplied diff is present in that tab.
+  const [preappliedCloseTabId, setPreappliedCloseTabId] = useState<string | null>(null);
+
+  // ── Search (Issue 3-C, BR-WS-DATA-005) ─────────────────────────
+  const { searchQuery, searchResults, handleSearchQueryChange, clearSearchResults } =
+    useWorkspaceSearch();
+
+  // ── Local entries state for file mutations (Phase 3-D) ─────────
+  // workspaceActor manages workspaceSnapshot; local mutations update entries here.
+  // Reset when workspace root changes.
+  const [localWorkspaceEntries, setLocalWorkspaceEntries] = useState<
+    import("./types/workspace").WorkspaceEntry[] | null
+  >(null);
+
+  useEffect(() => {
+    setLocalWorkspaceEntries(null);
+  }, [workspaceSnapshot?.workspace.rootPath]);
+
+  // ── Derived ────────────────────────────────────────────────────
+  const isActive = wsValue === "Active";
+
+  // ── State derivation helpers ───────────────────────────────────
+  type WorkspacePanelState = "NoWorkspace" | "Loading" | "Active" | "Closing" | "Error";
+  function workspacePanelState(): WorkspacePanelState {
+    return wsValue as WorkspacePanelState;
+  }
+
+  type EditorStateName =
+    | "noWorkspace" | "idle" | "loading" | "editing" | "dirty" | "saving" | "readonly" | "error";
+  function editorStateName(): EditorStateName {
+    return edValue as EditorStateName;
+  }
+
+  type ChatStateName =
+    | "noWorkspace" | "ready" | "validatingProvider" | "sending" | "streaming"
+    | "toolCalling" | "cancelling" | "error";
+  function chatStateName(): ChatStateName {
+    return chatValue as ChatStateName;
+  }
+
+  // Derive active tab's fileType for EditorArea serialization path
+  const activeTab = edTabs.find((t) => t.id === edActiveTabId) ?? null;
+  const activeFileType = activeTab?.fileType;
+
+  // ── Workspace handlers ─────────────────────────────────────────
+  // Preapplied diffs for the currently active tab's file.
+  const activeFilePath = activeTab?.filePath ?? null;
+  const activeFileMode = activeTab
+    ? activeTab.fileType === "other" ? "readonly" : "editable"
+    : undefined;
+  const activeFileDirty = activeTab?.dirty ?? false;
+  const activePreappliedDiff: PendingDiff | null = activeFilePath
+    ? (allDiffs.find((d) => d.filePath === activeFilePath && d.status === "preapplied") ?? null)
+    : null;
+  const activeFilePendingDiffCount = activeFilePath
+    ? allDiffs.filter((d) => d.filePath === activeFilePath).length
+    : 0;
+  const activeFileLogicalStateSnapshot =
+    activeFilePath && activeFileMode === "editable"
+      ? activeContent.slice(0, MAX_ACTIVE_FILE_LOGICAL_STATE_SNAPSHOT)
+      : undefined;
+  const activeFileSnapshotTruncated =
+    activeFilePath && activeFileMode === "editable"
+      ? activeContent.length > MAX_ACTIVE_FILE_LOGICAL_STATE_SNAPSHOT
+      : undefined;
+
+  const previousActiveFilePathRef = useRef<string | null>(null);
+  useEffect(() => {
+    const previous = previousActiveFilePathRef.current;
+    if (previous !== activeFilePath) {
+      if (previous && activeFilePath) {
+        notifyActiveFileChanged(previous, activeFilePath);
+      }
+      previousActiveFilePathRef.current = activeFilePath;
+    }
+  }, [activeFilePath, notifyActiveFileChanged]);
+
+  // Tabs that have at least one preapplied diff — for tab close guard and tab indicator.
+  const preappliedTabIds = new Set(
+    allDiffs.filter((d) => d.status === "preapplied").map((d) => d.filePath),
+  );
+
+  function canLeaveWorkspace() {
     return canChangeWorkspace({
-      editorDirty: hasDirtyEditorTabs(editorSession),
-      hasPendingDiff: Boolean(pendingDiff),
+      editorDirty: edTabs.some((t) => t.dirty),
+      hasPendingDiff: allDiffs.length > 0,
     });
   }
 
-  function workspaceBlockedMessage(): string {
-    if (hasDirtyEditorTabs(editorSession)) return "Save or discard dirty editor tabs before changing Workspace.";
-    if (pendingDiff) return "Accept or reject the pending diff before changing Workspace.";
-    return "Workspace cannot be changed yet.";
+  function handleOpenWorkspace() {
+    void openWorkspaceFlow();
   }
 
-  async function handleOpenWorkspace() {
-    setWorkspaceError(null);
-    if (workspaceSnapshot && !canLeaveCurrentWorkspace()) {
-      setWorkspaceError(workspaceBlockedMessage());
+  function handleCloseWorkspaceWithGuard() {
+    if (!workspaceSnapshot) return;
+    if (!canLeaveWorkspace()) {
+      setShowCloseGuard(true);
       return;
     }
-    try {
-      const result = await openWorkspace();
-      if (!result.cancelled && result.snapshot) {
-        setWorkspaceSnapshot({
-          ...result.snapshot,
-          entries: sortWorkspaceEntries(result.snapshot.entries),
-        });
-        setRecentWorkspaces(normalizeRecentWorkspaces(result.recentWorkspaces ?? []));
-        setEditorSession(createEmptyEditorSession());
-        setPendingDiff(null);
-      }
-    } catch (error) {
-      setWorkspaceError(error instanceof Error ? error.message : String(error));
-    }
+    // No guard needed — transition machine to Closing then immediately close
+    wsActor.send({ type: "CLOSE_WORKSPACE" });
+    void confirmCloseFlow(toChatMessageRecords());
   }
 
-  function handleCloseWorkspace() {
-    setWorkspaceError(null);
-    if (!workspaceSnapshot) return;
-    if (!canLeaveCurrentWorkspace()) {
-      setWorkspaceError(workspaceBlockedMessage());
-      return;
-    }
-    setWorkspaceSnapshot(null);
-    setEditorSession(createEmptyEditorSession());
-    setEditorError(null);
-    setPendingDiff(null);
-    setNewWorkspaceItemPath("");
-    setStructureSourcePath("");
-    setStructureTargetPath("");
+  function handleForceCloseWorkspace() {
+    setShowCloseGuard(false);
+    wsActor.send({ type: "CLOSE_WORKSPACE" });
+    void confirmCloseFlow(toChatMessageRecords());
   }
 
-  async function handleCreateWorkspaceItem(kind: "file" | "folder") {
-    if (!workspaceSnapshot) return;
-    const relativePath = newWorkspaceItemPath.trim();
-    if (!relativePath) return;
-    setWorkspaceError(null);
-    try {
-      const result =
-        kind === "file"
-          ? await createWorkspaceFile(workspaceSnapshot.workspace.rootPath, relativePath)
-          : await createWorkspaceFolder(workspaceSnapshot.workspace.rootPath, relativePath);
-      if (isPathConflict(result)) {
-        setWorkspaceError(result.conflict.message);
-        return;
-      }
-      setWorkspaceSnapshot({
-        ...workspaceSnapshot,
-        entries: sortWorkspaceEntries(result.entries),
-      });
-      setNewWorkspaceItemPath("");
-    } catch (error) {
-      setWorkspaceError(error instanceof Error ? error.message : String(error));
-    }
+  function handleCancelClose() {
+    setShowCloseGuard(false);
+    // Machine stays in Active (CLOSE_WORKSPACE was not sent yet)
+  }
+
+  /** BR-AG-PERSIST-001: chat persistence is handled by chatActor.onWorkspaceClosed(). */
+  function toChatMessageRecords(): ChatMessageRecord[] {
+    // chatActor persists messages directly; this returns empty to satisfy confirmCloseFlow signature
+    return [];
   }
 
   async function applyWorkspaceMutation(
     action: () => Promise<WorkspaceMutationResult>,
-    clearInputs: () => void,
   ) {
     if (!workspaceSnapshot) return;
-    setWorkspaceError(null);
-    try {
-      const result = await action();
-      if (isPathConflict(result)) {
-        setWorkspaceError(result.conflict.message);
-        return;
-      }
-      setWorkspaceSnapshot({
-        ...workspaceSnapshot,
-        entries: sortWorkspaceEntries(result.entries),
-      });
-      clearInputs();
-    } catch (error) {
-      setWorkspaceError(error instanceof Error ? error.message : String(error));
+    const result = await action();
+    if (isPathConflict(result)) {
+      // Show banner (BR-WS-DATA-002) and throw so FileTreeNode can show inline error
+      showConflictError(result.conflict.message);
+      throw new Error(result.conflict.message);
     }
+    // Update local entries state (workspaceActor owns snapshot; Phase 4 wires full actor path)
+    setLocalWorkspaceEntries(sortWorkspaceEntries(result.entries));
+    // BR-WS-DATA-005: invalidate stale search results after any file mutation
+    clearSearchResults();
   }
 
-  async function handleRenameWorkspaceItem() {
+  // The effective entries: local mutations override actor snapshot
+  const effectiveEntries = isActive
+    ? (localWorkspaceEntries ?? workspaceSnapshot?.entries ?? [])
+    : [];
+
+  // ── File management handlers (Issue 3-D) ─────────────────────
+  async function handleCreateWorkspaceItem(
+    kind: "file" | "folder",
+    parentRelativePath: string,
+    name: string,
+  ) {
     if (!workspaceSnapshot) return;
-    const sourcePath = structureSourcePath.trim();
-    const newName = structureTargetPath.trim();
-    if (!sourcePath || !newName) return;
-    await applyWorkspaceMutation(
-      () =>
-        renameWorkspaceItem(workspaceSnapshot.workspace.rootPath, {
-          sourcePath,
-          newName,
-        }),
-      () => {
-        setStructureSourcePath("");
-        setStructureTargetPath("");
-      },
+    const separator = parentRelativePath ? "/" : "";
+    const relativePath = `${parentRelativePath}${separator}${name}`;
+    await applyWorkspaceMutation(() =>
+      kind === "file"
+        ? createWorkspaceFile(workspaceSnapshot.workspace.rootPath, relativePath)
+        : createWorkspaceFolder(workspaceSnapshot.workspace.rootPath, relativePath),
     );
   }
 
-  async function handleMoveWorkspaceItem() {
+  async function handleRenameWorkspaceItem(relativePath: string, newName: string) {
     if (!workspaceSnapshot) return;
-    const sourcePath = structureSourcePath.trim();
-    const targetPath = structureTargetPath.trim();
-    if (!sourcePath || !targetPath) return;
-    await applyWorkspaceMutation(
-      () =>
-        moveWorkspaceItem(workspaceSnapshot.workspace.rootPath, {
-          sourcePath,
-          targetPath,
-        }),
-      () => {
-        setStructureSourcePath("");
-        setStructureTargetPath("");
-      },
+    await applyWorkspaceMutation(() =>
+      renameWorkspaceItem(workspaceSnapshot.workspace.rootPath, { sourcePath: relativePath, newName }),
     );
   }
 
-  async function handleDeleteWorkspaceItem() {
+  async function handleDeleteWorkspaceItem(relativePath: string) {
     if (!workspaceSnapshot) return;
-    const relativePath = structureSourcePath.trim();
-    if (!relativePath) return;
-    await applyWorkspaceMutation(
-      () => deleteWorkspaceItem(workspaceSnapshot.workspace.rootPath, relativePath),
-      () => {
-        setStructureSourcePath("");
-        setStructureTargetPath("");
-      },
+    await applyWorkspaceMutation(() =>
+      deleteWorkspaceItem(workspaceSnapshot.workspace.rootPath, relativePath),
     );
   }
 
+  // ── Editor handlers (Issue 4-A / 4-B) ─────────────────────────
   async function handleOpenFile(relativePath: string) {
     if (!workspaceSnapshot) return;
-    setEditorError(null);
-    try {
-      const openedDocument = await openEditorDocument({
-          workspaceRoot: workspaceSnapshot.workspace.rootPath,
-          relativePath,
-        });
-      setEditorSession((session) => openEditorTab(session, openedDocument));
-      if (pendingDiff && pendingDiff.filePath !== openedDocument.filePath) {
-        expirePendingDiff(pendingDiff);
+    await edOpenFile(workspaceSnapshot.workspace.rootPath, relativePath);
+    // Expire preapplied diffs that belong to other files (no longer visible in editor).
+    for (const diff of allDiffs) {
+      if (diff.status === "preapplied" && diff.filePath !== relativePath) {
+        expireDiff(diff);
       }
-    } catch (error) {
-      setEditorError(error instanceof Error ? error.message : String(error));
     }
   }
 
-  async function handleSaveFile() {
-    if (!editorDocument) return;
-    if (editorError?.startsWith("Markdown conversion failed:")) return;
-    setEditorError(null);
-    try {
-      const savedDocument = await saveEditorDocument(editorDocument);
-      setEditorSession((session) => upsertEditorTab(session, savedDocument));
-    } catch (error) {
-      setEditorError(error instanceof Error ? error.message : String(error));
+  async function handleSaveFile(tabId?: string) {
+    // BR-DE-PERSIST-001: block save when active tab has a preapplied diff.
+    const targetFilePath = tabId
+      ? edTabs.find((t) => t.id === tabId)?.filePath
+      : activeFilePath;
+    const hasPreapplied = targetFilePath &&
+      allDiffs.some((d) => d.filePath === targetFilePath && d.status === "preapplied");
+    if (hasPreapplied) {
+      setShowPreappliedSaveDialog(true);
+      return;
     }
-  }
-
-  function expirePendingDiff(diff: PendingDiff) {
-    setTerminalDiffCards((cards) => [
-      createTerminalDiffCard(diff.id, "expired"),
-      ...cards,
-    ]);
-    setPendingDiff(null);
+    await edSaveFile(tabId);
   }
 
   function handleEditorChange(content: string) {
-    if (!editorDocument) return;
-    const nextDocument = {
-      ...editorDocument,
-      content,
-      dirty: true,
-    };
-    setEditorSession((session) => updateActiveEditorContent(session, content));
-    if (
-      pendingDiff &&
-      shouldExpirePendingDiff(pendingDiff, nextDocument.filePath, content)
-    ) {
-      expirePendingDiff(pendingDiff);
+    edSetContent(content);
+    // BR-DE-STATE-012: expire preapplied diffs whose applied newText is no longer present.
+    // Deletion diffs have newText="", so any subsequent user edit invalidates the preapplied anchor.
+    //
+    // NOTE: diffStore.getAllDiffs() is used here instead of the `allDiffs` React snapshot.
+    // handleEditorChange can be called synchronously from inside TipTap's onUpdate during
+    // edApplyDiffReplaceInTab (e.g. during rejectDiff). At that point the React snapshot is
+    // stale — it still shows `preapplied` for a diff whose actor has already transitioned to
+    // `rejecting` (actor subscriber updates cachedAllDiffs synchronously). Reading from the
+    // store directly prevents a spurious expireDiff() call that would stop the actor before
+    // rejectDiff sends TERMINAL_RECORDED, producing a XState warning and a duplicate terminal card.
+    for (const diff of diffStore.getAllDiffs()) {
+      if (diff.status === "preapplied" && diff.filePath === activeFilePath) {
+        if (!diff.newText || !content.includes(diff.newText)) {
+          expireDiff(diff);
+        }
+      }
     }
   }
 
-  function handleCloseEditorTab(tabId: string) {
-    setEditorError(null);
-    const tab = editorSession.tabs.find((item) => item.id === tabId);
+  function handleTabDiscard(tabId: string) {
+    // BR-DE-STATE-014: if this tab has a preapplied diff, require explicit decision.
+    const tab = edTabs.find((t) => t.id === tabId);
+    const hasPreapplied = tab?.filePath &&
+      allDiffs.some((d) => d.filePath === tab.filePath && d.status === "preapplied");
+    if (hasPreapplied) {
+      setPreappliedCloseTabId(tabId);
+      return;
+    }
+    edCloseTab(tabId);
+  }
+
+  async function handleTabSaveAndClose(tabId: string) {
+    const tab = edTabs.find((t) => t.id === tabId);
     if (!tab) return;
-    const discardDirty =
-      !tab.dirty || window.confirm(`Discard unsaved changes in ${tab.filePath}?`);
-    const result = closeEditorTab(editorSession, tabId, discardDirty);
-    if (result.blocked) {
-      setEditorError("Dirty editor tab was not closed.");
+    if (tabId !== edActiveTabId) {
+      edSwitchTab(tabId);
     }
-    setEditorSession(result.session);
+    await edSaveFile(tabId);
+    edCloseTab(tabId);
   }
 
-  async function handleSendAgentMessage() {
-    if (agentStreaming) return;
-    const normalizedProvider = normalizeProviderConfig(providerConfig);
-    setProviderConfig(normalizedProvider);
-    setAgentError(null);
-
-    if (!canSendAgentMessage(normalizedProvider)) {
-      setAgentError("Provider configuration is required before sending.");
-      return;
-    }
-    if (!canRecordAgentMessage(agentInput)) {
-      setAgentError("Message cannot be empty.");
-      return;
-    }
-
-    const userContent = agentInput;
-    const userMessage = createUserAgentMessage(userContent);
-    const assistantMessage = createAssistantStreamMessage();
-    setAgentMessages((messages) => [...messages, userMessage, assistantMessage]);
-    setAgentInput("");
-    setAgentStreaming(true);
-
-    try {
-      for await (const chunk of streamAssistantResponse({
-        provider: normalizedProvider,
-        userContent,
-        workspaceName: workspaceSnapshot?.workspace.displayName,
-        activeFilePath: editorDocument?.filePath,
-      })) {
-        setAgentMessages((messages) =>
-          messages.map((message) =>
-            message.id === assistantMessage.id
-              ? {
-                  ...message,
-                  content: message.content + chunk.content,
-                  streamStatus: chunk.done ? "complete" : "streaming",
-                }
-              : message,
-          ),
-        );
+  function handleTabRejectAndClose(tabId: string) {
+    const tab = edTabs.find((t) => t.id === tabId);
+    if (tab) {
+      for (const diff of allDiffs) {
+        if (diff.filePath === tab.filePath && diff.status === "preapplied") {
+          if (!rejectDiff(diff)) {
+            return;
+          }
+        }
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setAgentError(message);
-      setAgentMessages((messages) =>
-        messages.map((item) =>
-          item.id === assistantMessage.id
-            ? { ...item, streamStatus: "failed", content: message }
-            : item,
-        ),
-      );
-    } finally {
-      setAgentStreaming(false);
     }
+    edCloseTab(tabId);
+    setPreappliedCloseTabId(null);
   }
 
-  async function runAgentTool(
-    toolName: "read_file" | "list_files" | "search_files",
-  ) {
-    if (!workspaceSnapshot) {
-      setAgentError("Open a Workspace before running tools.");
-      return;
-    }
-    setAgentError(null);
-    try {
-      const workspaceRoot = workspaceSnapshot.workspace.rootPath;
-      const result =
-        toolName === "read_file"
-          ? await executeReadFileTool(
-              workspaceRoot,
-              editorDocument?.filePath ?? "",
-            )
-          : toolName === "list_files"
-            ? await executeListFilesTool(workspaceRoot)
-            : await executeSearchFilesTool(workspaceRoot, searchQuery);
-
-      setToolExecutions((executions) => [result.execution, ...executions]);
-      setAgentMessages((messages) => [...messages, result.message]);
-    } catch (error) {
-      const failedExecution = {
-        ...createPendingToolExecution(toolName),
-        status: "failed" as const,
-        errorMessage: error instanceof Error ? error.message : String(error),
-      };
-      setToolExecutions((executions) => [failedExecution, ...executions]);
-      setAgentError(failedExecution.errorMessage ?? "Tool failed.");
-    }
-  }
-
-  function handleCreatePendingDiff() {
-    setAgentError(null);
-    if (!editorDocument || editorDocument.mode !== "editable") {
-      setAgentError("Open an editable current document before proposing an edit.");
-      return;
-    }
-    if (!canRecordAgentMessage(agentInput)) {
-      setAgentError("Edit instruction cannot be empty.");
-      return;
-    }
-    const execution = createPendingToolExecution("edit_current_editor_document");
-    try {
-      const diff = createPendingDiffFromCurrentEditor({
-        filePath: editorDocument.filePath,
-        originalText: editorDocument.content,
-        instruction: agentInput,
-      });
-      if (pendingDiff) {
-        setTerminalDiffCards((cards) => [
-          createTerminalDiffCard(pendingDiff.id, "expired"),
-          ...cards,
-        ]);
+  function handleTabAcceptAndClose(tabId: string) {
+    const tab = edTabs.find((t) => t.id === tabId);
+    if (tab) {
+      for (const diff of allDiffs) {
+        if (diff.filePath === tab.filePath && diff.status === "preapplied") {
+          acceptDiff(diff);
+        }
       }
-      setPendingDiff(diff);
-      setToolExecutions((executions) => [
-        completeToolExecution(execution, `PendingDiff created for ${diff.filePath}`),
-        ...executions,
-      ]);
-      setAgentMessages((messages) => [
-        ...messages,
-        createUserAgentMessage(agentInput),
-        {
-          id: `msg-${Date.now()}-diff`,
-          role: "assistant",
-          content: `Created PendingDiff for ${diff.filePath}. Review before writing.`,
-          streamStatus: "complete",
-        },
-      ]);
-      setAgentInput("");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setToolExecutions((executions) => [
-        {
-          ...execution,
-          status: "failed",
-          errorMessage: message,
-        },
-        ...executions,
-      ]);
-      setAgentError(message);
     }
+    edCloseTab(tabId);
+    setPreappliedCloseTabId(null);
   }
 
-  async function handleAcceptPendingDiff() {
-    if (!pendingDiff || !editorDocument) return;
-    try {
-      const result = acceptPendingDiff(
-        pendingDiff,
-        editorDocument.filePath,
-        editorDocument.content,
-      );
-      if (result.terminalCard.status === "expired") {
-        setTerminalDiffCards((cards) => [result.terminalCard, ...cards]);
-        setPendingDiff(null);
-        return;
+  async function handleAcceptAllAndSave() {
+    if (activeFilePath) {
+      for (const diff of allDiffs) {
+        if (diff.filePath === activeFilePath && diff.status === "preapplied") {
+          acceptDiff(diff);
+        }
       }
-      const savedDocument = await saveEditorDocument({
-        ...editorDocument,
-        content: result.content,
-        dirty: true,
-      });
-      setEditorSession((session) => upsertEditorTab(session, savedDocument));
-      setTerminalDiffCards((cards) => [result.terminalCard, ...cards]);
-      setPendingDiff(null);
-    } catch (error) {
-      setEditorError(error instanceof Error ? error.message : String(error));
+    }
+    setShowPreappliedSaveDialog(false);
+    await edSaveFile();
+  }
+
+  // ── Diff lifecycle helpers (drive diffMachine + diffStore) ─────
+
+  /** BR-DE-STATE-003 / BR-DE-STATE-012 / BR-DE-STATE-013: move diff to expired terminal. */
+  function expireDiff(diff: PendingDiff) {
+    diffStore.getDiffActor(diff.id)?.send({ type: "EXPIRE_REQUESTED" });
+    diffStore.moveToTerminal(diff.id, createTerminalDiffCard(diff.id, "expired", diff.sourceToolId));
+  }
+
+  /**
+   * BR-DE-STATE-010 / BR-DE-STATE-011: Accept open-file diff.
+   * Content is already in LogicalState (PM applied). Confirm without writing DiskState.
+   * File remains dirty until user saves explicitly.
+   */
+  function acceptDiff(diff: PendingDiff) {
+    const actor = diffStore.getDiffActor(diff.id);
+    actor?.send({ type: "ACCEPT_REQUESTED" });
+    actor?.send({ type: "ACCEPT_CONFIRMED" });
+    diffStore.moveToTerminal(diff.id, createTerminalDiffCard(diff.id, "accepted", diff.sourceToolId));
+  }
+
+  /**
+   * BR-DE-STATE-002: Reject open-file diff.
+   * Reverts LogicalState by re-applying inverse replace (newText → originalText).
+   */
+  function rejectDiff(diff: PendingDiff): boolean {
+    const actor = diffStore.getDiffActor(diff.id);
+    actor?.send({ type: "REJECT_REQUESTED" });
+    const tabId = edTabs.find((t) => t.filePath === diff.filePath)?.id;
+    const result = tabId
+      ? edApplyDiffReplaceInTab(tabId, diff.newText, diff.originalText)
+      : { success: false as const, reason: "text-not-found" as const };
+    if (!result.success) {
+      actor?.send({ type: "FAILED" });
+      diffStore.moveToTerminal(diff.id, createTerminalDiffCard(diff.id, "error", diff.sourceToolId));
+      return false;
+    }
+    actor?.send({ type: "TERMINAL_RECORDED" });
+    diffStore.moveToTerminal(diff.id, createTerminalDiffCard(diff.id, "rejected", diff.sourceToolId));
+    return true;
+  }
+
+  function handleAcceptDiffById(diffId: string) {
+    const diff = diffStore.getDiff(diffId);
+    if (diff && diff.status === "preapplied") acceptDiff(diff);
+  }
+
+  function handleRejectDiffById(diffId: string) {
+    const diff = diffStore.getDiff(diffId);
+    if (diff && diff.status === "preapplied") rejectDiff(diff);
+  }
+
+  // ── Agent / Chat handlers (Issue 5-A / 5-B / 5-C) ────────────
+  async function handleSendAgentMessage(userContent: string) {
+    await chatSendMessage(
+      userContent,
+      providerConfig.provider,
+      providerConfig.model,
+      providerConfig.apiKeyConfigured,
+      {
+        activeFilePath: activeFilePath ?? undefined,
+        activeFileMode,
+        activeFileDirty,
+        pendingDiffCount: activeFilePendingDiffCount,
+        activeFileLogicalStateSnapshot,
+        activeFileSnapshotTruncated,
+        documentStructure:
+          activeFilePath && activeFileMode === "editable"
+            ? (extractDocumentStructure(activeFilePath) ?? undefined)
+            : undefined,
+      },
+    );
+  }
+
+  function handleCancelMessage() {
+    chatCancelMessage();
+    for (const diff of allDiffs) {
+      if (diff.status === "preapplied") {
+        rejectDiff(diff);
+      }
     }
   }
 
-  function handleRejectPendingDiff() {
-    if (!pendingDiff) return;
-    setTerminalDiffCards((cards) => [rejectPendingDiff(pendingDiff), ...cards]);
-    setPendingDiff(null);
+  function handleRetryMessage() {
+    chatRetryMessage();
   }
 
+  // ── Diff card data mapping (all live + terminal) ───────────────
+  // BR-DE-UI-003: sourceToolId is included so MessageList can group DiffCards
+  // by AgentMessage.toolCallId === diff.sourceToolId for inline rendering.
+  const diffEntries = [
+    ...allDiffs.map((d) => ({
+      diffId: d.id,
+      filePath: d.filePath,
+      originalText: d.originalText,
+      newText: d.newText,
+      status: d.status as PendingDiffStatus,
+      sourceToolId: d.sourceToolId,
+    })),
+    ...terminalDiffCards.map((tc) => ({
+      diffId: tc.diffId,
+      filePath: "",
+      originalText: "",
+      newText: tc.message,
+      status: tc.status as PendingDiffStatus,
+      sourceToolId: tc.sourceToolId,
+    })),
+  ];
+
+  // BR-DE-UI-003: batch accept/reject all pending/preapplied diffs.
+  // Each diff is processed independently; failure of one does not block others.
+  function handleAcceptAllDiffs() {
+    for (const d of allDiffs) {
+      if (d.status === "pending" || d.status === "preapplied") {
+        acceptDiff(d);
+      }
+    }
+  }
+
+  function handleRejectAllDiffs() {
+    for (const d of allDiffs) {
+      if (d.status === "pending" || d.status === "preapplied") {
+        rejectDiff(d);
+      }
+    }
+  }
+
+  // chatMessages is already AgentMessage[] from useChatActor (chatMachine type)
+
+  // ── Tab list mapping ───────────────────────────────────────────
+  const editorTabs = edTabs.map((t) => ({
+    id: t.id,
+    filePath: t.filePath,
+    dirty: t.dirty,
+  }));
+
+  // ── Render ─────────────────────────────────────────────────────
   return (
-    <main className="app-shell">
-      <aside className="panel">
-        <h1>Binder Mini</h1>
-        <button className="primary-action" type="button" onClick={handleOpenWorkspace}>
-          Open Workspace
-        </button>
-        {workspaceSnapshot ? (
-          <button type="button" onClick={handleCloseWorkspace}>
-            Close Workspace
-          </button>
-        ) : null}
-        {workspaceSnapshot ? (
-          <div className="workspace-summary">
-            <strong>{workspaceSnapshot.workspace.displayName}</strong>
-            <span>{workspaceSnapshot.workspace.rootPath}</span>
-          </div>
-        ) : (
-          <p className="muted">No workspace open</p>
-        )}
-        {recentWorkspaces.length ? (
-          <section className="recent-workspaces" aria-label="Recent Workspaces">
-            <strong>Recent</strong>
-            <ul>
-              {recentWorkspaces.map((workspace) => (
-                <li key={workspace.rootPath}>
-                  <span>{workspace.displayName}</span>
-                  <small>{workspace.rootPath}</small>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
-        {workspaceError ? <p className="error-text">{workspaceError}</p> : null}
-        {workspaceSnapshot ? (
-          <div className="workspace-create">
-            <input
-              aria-label="New Workspace item path"
-              placeholder="notes/new.md"
-              value={newWorkspaceItemPath}
-              onChange={(event) => setNewWorkspaceItemPath(event.target.value)}
-            />
-            <div>
-              <button type="button" onClick={() => void handleCreateWorkspaceItem("file")}>
-                File
-              </button>
-              <button type="button" onClick={() => void handleCreateWorkspaceItem("folder")}>
-                Folder
-              </button>
-            </div>
-          </div>
-        ) : null}
-        {workspaceSnapshot ? (
-          <div className="workspace-structure">
-            <input
-              aria-label="Workspace structure source path"
-              placeholder="source path"
-              value={structureSourcePath}
-              onChange={(event) => setStructureSourcePath(event.target.value)}
-            />
-            <input
-              aria-label="Workspace structure target path or new name"
-              placeholder="target path or new name"
-              value={structureTargetPath}
-              onChange={(event) => setStructureTargetPath(event.target.value)}
-            />
-            <div>
-              <button type="button" onClick={() => void handleRenameWorkspaceItem()}>
-                Rename
-              </button>
-              <button type="button" onClick={() => void handleMoveWorkspaceItem()}>
-                Move
-              </button>
-              <button type="button" onClick={() => void handleDeleteWorkspaceItem()}>
-                Delete
-              </button>
-            </div>
-          </div>
-        ) : null}
-        {workspaceSnapshot ? (
-          <WorkspaceEntryList entries={workspaceSnapshot.entries} onOpenFile={handleOpenFile} />
-        ) : null}
-      </aside>
-      <section className="editor-surface">
-        {editorSession.tabs.length > 0 ? (
-          <div className="editor-tabs" role="tablist" aria-label="Open editor files">
-            {editorSession.tabs.map((tab) => (
-              <div
-                key={tab.id}
-                className={`editor-tab-item ${
-                  tab.id === editorSession.activeTabId ? "active" : ""
-                }`}
-              >
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={tab.id === editorSession.activeTabId}
-                  className="editor-tab-select"
-                  onClick={() =>
-                    setEditorSession((session) => activateEditorTab(session, tab.id))
-                  }
-                >
-                  <span>{tab.filePath}</span>
-                  {tab.dirty ? <strong>*</strong> : null}
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Close ${tab.filePath}`}
-                  className="editor-tab-close"
-                  onClick={() => handleCloseEditorTab(tab.id)}
-                >
-                  x
-                </button>
-              </div>
-            ))}
-          </div>
-        ) : null}
-        <div className="editor-toolbar">
-          <div>
-            <strong>{editorDocument?.filePath ?? "Editor"}</strong>
-            {editorDocument ? <span>{editorDocument.mode}</span> : null}
-          </div>
-          <button
-            className="primary-action"
-            type="button"
-            disabled={
-              !editorDocument ||
-              !canSaveEditorDocument(editorDocument) ||
-              editorError?.startsWith("Markdown conversion failed:")
+    <>
+      <MainLayout
+        leftPanel={
+          <FileTreePanel
+            workspaceState={workspacePanelState()}
+            displayName={workspaceSnapshot?.workspace.displayName}
+            rootPath={workspaceSnapshot?.workspace.rootPath}
+            entries={effectiveEntries}
+            recentWorkspaces={recentWorkspaces}
+            errorMessage={wsValue === "Error"
+              ? (wsActor.getSnapshot().context.errorMessage ?? "加载失败")
+              : undefined}
+            conflictError={conflictError}
+            searchQuery={searchQuery}
+            searchResults={searchResults}
+            onSearchQueryChange={(q) =>
+              handleSearchQueryChange(q, workspaceSnapshot?.workspace.rootPath ?? null, isActive)
             }
-            onClick={() => void handleSaveFile()}
-          >
-            Save
-          </button>
-        </div>
-        {editorError ? <p className="error-text">{editorError}</p> : null}
-        {editorDocument && usesMarkdownEditor(editorDocument) ? (
-          <MarkdownEditor
-            content={editorDocument.content}
-            readOnly={editorDocument.mode === "readonly"}
+            onSearchResultClick={(filePath) => void handleOpenFile(filePath)}
+            onOpenWorkspace={handleOpenWorkspace}
+            onCloseWorkspace={handleCloseWorkspaceWithGuard}
+            onFileClick={(relativePath) => void handleOpenFile(relativePath)}
+            onRetry={handleOpenWorkspace}
+            onCreateFile={(parentPath, name) =>
+              handleCreateWorkspaceItem("file", parentPath, name)
+            }
+            onCreateFolder={(parentPath, name) =>
+              handleCreateWorkspaceItem("folder", parentPath, name)
+            }
+            onRename={handleRenameWorkspaceItem}
+            onDelete={handleDeleteWorkspaceItem}
+          />
+        }
+        centerPanel={
+          <EditorColumn
+            stateName={editorStateName()}
+            tabs={editorTabs}
+            activeTabId={edActiveTabId}
+            content={activeContent}
+            fileType={activeFileType}
+            appliedRange={activePreappliedDiff?.appliedRange ?? null}
+            errorMessage={edErrorMessage}
+            preappliedTabIds={preappliedTabIds}
+            onTabClick={(tabId) => edSwitchTab(tabId)}
+            onTabDiscard={handleTabDiscard}
+            onTabSaveAndClose={(tabId) => void handleTabSaveAndClose(tabId)}
+            onTabRejectAndClose={handleTabRejectAndClose}
+            onTabAcceptAndClose={(tabId) => void handleTabAcceptAndClose(tabId)}
             onChange={handleEditorChange}
-            onError={setEditorError}
+            onSave={() => void handleSaveFile()}
+            onAcceptAllAndSave={() => void handleAcceptAllAndSave()}
           />
-        ) : editorDocument ? (
-          <textarea
-            className="editor-textarea"
-            readOnly={editorDocument.mode === "readonly"}
-            value={editorDocument.content}
-            onChange={(event) => handleEditorChange(event.target.value)}
+        }
+        rightPanel={
+          <ChatPanel
+            stateName={chatStateName()}
+            messages={chatMessages}
+            streamingContent={chatStreamingContent}
+            inputReferences={[]}
+            diffs={diffEntries}
+            providerConfig={providerConfig}
+            errorMessage={chatErrorMessage}
+            onSend={(content) => void handleSendAgentMessage(content)}
+            onCancel={handleCancelMessage}
+            onRetry={handleRetryMessage}
+            onProviderChange={handleProviderChange}
+            onModelChange={handleModelChange}
+            onSaveApiKey={(key) => {
+              // BR-AG-SEC-001 / BR-AG-PERSIST-002: API key sent to Rust backend only;
+              // raw key never stored in React state and persists in backend app config.
+              void saveApiKey(providerConfig.provider, key).then(() =>
+                isApiKeyConfigured(providerConfig.provider).then((configured) =>
+                  setProviderConfig((c) => ({ ...c, apiKeyConfigured: configured })),
+                ),
+              );
+            }}
+            onRemoveReference={() => {}}
+            onAcceptDiff={(diffId) => handleAcceptDiffById(diffId)}
+            onRejectDiff={(diffId) => handleRejectDiffById(diffId)}
+            onAcceptAll={handleAcceptAllDiffs}
+            onRejectAll={handleRejectAllDiffs}
           />
-        ) : (
-          <p className="muted">Open a file from the Workspace.</p>
-        )}
-        {editorStatus ? (
-          <footer className="editor-status-bar">
-            <span>{editorStatus.filePath}</span>
-            <span>{editorStatus.stateLabel}</span>
-            <span>{editorStatus.characterCount} chars</span>
-            <span>{editorStatus.wordCount} words</span>
-          </footer>
-        ) : null}
-        {pendingDiff ? (
-          <section className="diff-card">
-            <header>
-              <strong>PendingDiff</strong>
-              <span>{pendingDiff.filePath}</span>
-            </header>
-            <p>{pendingDiff.summary}</p>
-            <div className="diff-preview">
-              <div>
-                <strong>Original</strong>
-                <pre>{pendingDiff.originalText}</pre>
-              </div>
-              <div>
-                <strong>Proposed</strong>
-                <pre>{pendingDiff.proposedText}</pre>
-              </div>
-            </div>
-            <div className="diff-actions">
-              <button
-                className="primary-action"
-                type="button"
-                onClick={() => void handleAcceptPendingDiff()}
-              >
-                Accept
-              </button>
-              <button type="button" onClick={handleRejectPendingDiff}>
-                Reject
-              </button>
-            </div>
-          </section>
-        ) : null}
-        {terminalDiffCards.length > 0 ? (
-          <div className="terminal-diff-list">
-            {terminalDiffCards.map((card) => (
-              <div className="terminal-diff-card" key={`${card.diffId}-${card.status}`}>
-                <strong>{card.status}</strong>
-                <span>{card.message}</span>
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </section>
-      <aside className="panel">
-        <h2>Agent</h2>
-        <label className="field">
-          <span>Provider</span>
-          <select
-            value={providerConfig.provider}
-            onChange={(event) =>
-              setProviderConfig({
-                ...providerConfig,
-                provider: event.target.value as ProviderConfig["provider"],
-              })
-            }
-          >
-            <option value="openai">OpenAI</option>
-            <option value="anthropic">Anthropic</option>
-            <option value="deepseek">DeepSeek</option>
-          </select>
-        </label>
-        <label className="field">
-          <span>Model</span>
-          <input
-            value={providerConfig.model}
-            onChange={(event) =>
-              setProviderConfig({ ...providerConfig, model: event.target.value })
-            }
-            placeholder="model name"
-          />
-        </label>
-        <label className="checkbox-field">
-          <input
-            checked={providerConfig.apiKeyConfigured}
-            type="checkbox"
-            onChange={(event) =>
-              setProviderConfig({
-                ...providerConfig,
-                apiKeyConfigured: event.target.checked,
-              })
-            }
-          />
-          <span>API key configured</span>
-        </label>
-        <div className="agent-messages">
-          {agentMessages.map((message) => (
-            <div className="message-row" key={message.id}>
-              <strong>
-                {message.role}
-                {message.streamStatus ? ` · ${message.streamStatus}` : ""}
-              </strong>
-              <p>{message.content}</p>
-            </div>
-          ))}
-        </div>
-        <textarea
-          className="agent-input"
-          value={agentInput}
-          onChange={(event) => setAgentInput(event.target.value)}
-          placeholder="Ask Agent to inspect the workspace"
-        />
-        {agentError ? <p className="error-text">{agentError}</p> : null}
-        <button
-          className="primary-action"
-          type="button"
-          disabled={agentStreaming}
-          onClick={() => void handleSendAgentMessage()}
-        >
-          {agentStreaming ? "Streaming" : "Send"}
-        </button>
-        <button
-          type="button"
-          onClick={handleCreatePendingDiff}
-          disabled={!editorDocument || editorDocument.mode !== "editable"}
-        >
-          Propose edit
-        </button>
-        <div className="tool-actions">
-          <button
-            type="button"
-            onClick={() => void runAgentTool("read_file")}
-            disabled={!editorDocument}
-          >
-            Read active file
-          </button>
-          <button type="button" onClick={() => void runAgentTool("list_files")}>
-            List files
-          </button>
-        </div>
-        <label className="field">
-          <span>Search</span>
-          <input
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="query"
-          />
-        </label>
-        <button type="button" onClick={() => void runAgentTool("search_files")}>
-          Search files
-        </button>
-        <div className="tool-list">
-          {toolExecutions.map((execution) => (
-            <div className="tool-row" key={execution.id}>
-              <span>{execution.toolName}</span>
-              <small>{execution.status}</small>
-              {execution.resultSummary ? <p>{execution.resultSummary}</p> : null}
-              {execution.errorMessage ? <p>{execution.errorMessage}</p> : null}
-            </div>
-          ))}
-        </div>
-        <small>{machines.length} state machines registered</small>
-      </aside>
-    </main>
-  );
-}
+        }
+      />
 
-function WorkspaceEntryList({
-  entries,
-  onOpenFile,
-}: {
-  entries: WorkspaceEntry[];
-  onOpenFile: (relativePath: string) => void | Promise<void>;
-}) {
-  return (
-    <ul className="file-list">
-      {entries.map((entry) => (
-        <li key={entry.relativePath}>
-          <div className="file-row">
-            <span aria-hidden="true">{entry.kind === "directory" ? "dir" : "file"}</span>
-            {entry.kind === "file" ? (
-              <button
-                className="file-button"
-                type="button"
-                onClick={() => void onOpenFile(entry.relativePath)}
-              >
-                {entry.name}
-              </button>
-            ) : (
-              <span>{entry.name}</span>
-            )}
-          </div>
-          {entry.children?.length ? (
-            <WorkspaceEntryList entries={entry.children} onOpenFile={onOpenFile} />
-          ) : null}
-        </li>
-      ))}
-    </ul>
+      {showCloseGuard && (
+        <WorkspaceCloseGuardDialog
+          onCancel={handleCancelClose}
+          onConfirm={handleForceCloseWorkspace}
+        />
+      )}
+
+      {showPreappliedSaveDialog && (
+        <PreappliedSaveDialog
+          onCancel={() => setShowPreappliedSaveDialog(false)}
+          onAcceptAllAndSave={() => void handleAcceptAllAndSave()}
+        />
+      )}
+
+      {preappliedCloseTabId && (
+        <PreappliedTabCloseDialog
+          filePath={edTabs.find((t) => t.id === preappliedCloseTabId)?.filePath ?? ""}
+          onCancelClose={() => setPreappliedCloseTabId(null)}
+          onRejectAndClose={() => handleTabRejectAndClose(preappliedCloseTabId)}
+          onAcceptAndClose={() => handleTabAcceptAndClose(preappliedCloseTabId)}
+        />
+      )}
+    </>
   );
 }

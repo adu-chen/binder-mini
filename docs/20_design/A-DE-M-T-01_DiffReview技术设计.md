@@ -17,7 +17,7 @@
 
 | 功能 | 实现状态 | 承接规则 |
 |------|----------|----------|
-| PendingDiff 数据结构（id、filePath、originalText、proposedText、status、summary）——Phase 9 接口重写：proposedText 改为 newText（精确替换片段），见 §3.1 | 已实现（Phase 5）→Phase 9 重写 | BR-DE-STATE-001 |
+| PendingDiff 数据结构（id、filePath、originalText、newText、status、summary）——Phase 9 接口已重写为 newText（精确替换片段），见 §3.1 | 已实现（Phase 5）→Phase 9 重写 | BR-DE-STATE-001 |
 | createPendingDiffFromCurrentEditor | 已实现 | BR-DE-STATE-001 |
 | canExecutePendingDiff（Phase 13-A：status === "pending"（未打开文件）；Phase 13-B 后扩展为 preapplied（已打开文件）均可执行）| 已实现 | BR-DE-STATE-001 |
 | acceptPendingDiff（校验 originalText + 写入） | 已实现 | BR-DE-PERSIST-001 |
@@ -259,7 +259,7 @@ reject 执行逻辑（LogicalState 回滚，DE→ED 事件协议）：
 → [用户接受] ACCEPT_REQUESTED → accepting → 移除 appliedRange 绿增 Decoration → ACCEPT_CONFIRMED → terminal(accepted)
    [LogicalState 不变（已含 newText）；DiskState 不写；文件保持 dirty]
 → [用户拒绝] REJECT_REQUESTED → rejecting → 精确回滚 appliedRange（newText → originalText）→ TERMINAL_RECORDED → terminal(rejected)
-→ [syncPendingDiffsWithDocument 检测 originalText 不匹配] EXPIRE_REQUESTED → expired → TERMINAL_RECORDED → terminal(expired)
+→ [syncPendingDiffsWithDocument 检测 appliedRange 位置 newText 不匹配] EXPIRE_REQUESTED → expired → TERMINAL_RECORDED → terminal(expired)
 ```
 
 ### 5.2 未打开文件链路
@@ -284,7 +284,7 @@ DIFF_CREATED → pending
 
 ## 5-A. Cmd+S 触发绿增固化协议（Phase 13-E）
 
-当用户在 Editor 执行 Cmd+S（保存）且当前文件存在 preapplied diff 时，必须弹出确认对话框（对齐 binder-core BR-DE-DIFF-005）：
+当用户在 Editor 执行 Cmd+S（保存）且 ActiveFile 存在 preapplied diff 时，必须弹出确认对话框（对齐 binder-core BR-DE-DIFF-005）：
 
 ```
 确认对话框文案：
@@ -293,7 +293,7 @@ DIFF_CREATED → pending
 ```
 
 确认流程：
-1. 用户点击"确认保存"：对当前文件所有 preapplied diff 批量执行 ACCEPT（移除绿增效果），全部 accept 确认后执行磁盘写入（LogicalState → DiskState，editorMachine SAVE）。
+1. 用户点击"确认保存"：对 ActiveFile 所有 preapplied diff 批量执行 ACCEPT（移除绿增效果），全部 accept 确认后执行磁盘写入（LogicalState → DiskState，editorMachine SAVE）。
 2. 用户点击"取消"：终止本次保存，不修改任何 diff 状态，dirty 标记保持。
 3. 不影响其他文件的 diff。
 
@@ -317,10 +317,10 @@ DIFF_CREATED → pending
 
 ### 5-B.3 Cmd+S 触发批量绿增固化的原子性
 
-Cmd+S 触发的"固化当前文件全部 preapplied diff"属于批量操作，同样遵循跳过继续原则：
+Cmd+S 触发的"固化 ActiveFile 全部 preapplied diff"属于批量操作，同样遵循跳过继续原则：
 
 - 若有部分 diff accept 失败，已成功 accept 的 diff 保持 terminal 状态，失败的回 error 状态。
-- DiskState 写入（LogicalState → DiskState）只在**当前文件所有待处理 diff 均 accept 成功后**执行；若有失败，不写入 DiskState（等待用户处理失败卡片后重试）。
+- DiskState 写入（LogicalState → DiskState）只在 **ActiveFile 所有待处理 diff 均 accept 成功后**执行；若有失败，不写入 DiskState（等待用户处理失败卡片后重试）。
 
 ## 6. 持久化协议（Phase 13-D）
 
@@ -360,15 +360,17 @@ CREATE TABLE terminal_diff_cards (
 3. `accepting` / `rejecting` 为内存临时状态，不写入数据库；崩溃恢复时不存在此类 DB 记录。`preapplied` 状态的记录恢复时降级为 `pending`（LogicalState 跨会话不可恢复，回退到未预应用状态，等待文件重新打开后触发继承流）。
 4. Workspace 关闭时，所有非终态 diff 转 `expired` 并写入数据库。
 
-## 7. 候选规则（Phase 13 进入实现前升级为正式规则）
+## 7. 规则落地状态
+
+Phase 13 关键候选规则已升级为 `SYS-C-T-01` 正式 RULE。进入代码实现前必须映射正式 RULE，不得继续以候选规则驱动实现。
 
 | 候选规则 ID | 候选链路 | 来源需求 | 规则意图 |
 |-------------|----------|----------|----------|
-| DE-CAND-DATA-001 | DE-CREATE-DIFF | REQ-DE-006 | PendingDiff 必须携带 sourceToolId，可追溯到生成它的 ToolExecution。 |
-| DE-CAND-STATE-004 | DE-ACCEPT-DIFF | REQ-DE-002 | Accept 前必须校验当前磁盘内容与 originalText 一致；不一致时转 expired，不执行写入。 |
-| DE-CAND-STATE-005 | DE-CREATE-DIFF、DE-ACCEPT-DIFF | REQ-DE-001 | preapplied 状态只适用于已打开文件链路（diff 创建时立即修改 LogicalState）；未打开文件保持 pending 直到用户决策；Accept（已打开文件）不写 DiskState。 |
-| DE-CAND-PERSIST-002 | DE-ACCEPT-DIFF、DE-REJECT-DIFF | REQ-DE-007 | PendingDiff 状态必须持久化到 workspace.db，应用重启后可恢复或转 expired。 |
-| DE-CAND-STATE-006 | DE-EXPIRE-DIFF | REQ-DE-007 | Workspace 关闭时，所有非终态 PendingDiff 必须转 expired 并写入持久化存储。 |
+| ~~DE-CAND-DATA-001~~ | DE-CREATE-DIFF | REQ-DE-006 | 已升级为 BR-DE-DATA-001：PendingDiff 必须携带 sourceToolId，可追溯到生成它的 ToolExecution。 |
+| ~~DE-CAND-STATE-004~~ | DE-ACCEPT-DIFF | REQ-DE-002 | 已升级为 BR-DE-STATE-004：closed-file accept 前必须校验当前 DiskState hash 与 baseRevision 一致；不一致时转 expired，不执行写入。 |
+| ~~DE-CAND-STATE-005~~ | DE-CREATE-DIFF、DE-ACCEPT-DIFF | REQ-DE-001 | 已升级为 BR-DE-STATE-005：preapplied 状态只适用于已打开文件链路；Accept（已打开文件）不写 DiskState。 |
+| ~~DE-CAND-PERSIST-002~~ | DE-ACCEPT-DIFF、DE-REJECT-DIFF | REQ-DE-007 | 已升级为 BR-DE-PERSIST-002：PendingDiff 状态必须持久化到 workspace.db，应用重启后可恢复或转 expired。 |
+| ~~DE-CAND-STATE-006~~ | DE-EXPIRE-DIFF | REQ-DE-007 | 已升级为 BR-DE-STATE-013：Workspace 关闭时，所有非终态 PendingDiff 必须转 expired 并写入持久化存储。 |
 
 ## 8. 已注册正式规则引用
 
@@ -378,6 +380,12 @@ CREATE TABLE terminal_diff_cards (
 | BR-DE-PERSIST-001 | DE-ACCEPT-DIFF | 只有接受后才能写文件。 |
 | BR-DE-STATE-002 | DE-REJECT-DIFF | 拒绝后候选修改进入不可执行终态，文件不变。 |
 | BR-DE-STATE-003 | DE-EXPIRE-DIFF | 内容变化或定位失效后 PendingDiff 进入 expired，不可继续接受或拒绝。 |
+| BR-DE-DATA-001 | DE-CREATE-DIFF | PendingDiff 创建时必须携带 sourceToolId、baseRevision、createdAt、effectivePath。 |
+| BR-DE-STATE-004 | DE-ACCEPT-DIFF | closed-file accept 写入前必须校验 DiskState hash 与 baseRevision。 |
+| BR-DE-STATE-005 | DE-CREATE-DIFF、DE-ACCEPT-DIFF | preapplied 只适用于 open-file 链路；accept open-file 不写 DiskState。 |
+| BR-DE-PERSIST-002 | DE-ACCEPT-DIFF、DE-REJECT-DIFF、DE-EXPIRE-DIFF | PendingDiff 状态必须持久化并支持重启恢复。 |
+| BR-DE-STATE-013 | DE-EXPIRE-DIFF | WORKSPACE_CLOSED 时所有非终态 PendingDiff 转 expired。 |
+| BR-DE-STATE-014 | DE-ACCEPT-DIFF、DE-REJECT-DIFF | 关闭含 preapplied diff 的 EditorTab 前必须批量 accept/reject 或取消关闭。 |
 
 ## 9. 验收标准
 
@@ -393,7 +401,7 @@ Phase 13-B/C（状态机升级）完成标准：
 2. preapplied → reject 触发 appliedRange 精确回滚（newText → originalText，revision token 校验）。
 3. preapplied → reject 在 revision 不匹配时（用户已编辑 diff 区域）进入 error 终态，不发送 ROLLBACK_LOGICAL_STATE，不强制覆盖 LogicalState。
 4. 未打开文件链路不进入 preapplied；继承流（文件打开）以 DiskState hash 一致为前提。
-5. 统一失效规则：syncPendingDiffsWithDocument 检测 originalText 不匹配（LogicalState 变化）→ EXPIRE_REQUESTED；非 diff 区域编辑不触发 expire。
+5. 统一失效规则：syncPendingDiffsWithDocument 检测 appliedRange 位置 newText 不匹配（LogicalState 变化）→ EXPIRE_REQUESTED；非 diff 区域编辑不触发 expire。
 6. Accept（已打开文件）不写 DiskState；编辑器文件保持 dirty。
 7. 编辑器内只显示绿增（newText 字符精确绿色高亮），不显示红删；完整 diff 视图只在聊天流中（calculateHybridDiff(originalText, newText)）。
 8. Cmd+S 时有 preapplied diff 必须弹出确认对话框。
@@ -415,5 +423,6 @@ Phase 13-D（持久化）完成标准：
 | 2026-05-23 | v1.2 | §1 canExecutePendingDiff 补充 Phase 分阶段说明；PendingDiffStatus 类型注释说明 accepting/rejecting 为内存临时态不写库；§6.2 崩溃恢复步骤 3 修正：accepting/rejecting 不存在于 DB，preapplied 恢复时降级为 mounted_pending。 |
 | 2026-05-24 | v1.3 | 全面引入文档三态模型（DiskState/LogicalState/DisplayState）；消除 mounted_pending（无此中间状态，diff 创建即 LOGICAL_STATE_APPLIED → preapplied）；新增 §3.4 三态模型表；§3.1 PendingDiffStatus 完整重写（移除 mounted_pending，按路径拆分 pending/accepted/rejected 语义）；§4.2 状态机重画（LOGICAL_STATE_APPLIED、INHERIT_APPLIED 事件；移除 MOUNT_TO_EDITOR/PREAPPLY_CONTENT）；§4.3 约束更新（Accept 不写磁盘）；§4.5 统一失效规则（LogicalState 变化规则，覆盖 diff-on-diff 场景）；§5.1/5.2 链路重写（含继承流）；§5-A/5-B.3 Cmd+S 语义修正（写盘仍为 Cmd+S，accept 不写盘）；§6.2 恢复降级 preapplied→pending；§7 DE-CAND-STATE-005 更新；§9 B/C 验收标准重写 |
 | 2026-05-24 | v1.4 | §3.1 PendingDiff 新增 effectivePath 字段（D-01："open-file"/"closed-file" 路由 accept 语义；INHERIT_APPLIED 时从 closed-file 升级为 open-file）；baseRevision 改为必填（非可选）；§4.2 状态机增加 LOGICAL_STATE_APPLIED_FAILED → error 路径；INHERIT_APPLIED 注释补充 effectivePath 升级语义；§4.3 约束 3/4/5/6 重写（effectivePath 路由、LOGICAL_STATE_APPLIED_FAILED 处置、INHERIT_APPLIED 所有权）；§4.4 回滚协议重写（D-02：revision 不匹配时进入 error 终态而非 conflict 子状态，明确 ROLLBACK_LOGICAL_STATE 事件名和 DE→ED 协议）；§5.2 INHERIT_APPLIED 触发方明确为 editorMachine，补充完整触发流程；§5-A Cmd+S 对话框文案更新（D-07：表述用户编辑 + AI 修改）；§9 B/C 验收标准 3 更新（conflict/expired → error 终态） |
-| 2026-05-24 | v1.5 | 精确编辑架构重写（D-10）：§3.1 PendingDiff 字段重写（proposedText→newText：精确替换片段；originalText 语义改为"待替换精确原文字符串，主定位器 IR-RANGE-005"；新增 appliedRange{from,to} 字段由 Editor Runtime 记录 PM 位置；anchor 由可选改为 DiffAnchorRef 设计完善）；§3.3 DiffAnchorRef 完整重写（startBlockId/endBlockId/startOffset/endOffset/occurrenceIndex/paraIndex）；§3.4 三态模型操作描述改为字符精确替换（非全文替换）；§4.4 回滚协议改为 appliedRange 精确回滚（newText → originalText），ROLLBACK_LOGICAL_STATE 事件携带 appliedRange；§4.5 失效检测改为 syncPendingDiffsWithDocument 事务监听（doc.textBetween 检查）；§5.1 已打开链路图重写（originalText+newText+anchor? 入参，appliedRange 记录）；§6.1 DB schema 更新（proposed_text→new_text，新增 anchor_json）；§9 验收标准新增条目 10（originalText 找不到转 error） |
-| 2026-05-24 | v1.6 | 审计修复：§3.1 PendingDiffStatus preapplied 补充 Phase 13-B 注释（CL-01）；§3.3 DiffAnchorRef 字段注释精确化：startBlockId/startOffset 来源标为"模型输入"，endBlockId/endOffset 标为"Editor Runtime 计算"（CL-02）；§3.3 新增工具调用参数→DiffAnchorRef 映射表（G-03） |
+| 2026-05-24 | v1.5 | 精确编辑架构重写（D-10）：§3.1 PendingDiff 字段重写为 newText 精确替换片段；originalText 语义改为"待替换精确原文字符串，主定位器 IR-RANGE-005"；新增 appliedRange{from,to} 字段由 Editor Runtime 记录 PM 位置；anchor 由可选改为 DiffAnchorRef 设计完善；§3.3 DiffAnchorRef 完整重写；§3.4 三态模型操作描述改为字符精确替换；§4.4 回滚协议改为 appliedRange 精确回滚（newText → originalText）；§4.5 失效检测改为 syncPendingDiffsWithDocument 事务监听；§5.1 已打开链路图重写；§6.1 DB schema 更新为 new_text + anchor_json；§9 验收标准新增 originalText 找不到转 error |
+| 2026-05-24 | v1.6 | 审计修复：正文中旧替换字段残留统一改为 newText；Apply-first 失效检测统一为 appliedRange 位置 newText 不匹配；保存批量处理表述统一使用 ActiveFile 术语 |
+| 2026-05-24 | v1.7 | 审计修复：§3.1 PendingDiffStatus preapplied 补充 Phase 13-B 注释（CL-01）；§3.3 DiffAnchorRef 字段注释精确化：startBlockId/startOffset 来源标为"模型输入"，endBlockId/endOffset 标为"Editor Runtime 计算"（CL-02）；§3.3 新增工具调用参数→DiffAnchorRef 映射表（G-03）；§7 候选规则表更新为正式 RULE 落地状态 |

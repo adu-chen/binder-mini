@@ -130,7 +130,7 @@ baseRevision 用于 PendingDiff 中快速检测文件内容是否在 diff 生成
 - 算法：SHA-256 of 文件内容字节
 - 编码：hex string（64 字符）
 - 计算时机：createPendingDiffFromCurrentEditor 调用时，从磁盘读取文件内容后计算
-- 用途：shouldExpirePendingDiff 检测时，重新计算当前文件 hash，与 baseRevision 比对；不一致时自动 expire
+- 用途：shouldExpirePendingDiff 检测时，重新计算目标文件 DiskState hash，与 baseRevision 比对；不一致时自动 expire
 
 注：baseRevision 是内部检测字段，不暴露给前端 UI。
 

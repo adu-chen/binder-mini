@@ -37,8 +37,8 @@ Editor 需求必须满足以下原则：
 | REQ-ED-002 | 保存文件 | 用户可以保存当前 editable 文件。 | 保存只写回当前打开文件，成功后 dirty=false，磁盘内容与编辑器内容一致。 |
 | REQ-ED-003 | 多标签编辑 | 用户可以同时打开多个 Workspace 文件。 | 每个标签保留独立路径、内容快照、dirty 状态和状态机实例或等价状态。 |
 | REQ-ED-004 | dirty 标记与关闭保护 | 用户修改内容后标签进入 dirty；关闭 dirty 标签或切换 Workspace 前必须处理未保存状态。 | 未确认时不得丢弃 dirty 内容；非 dirty 标签可直接关闭。 |
-| REQ-ED-005 | 状态栏 | Editor 展示当前文件、保存状态和基础统计信息。 | 当前标签切换或内容变化后状态栏同步更新。 |
-| REQ-ED-006 | TipTap/Markdown 编辑 | md 文件使用 TipTap/ProseMirror 承载编辑体验，并能稳定转换为 Markdown 文本保存。 | Markdown 读写往返不破坏主流程文本语义；txt 可继续按纯文本路径保存。 |
+| REQ-ED-005 | 状态栏 | Editor 展示 ActiveFile、保存状态和基础统计信息。 | ActiveFile 切换或内容变化后状态栏同步更新。 |
+| REQ-ED-006 | TipTap/Markdown 编辑 | md 文件使用 TipTap/ProseMirror 承载编辑体验，并能稳定转换为 Markdown 文本保存；txt 与 md 共用同一 TipTap 实例，走纯文本序列化路径。 | Markdown 读写往返不破坏主流程文本语义；txt 不退回 textarea 或独立 runtime。 |
 | REQ-ED-007 | BlockId 定位 | Editor 在文件打开时为可定位文档块生成稳定 BlockId；校验 AI 工具输出的 BlockId 是否有效。 | BlockId 不由模型提供执行权威；缺失或冲突时由 Editor Runtime 修复或拒绝执行；文件打开即可用，不依赖保存动作。 |
 | REQ-ED-008 | DiffDecoration 绿增 | Editor 在 pending diff 进入 preapplied 状态时，在已验证 anchor 范围内渲染绿色新增（绿增）效果；不渲染红色删除。 | 绿增只消费已验证 anchor（blockId 或 lineRange）；anchor 无效时不渲染并通知 DE；聊天流显示完整红删绿增；终态后绿增自动移除。 |
 
@@ -201,12 +201,12 @@ status: active
 
 | step_id | actor | input | action | output | next_step | exception |
 |---------|-------|-------|--------|--------|-----------|-----------|
-| S01 | DE | PendingDiff（filePath、diffId、anchor：blockId 或 lineRange）| diff 进入 preapplied（LogicalState 已修改为 proposedText），通知 ED 渲染绿增效果 | diffId + anchor | S02 | — |
+| S01 | DE | PendingDiff（filePath、diffId、appliedRange、DiffAnchorRef）| diff 进入 preapplied（LogicalState 已在 originalText 位置精确替换为 newText），通知 ED 渲染绿增效果 | diffId + appliedRange | S02 | — |
 | S02 | ED | diffId + anchor | 校验 anchor 对应的 ProseMirror 节点在当前文档中是否存在 | 校验结果 | S03（有效）| ERR-01（anchor 无效 → 不渲染，通知 DE 失效此 diff）|
 | S03 | ED | 有效 anchor 范围 | DiffDecorationExtension 在对应节点范围内渲染绿增效果（ProseMirror Decoration，只显示新增内容绿色覆盖，不显示红删）| 绿增效果可见 | DONE | — |
 | S04 | DE | 终态通知（diffId → accepted/rejected/expired）| DE 通知 ED 移除对应绿增 Decoration | — | ED 移除绿增，恢复正常编辑态 | — |
 
-注：编辑器内永远不显示红色删除效果；完整红删绿增 diff 视图只在聊天消息流中展示。Accept（已打开文件）只是移除绿增视觉效果，LogicalState 不变（已是 proposedText），DiskState 不触碰。
+注：编辑器内永远不显示红色删除效果；完整红删绿增 diff 视图只在聊天消息流中展示。Accept（已打开文件）只是移除绿增视觉效果，LogicalState 不变（已含 newText），DiskState 不触碰。
 
 ## 8. 已决策约束
 
@@ -226,9 +226,9 @@ status: active
 | 方向 | 触发场景 | 数据边界 | 约束 |
 |------|----------|----------|------|
 | ED → WS | 打开文件时请求文件内容 | filePath（WS 边界内）→ 文件内容 | 路径必须在 workspaceRoot 内；WS 未 active 时 ED 不可打开文件 |
-| ED → DE | 当前文件有 pending diff 时展示绿增 | diffId、filePath → DiffAnchorRef | ED 只消费 DE 的 preapplied diff 展示绿增效果；不直接修改 diff 状态 |
+| ED → DE | ActiveFile 有 pending diff 时展示绿增 | diffId、filePath → DiffAnchorRef | ED 只消费 DE 的 preapplied diff 展示绿增效果；不直接修改 diff 状态 |
 | WS → ED | WS 关闭或切换时通知 ED | workspaceMachine 状态变化 → ED 关闭所有标签 | dirty 标签必须先处理再允许 WS 切换（反向依赖） |
-| DE → ED | diff 创建时立即推送 proposedText（已打开文件）| CONTENT_UPDATE 事件（diffId、proposedText）→ ED LogicalState | ED 立即将 LogicalState 修改为 proposedText，diff 进入 preapplied；绿增效果展示；用户接受时仅移除绿增，LogicalState 不变，不写磁盘；用户拒绝时触发 LogicalState 回滚 |
+| DE → ED | diff 创建时立即应用 newText（已打开文件）| LOGICAL_STATE_APPLIED 事件（diffId、originalText、newText、appliedRange）→ ED LogicalState | ED 在 originalText 位置精确替换为 newText，diff 进入 preapplied；绿增效果展示；用户接受时仅移除绿增，LogicalState 不变，不写磁盘；用户拒绝时触发 LogicalState 回滚 |
 | DE → ED | preapplied diff 被拒绝时回滚编辑器缓冲区 | diffId、originalText → 编辑器缓冲区内容 | reject 时 ED 必须回滚到 originalText；不得只记录终态而留游离内容 |
 
 ## 变更记录
@@ -241,3 +241,4 @@ status: active
 | 2026-05-23 | v1.3 | REQ-ED-007/008 从 blocked/P2 升为 active/P1（当前阶段即应实现）；§7 补充 BlockId 生成流程表（ED-BLOCKID-FLOW）和 DiffDecoration 渲染流程表（ED-DIFFDECORATION-FLOW），替换"前置...完成后实现"占位描述 |
 | 2026-05-23 | v1.4 | §9 拆分 DE→ED 交互为两行：mounted_pending 推送 proposedText（CONTENT_UPDATE）+ reject 回滚；§8 补充 txt/TipTap 实例决策约束（txt 与 md 同实例，BlockId 同样适用） |
 | 2026-05-24 | v1.5 | REQ-ED-008 名称"绿审态"改为"绿增"；ED-DIFFDECORATION-FLOW 修订：触发点从 mounted_pending 改为 preapplied（LogicalState 已修改）；绿增只显示新增不显示红删；Accept 只移除绿增不写磁盘；§9 DE→ED 交互更新（diff 创建即推送 proposedText；accept 不写磁盘） |
+| 2026-05-24 | v1.6 | 审计修复：REQ-ED-006 明确 txt 共用 TipTap 纯文本序列化路径；REQ-ED-008 和跨模块交互将 proposedText 旧口径替换为 originalText + newText + appliedRange 精确替换链路；ActiveFile 术语替换旧"当前文件"表述 |

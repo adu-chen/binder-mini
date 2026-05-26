@@ -4,8 +4,8 @@
 负责模块：   AG
 文档职责：   Prompt Runtime 数据结构规范、system prompt 组装规则和安全约束
 上游约束：   CORE-C-P-01、AG-M-D-01、AG-M-T-01、AG-M-P-01、SYS-C-T-01
-直接承接：   Tauri send_chat_message command、Phase 12 Issue Trace
-使用边界：   定义 Prompt Runtime 组装规则和安全边界，不写 Rust/TS 实现代码
+直接承接：   Tauri chat_stream/send_chat_message 适配层、Provider Payload 组装、工具暴露 guard
+使用边界：   定义 Prompt Runtime 组装规则和安全边界，不写 Rust/TS 实现代码，不表达实现完成度
 变更要求：   system prompt 结构、allowedTools 规则或 forbidden fields 变更时必须同步本文
 ---
 
@@ -17,7 +17,7 @@
 
 ## 2. PromptRuntime 数据结构
 
-（承接 AG-M-T-01 §3.6，本文只做组装规则声明）
+（承接 AG-M-T-01 §3.7，本文只做组装规则声明）
 
 ```typescript
 interface PromptRuntime {
@@ -29,9 +29,10 @@ interface PromptRuntime {
     activeFileMode?: "editable" | "readonly";   // 当前活跃文件编辑模式（M-01）
     activeFileDirty?: boolean;                  // 是否有未保存的用户编辑（M-01）
     pendingDiffCount?: number;                  // 当前活跃文件待审 PendingDiff 数量（M-01）
+    activeFileLogicalStateSnapshot?: string;     // ActiveFile 当前 LogicalState 内容快照（M-06）
     documentStructure?: string;                 // 仅 .md 文件：标题层级摘要（≤1500字符，每次请求刷新）（M-05）
   };
-  inputReferences?: InputReference[];  // 用户引用（Phase 12）
+  inputReferences?: InputReference[];  // 用户引用
   historySlice?: AgentMessage[];       // 裁剪后的对话历史
 }
 ```
@@ -55,10 +56,32 @@ L0 在每次请求时组装，包含以下四组信息：
 **② Editor 状态（每次请求从 editorMachine 读取，客观事实）**
 
 - `activeFileMode`：`editable` 或 `readonly`——模型据此判断是否可发起编辑工具调用
-- `activeFileDirty`：当前文件是否有未保存的用户编辑——模型据此感知 LogicalState 与 DiskState 的差异
-- `pendingDiffCount`：当前文件待审 PendingDiff 数量——模型据此感知是否已有待处理建议
+- `activeFileDirty`：ActiveFile 是否有未保存的用户编辑——模型据此感知 LogicalState 与 DiskState 的差异
+- `pendingDiffCount`：ActiveFile 待审 PendingDiff 数量——模型据此感知是否已有待处理建议
+- `activeFileLogicalStateSnapshot`：ActiveFile 当前 LogicalState 内容快照——模型生成 `edit_current_editor_document.originalText` 的上下文源；该快照包含未保存用户编辑和已 preapplied 的 AI 修改，不等同于 DiskState
 
-**③ 文档结构摘要（仅 .md 活跃文件，每次请求刷新）**
+**③ ActiveFile LogicalStateSnapshot（当前打开文件编辑上下文）**
+
+当存在 editable ActiveFile 时，PromptRuntime 必须注入当前编辑器 LogicalState 的内容快照，作为模型生成 `originalText` 的依据：
+
+```xml
+<active_file_logical_state file="{activeFilePath}" dirty="{activeFileDirty}">
+<![CDATA[
+# hello world
+
+当前编辑器中的未保存内容...
+]]>
+</active_file_logical_state>
+```
+
+约束：
+- 快照来源必须是 ED Runtime 的 LogicalState，不得从 `read_file`、FTS5 索引或磁盘 DiskState 重读替代
+- 当 ActiveFile dirty 或存在 preapplied diff 时，快照必须反映当前编辑器内容，而不是最近一次保存内容
+- 快照只提供当前打开文件编辑上下文，不声明写权威；真正写入仍必须经 `edit_current_editor_document` → Diff Review
+- 大文件可按安全上限截断，但截断必须显式标记；若截断导致无法提供目标片段，模型应请求更具体的选区/InputReference 或返回无法定位，而不是猜测
+- **Markdown 语法字符（如 `#`、`**`、`*`、`-` 等）在 CDATA 中出现，仅供模型理解文档结构与语义（标题层级、字体样式、段落类型等）；模型生成 `edit_current_editor_document.originalText` 时，必须提取 ProseMirror 文本节点纯文本，不得将语法字符纳入 `originalText`**
+
+**④ 文档结构摘要（仅 .md 活跃文件，每次请求刷新）**
 
 当 activeFilePath 为 `.md` 文件时，注入当前 LogicalState 的标题层级结构（不注入正文内容）：
 
@@ -74,16 +97,18 @@ L0 在每次请求时组装，包含以下四组信息：
 
 约束：
 - 字符上限 1500；超出时只保留标题层级，去除细节
-- 不注入正文文本（正文需模型显式调用 `read_file` 获取）
-- **注入 blockId**（ED-CAND-DATA-002 确认后启用；blockId 由 Editor Runtime 的 BlockIdExtension 生成，会话级有效）；模型使用 blockId 作为 `edit_current_editor_document` 的 `startBlockId` 参数辅助定位
+- document_structure 只承担结构定位辅助；正文编辑上下文由 `active_file_logical_state` 提供，`read_file` 只代表磁盘视角
+- **注入 blockId**（BR-ED-DATA-002 约束；BlockId 由 Editor Runtime 的 BlockIdExtension 生成，会话级有效）；模型使用 blockId 作为 `edit_current_editor_document` 的 `startBlockId` 参数辅助定位
 - 非 .md 文件不注入此块（避免对代码文件、纯文本等无意义注入）
 
-**④ 工具使用系统约束声明**
+**⑤ 工具使用系统约束声明**
 
 告知模型系统层的硬性边界（描述系统约束事实，不做意图分类或判断）：
 
-- `edit_current_editor_document`：提供 `originalText`（文档中待替换的精确原文）和 `newText`（替换内容）；可附带 `startBlockId`（来自本 system prompt `<document_structure>` 的 block-id 属性）和 `startOffset`（块内字符偏移）辅助定位；`activeFileMode` 为 `readonly` 时不可用；不得全量替换文件（不得省略 `originalText`）
-- `update_file`：只能操作当前未在 Editor 中打开的文件；同样使用 `originalText` + `newText` 精确替换
+- `edit_current_editor_document`：提供 `originalText`（**文档中待替换的纯文本，不含 Markdown 语法字符**）和 `newText`（替换内容）；可附带 `startBlockId`（来自本 system prompt `<document_structure>` 的 block-id 属性）和 `startOffset`（块内纯文本字符偏移，不含 Markdown 语法字符）辅助定位；`activeFileMode` 为 `readonly` 时不可用；不得全量替换文件（不得省略 `originalText`）
+- `<active_file_logical_state>` CDATA 中的 Markdown 语法字符（`#`、`**`、`*`、`-` 等）仅供模型理解文档结构与语义（标题层级、字体样式、段落类型）；提取 `originalText` 时须剔除语法字符，只保留文本节点纯文本。示例：heading `# 系统设计` → `originalText = "系统设计"`；bold `**关键词**` → `originalText = "关键词"`
+- 对 ActiveFile 的编辑必须基于 `<active_file_logical_state>` 中的 LogicalStateSnapshot 提取 originalText；`read_file` 结果不得替代该快照作为当前打开文档的编辑依据
+- `update_file`：只能操作当前未在 Editor 中打开的文件；调用前**必须先通过 `read_file` 读取目标文件内容**，从中提取 `originalText`（纯文本，不含 Markdown 语法字符）；不得在未读取文件的情况下猜测 `originalText`
 - 当不确定用户是否意图修改文件时，优先通过对话确认，再发起写工具调用
 
 示例组装结果：
@@ -93,6 +118,14 @@ You are a coding assistant for the Binder workspace editor.
 Current workspace: {workspaceName}
 Active file: design.md [editable] [dirty] [2 pending diffs]
 
+<active_file_logical_state file="design.md" dirty="true">
+<![CDATA[
+# 系统设计
+
+当前状态机包含...
+]]>
+</active_file_logical_state>
+
 <document_structure file="design.md">
   <heading level="1" block-id="uuid-a1b2">系统设计</heading>
   <heading level="2" block-id="uuid-c3d4">状态模型</heading>
@@ -101,12 +134,14 @@ Active file: design.md [editable] [dirty] [2 pending diffs]
 </document_structure>
 
 Tool constraints:
-- edit_current_editor_document: provide originalText (exact text to replace) and newText (replacement). Optionally provide startBlockId from <document_structure> above and startOffset (character offset in block text, excluding Markdown syntax chars). Do NOT replace entire file. Unavailable when file is readonly.
-- update_file: only for files not currently open in the editor. Same originalText+newText interface.
-- When uncertain about user's edit intent, confirm via conversation before calling write tools.
+- edit_current_editor_document: provide originalText (plain text ONLY — strip Markdown syntax chars such as #, **, *, - before using as originalText; <active_file_logical_state> Markdown is for structure/style context only), newText (replacement plain text), and summary. Optionally provide startBlockId (from <document_structure> block-id) and startOffset (plain-text char offset in block, no Markdown chars). Do NOT replace entire file. Unavailable when readonly.
+  Example: heading "# 系统设计" → originalText="系统设计" (not "# 系统设计")
+- Derive originalText from <active_file_logical_state> by reading text content and stripping Markdown syntax. Do NOT use read_file or DiskState as the edit source for the active file.
+- update_file: only for files NOT open in the editor. MUST call read_file first to obtain content; derive originalText from that content (plain text, no Markdown syntax chars). Do not guess originalText.
+- When uncertain about edit intent, confirm via conversation first.
 ```
 
-### L1：InputReference 上下文层（Phase 12，可选）
+### L1：InputReference 上下文层（可选）
 
 当用户请求中包含 InputReference 时，在 L0 之后注入只读引用内容：
 
@@ -120,7 +155,7 @@ Tool constraints:
 </input_references>
 ```
 
-注：InputReference 只注入只读上下文，不声明执行权威（详见 AG-M-P-03）。
+注：InputReference 是结构化内容载体，只通过 PromptRuntime 注入，不声明执行权威（详见 AG-M-P-03）。
 
 ### L2：消息历史层
 
@@ -134,13 +169,13 @@ Tool constraints:
 
 ### 4.1 已注册工具全集
 
-Phase 10-11 范围内实现的工具：`read_file`、`list_files`、`search_files`（只读工具，已有）、`edit_current_editor_document`（已有，Phase 9 接口重写为 originalText+newText）、`create_file`、`create_folder`、`rename_file`、`move_file`、`delete_file`、`update_file`（Phase 11）。
+已注册工具全集索引：`read_file`、`list_files`、`search_files`、`edit_current_editor_document`、`create_file`、`create_folder`、`rename_file`、`move_file`、`delete_file`、`update_file`。
 
 ### 4.2 过滤策略（场景动态）
 
 allowedTools 采用**场景动态过滤**策略，在后端组装 PromptRuntime 时根据当前 Workspace 状态和操作上下文决定（对齐 binder-core，REQ-AG-007）：
 
-决策依据（Phase 12 实现，Phase 10-11 暂用默认集）：
+决策依据：
 
 | 场景 | allowedTools 规则 |
 |------|-----------------|
@@ -152,7 +187,7 @@ allowedTools 采用**场景动态过滤**策略，在后端组装 PromptRuntime 
 过滤不变量：
 - allowedTools 只在后端确定，前端不干预工具可见性
 - 模型不可调用未在 allowedTools 中的工具（Rust guard 校验 tool call name）
-- Phase 10-11 阶段未实现场景动态时，以"所有已实现工具"为默认集
+- 未注册或未实现的工具不得进入 allowedTools；默认集也必须由运行时已注册工具和当前上下文交集计算得出
 
 ### 4.3 Provider Payload 中的工具暴露
 
@@ -172,7 +207,7 @@ Provider 实际收到的 tools 必须严格等于 allowedTools 指定的工具�
 
 ### 5.1 裁剪策略
 
-当前采用简单策略（Phase 10-12 范围）：
+当前采用简单策略：
 - 保留最近 N 条消息（N 为可配置参数，默认建议 20 条）
 - ToolExecution 结果超过字符限制时裁剪内容部分，保留 summary
 
@@ -199,7 +234,7 @@ Provider 实际收到的 tools 必须严格等于 allowedTools 指定的工具�
 
 | 项目 | 规则 |
 |------|------|
-| 单条文件引用 | 最大 8000 字符（Phase 12 可调整）|
+| 单条文件引用 | 最大 8000 字符 |
 | 全部引用合计 | 最大 20000 字符 |
 | 超出部分 | 追加"[内容已截断]"，保留原始 size 字段统计 |
 
@@ -234,3 +269,7 @@ Rust guard 必须在组装 payload 时扫描并移除上述字段（如果模型
 | 2026-05-23 | v1.1 | §4 allowedTools 过滤策略从全局白名单改为场景动态（对齐 binder-core REQ-AG-007）；补充场景决策表和过滤不变量 |
 | 2026-05-24 | v1.2 | §2 workspaceContext 扩展（activeFileMode/activeFileDirty/pendingDiffCount/documentStructure）；§3 L0 层重构为四组信息（基础指令、Editor 状态注入、.md 文档结构摘要、工具系统约束声明）；§5.3 新增文件切换上下文标记协议（ACTIVE_FILE_CHANGED 合成系统消息） |
 | 2026-05-24 | v1.3 | 精确编辑架构对齐（D-09/D-02）：§3 L0 ③ document_structure 约束改为**注入 blockId**（ED-CAND-DATA-002 确认后启用；block-id 属性供模型作为 startBlockId 参数）；document_structure XML 示例补充 block-id 属性和 paragraph 节点；④ 工具约束声明重写（移除 edit_document_block、update edit_current_editor_document 为 originalText+newText 接口，不得全量替换）；§3 L0 示例 system prompt 更新（block-id 属性，新工具约束文案）；§4.1 已注册工具全集移除 edit_document_block；§7 forbidden fields 更新（blockId 说明精确化，区分模型自报 vs document_structure 注入）|
+| 2026-05-24 | v1.4 | 审计修复：正文中 BlockId 门禁由候选规则口径改为 BR-ED-DATA-002；InputReference 表述统一为结构化内容载体；ActiveFile 术语替换旧"当前文件"描述 |
+| 2026-05-25 | v1.5 | 治理修复：移除阶段性实现判断，allowedTools 改为运行时注册工具与上下文交集；明确本文只定义 PromptRuntime 契约，不表达实现完成度 |
+| 2026-05-25 | v1.6 | 补齐 ActiveFile LogicalStateSnapshot 注入契约：新增 active_file_logical_state L0 块，明确 read_file/DiskState 不得替代当前编辑器逻辑态作为 edit_current_editor_document 上下文源 |
+| 2026-05-26 | v1.7 | originalText 语义决策落地：明确 active_file_logical_state CDATA 中 Markdown 语法字符（#/\*\*/\*/- 等）仅供模型理解文档结构与语义（标题层级、字体样式、段落类型），不得纳入 originalText；originalText 必须为 ProseMirror 文本节点纯文本；同步更新 §3 ⑤ 约束声明正文和示例 system prompt 文案；update_file 补充"先 read_file"约束 |

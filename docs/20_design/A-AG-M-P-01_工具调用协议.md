@@ -4,8 +4,8 @@
 负责模块：   AG
 文档职责：   Agent 工具调用协议与工具矩阵
 上游约束：   CORE-C-P-01、AG-M-D-01、AG-M-T-01、SYS-C-T-01
-直接承接：   agentService、ToolExecution 实现、Phase 10-12 Issue Trace
-使用边界：   定义工具分类、调用协议、边界约束和结果回流，不写运行时代码
+直接承接：   agentService、ToolExecution、Provider Adapter、PromptRuntime allowedTools
+使用边界：   定义工具分类、调用协议、边界约束和结果回流，不写运行时代码，不表达实现完成度
 变更要求：   工具增删、输入输出变更、执行路由变更时必须同步本文和 SYS-C-T-01
 ---
 
@@ -18,25 +18,25 @@
 | 类别 | 工具 | 特征 |
 |------|------|------|
 | 只读工具 | read_file、list_files、search_files | 不改变 Workspace 内容 |
-| 网络检索工具 | web_search | 调用外部搜索 API，不受 Workspace 边界约束（Phase 11）|
-| 结构工具 | create_file、create_folder、rename_file、move_file、delete_file | 改变文件树结构（Phase 11）|
+| 网络检索工具 | web_search | 调用外部搜索 API，不受 Workspace 边界约束 |
+| 结构工具 | create_file、create_folder、rename_file、move_file、delete_file | 改变文件树结构 |
 | 内容写工具 | edit_current_editor_document、update_file | 改变文件内容，必须先生成 PendingDiff |
 
 ## 3. 工具矩阵
 
-| 工具 | 输入 | 输出 | 执行方式 | 实现阶段 | 风险等级 |
+| 工具 | 输入 | 输出 | 执行方式 | 规则入口 | 风险等级 |
 |------|------|------|----------|----------|----------|
-| read_file | workspacePath、filePath | 文件内容 | 直接执行 | Phase 9（已有）| 低 |
-| list_files | workspacePath、dirPath? | 文件/目录列表 | 直接执行 | Phase 9（已有）| 低 |
-| search_files | workspacePath、query | 搜索结果列表 | 直接执行 | Phase 9（已有）| 低 |
-| web_search | query | 搜索结果列表（title、url、snippet）| 直接执行；不受 Workspace 边界约束；调用 DuckDuckGo/免费搜索 API（无需 key）| Phase 11 | 低 |
-| create_file | workspacePath、filePath、content | 创建结果 | 直接执行 | Phase 11 | 中 |
-| create_folder | workspacePath、folderPath | 创建结果 | 直接执行 | Phase 11 | 中 |
-| rename_file | workspacePath、oldPath、newPath | 重命名结果 / PathConflict | 冲突返回确认态 | Phase 11 | 中 |
-| move_file | workspacePath、fromPath、toPath | 移动结果 / PathConflict | 冲突返回确认态 | Phase 11 | 中 |
-| delete_file | workspacePath、filePath | 删除结果 | 识别到明确删除意图后直接执行 | Phase 11 | 高 |
-| edit_current_editor_document | originalText（精确原文）、newText（替换内容）、summary、startBlockId?、startOffset?、occurrenceIndex? | PendingDiff 创建结果 | 走 Diff Review 链路；字符精确替换 originalText → newText；由 Editor Runtime 通过 PM 文本搜索定位 | Phase 9（已有）| 中 |
-| update_file | workspacePath、filePath、originalText（精确原文）、newText（替换内容）、summary、occurrenceIndex? | PendingDiff 创建结果 | 走 Diff Review 链路；字符精确替换；不得用于已打开文档 | Phase 11 | 中 |
+| read_file | workspacePath、filePath | 文件内容 | 直接执行 | BR-AG-DATA-001、X-CONST-001 | 低 |
+| list_files | workspacePath、dirPath? | 文件/目录列表 | 直接执行 | BR-AG-DATA-001、X-CONST-001 | 低 |
+| search_files | workspacePath、query | 搜索结果列表 | 直接执行 | BR-AG-DATA-001、X-CONST-001 | 低 |
+| web_search | query | 搜索结果列表（title、url、snippet）| 直接执行；不受 Workspace 边界约束；调用 DuckDuckGo/免费搜索 API（无需 key）| REQ-AG-003、BR-AG-DATA-002 | 低 |
+| create_file | workspacePath、filePath、content | 创建结果 | 直接执行 | BR-AG-TOOL-001、BR-WS-DATA-004 | 中 |
+| create_folder | workspacePath、folderPath | 创建结果 | 直接执行 | BR-AG-TOOL-001、BR-WS-DATA-004 | 中 |
+| rename_file | workspacePath、oldPath、newPath | 重命名结果 / PathConflict | 冲突返回确认态 | BR-AG-TOOL-001、BR-WS-DATA-004 | 中 |
+| move_file | workspacePath、fromPath、toPath | 移动结果 / PathConflict | 冲突返回确认态 | BR-AG-TOOL-001、BR-WS-DATA-004 | 中 |
+| delete_file | workspacePath、filePath | 删除结果 | 识别到明确删除意图后直接执行 | BR-AG-TOOL-001、BR-WS-DATA-001 | 高 |
+| edit_current_editor_document | originalText（精确原文）、newText（替换内容）、summary、startBlockId?、startOffset?、occurrenceIndex? | PendingDiff 创建结果 | 走 Diff Review 链路；字符精确替换 originalText → newText；由 Editor Runtime 通过 PM 文本搜索定位 | BR-AG-DATA-003、BR-DE-STATE-001 | 中 |
+| update_file | workspacePath、filePath、originalText（精确原文）、newText（替换内容）、summary、occurrenceIndex? | PendingDiff 创建结果 | 走 Diff Review 链路；字符精确替换；不得用于已打开文档 | BR-AG-DATA-003、BR-DE-STATE-001 | 中 |
 
 ## 4. 执行协议
 
@@ -51,27 +51,35 @@
 
 ### 4.2 内容写工具协议
 
-edit_current_editor_document 和 update_file 必须满足（承接 AG-M-T-01 §5 候选规则 AG-CAND-DATA-002）：
+edit_current_editor_document 和 update_file 必须满足（承接 BR-DE-STATE-001、BR-AG-DATA-003、BR-AG-DATA-004）：
 1. 不直接写磁盘
 2. 必须先生成 PendingDiff（经 DE 模块路由）
 3. PendingDiff 由用户接受后才能写入文件
 
 **edit_current_editor_document 特殊约束**：
 - 执行目标以当前编辑器 ActiveFile 为权威（由运行时注入，模型不得自报 filePath）
+- 执行上下文以 ED LogicalStateSnapshot 为权威；LogicalStateSnapshot 必须来自当前活动 EditorTab 的 LogicalState，包含未保存用户编辑和已 preapplied 的 AI 修改
+- `read_file`、`search_files`、FTS5 索引和 DiskState 只提供磁盘/工作区视角，不得替代 LogicalStateSnapshot 作为 ActiveFile 编辑上下文
 - 模型可提供：
-  - `originalText`（必填）：文档中待替换的精确原文字符串；系统通过 ProseMirror 文本搜索定位（IR-RANGE-005 原则：originalText 文本匹配为主定位器）
-  - `newText`（必填）：替换内容
+  - `originalText`（必填）：文档中待替换的精确原文字符串；系统通过 ProseMirror 文本搜索定位（IR-RANGE-005 原则：originalText 文本匹配为主定位器）。**`originalText` 必须是 ProseMirror 文本节点的纯文本内容，不得包含 Markdown 语法字符**（如 `#`、`**`、`*`、`-`、`` ` `` 等块级/行内语法标记）。`<active_file_logical_state>` 中的 Markdown 语法字符仅用于向模型传达文档的结构与语义（标题层级、段落类型、字体样式等），提取 `originalText` 时须剔除这些字符。示例：
+    - Markdown heading `# 欢迎` → `originalText = "欢迎"` （不含 `#`）
+    - Markdown bold `**重要提示**` → `originalText = "重要提示"` （不含 `**`）
+    - Markdown list item `- 第一条` → `originalText = "第一条"` （不含 `- `）
+  - `newText`（必填）：替换内容（纯文本，不含 Markdown 语法字符；Markdown 格式由 Editor 层渲染，不由模型直接写入语法字符）
   - `summary`（必填）：人类可读描述
   - `startBlockId`（可选）：目标文本所在块的 BlockId（来自 L0 `<document_structure>` 注入），辅助定位
-  - `startOffset`（可选）：目标文本在块内的字符起始偏移（基于块 textContent，不含 Markdown 语法字符）
+  - `startOffset`（可选）：目标文本在块内的字符起始偏移（基于块 textContent 纯文本，不含 Markdown 语法字符）
   - `occurrenceIndex`（可选，默认 0）：当 originalText 在文档中出现多次时指定第几次出现（0-based）
 - 不得全量替换活跃文件；系统只替换与 originalText 精确匹配的位置
 - originalText 在文档中找不到时，返回结构化错误，diff 进入 error；不静默 fallback 为全量替换
+- 无法取得 ActiveFile LogicalStateSnapshot 时，工具必须返回结构化错误，不得退化为读取磁盘并继续编辑
 
 **update_file 使用限制**：
 - 只能用于当前未打开的 Workspace 文件
 - 不得用于 ActiveFile、dirty 文档、已打开但非 active 的文档
 - 同样使用 originalText + newText 字符精确替换；不使用全量替换
+- **调用 `update_file` 前，必须先通过 `read_file` 读取目标文件内容**；`originalText` 必须来自对目标文件实际内容的读取，不得由模型凭记忆推断或从对话历史猜测；未先读取文件内容便生成 `originalText` 将导致 text-not-found 错误，diff 进入 error 终态
+- `originalText` 同样为纯文本（与 `edit_current_editor_document` 规则一致），不含 Markdown 语法字符
 
 ### 4.3 删除工具协议
 
@@ -159,6 +167,7 @@ binder-mini 的 SSE 协议基于 Tauri 事件（chat-stream-event），工具结
 | WS | 结构工具通过 Workspace command 执行；路径边界由 WS 校验 |
 | DE | 内容写工具输出 PendingDiff，不直接写盘；originalText + newText 由 DE 转交 ED 执行字符精确替换 |
 | ED | edit_current_editor_document 的执行目标（ActiveFile）和 PM 文本定位由 ED Runtime 负责；模型输出 originalText+newText，ED 执行字符精确替换并记录 appliedRange |
+| ED | edit_current_editor_document 的上下文源由 ED Runtime 提供 LogicalStateSnapshot；AG/Provider 不得用 DiskState/read_file 结果替代当前编辑器逻辑态 |
 | chatMachine | 工具调用状态通过 toolCalling 状态管理；结果通过 SSE tool_result 事件回流 |
 
 ## 变更记录
@@ -170,3 +179,6 @@ binder-mini 的 SSE 协议基于 Tauri 事件（chat-stream-event），工具结
 | 2026-05-24 | v1.2 | §4.5 新增并行工具调用顺序化协议：多工具调用进入 pendingToolExecutions 队列，按返回顺序依次执行，不并行；部分失败转 error 不继续；UI 标注队列进度 |
 | 2026-05-24 | v1.3 | §2/§3 新增 edit_document_block（块级编辑工具，Phase 13-B，BlockId 稳定性策略就绪后激活）；§4.6 新增 edit_document_block 协议（blockId 来源约束、Rust 校验、激活条件）；§5 ToolResult data 从 unknown 改为结构化类型（ReadFileData / ListFilesData / SearchFilesData / StructureToolData / ContentWriteData，含 diffId 信息展示注记）；§6 边界约束矩阵补充 edit_document_block 相关行 |
 | 2026-05-24 | v1.4 | 精确编辑架构重写（D-01/D-02）：§2 移除 edit_document_block（定位能力折叠进 edit_current_editor_document anchor 字段，不作为独立工具）；§3 edit_current_editor_document 输入从 proposedText 改为 originalText+newText+startBlockId?+startOffset?+occurrenceIndex?（字符精确替换，不再全量替换）；update_file 同步改为 originalText+newText；§4.2 内容写工具协议重写（IR-RANGE-005 原则：originalText 为主定位器；新增 originalText 找不到时的错误处理）；移除 §4.6 edit_document_block 协议；§6 边界约束矩阵移除 edit_document_block 行，新增 originalText 找不到行；§7 ED 协作描述更新 |
+| 2026-05-25 | v1.5 | 补齐 ActiveFile 编辑上下文协议：edit_current_editor_document 必须以 ED LogicalStateSnapshot 为上下文源，read_file/DiskState 不得替代当前编辑器逻辑态；无法取得快照时工具结构化拒绝 |
+| 2026-05-25 | v1.5 | 治理修复：工具矩阵移除实现阶段列，改为规则入口；正文移除阶段性能力判断，明确本文只定义协议和边界，不表达实现完成度 |
+| 2026-05-26 | v1.6 | §4.2 originalText 语义决策落地：明确 originalText 为 ProseMirror 纯文本，不含 Markdown 语法字符（#/\*\*/\*/- 等）；active\_file\_logical\_state Markdown 仅供结构/语义理解（标题层级、字体样式、段落类型），提取 originalText 时须剔除；同步 newText 纯文本约束；startOffset 说明对齐；update_file 补充"先 read_file"前置约束 |

@@ -4,8 +4,8 @@
 负责模块：   AG
 文档职责：   chatMachine 状态机设计——Agent 对话会话全链路状态驱动
 上游约束：   CORE-C-P-01、AG-M-D-01（REQ-AG-008/009）、AG-M-T-01、AG-M-P-01、AG-M-P-02
-直接承接：   Phase 10 Issue Trace、agentMachine 实现迁移为 chatMachine
-使用边界：   定义 chatMachine 状态、事件、Context 和门禁约束，不写 XState 运行时代码
+直接承接：   chatMachine 实现、ChatInput 状态驱动、Provider Adapter、PromptRuntime
+使用边界：   定义 chatMachine 状态、事件、Context 和门禁约束，不写 XState 运行时代码，不表达实现完成度
 变更要求：   新增状态、事件或 Context 字段必须同步 AG-M-T-01 和测试矩阵
 ---
 
@@ -149,7 +149,7 @@ WORKSPACE_CLOSED 在任意状态下均有效：
 - 若当前处于 `ready` / `error`：直接转 `noWorkspace`。
 - `noWorkspace` 时忽略。
 
-转入 `noWorkspace` 时的处理顺序（对齐 REQ-AG-010、AG-CAND-PERSIST-001）：
+转入 `noWorkspace` 时的处理顺序（对齐 REQ-AG-010、BR-AG-PERSIST-001）：
 
 1. **先持久化**：将当前 `messages`（完整的已结算消息；streamingContent 中的 partial 内容丢弃）持久化到当前 Workspace 的 `workspace.db` chat_messages 表；持久化失败时记录错误日志，不阻断后续清理。
 2. **再清空内存**：清空 `messages`、`streamingContent`、`inputReferences`、`activeToolExecution`、`pendingToolExecutions`。
@@ -177,9 +177,9 @@ ACTIVE_FILE_CHANGED 在 `ready`、`sending`、`streaming`、`toolCalling`、`err
 3. **不触发任何状态转移**，不清空历史，不压缩内容
 4. chatMachine 不维护 activeFilePath；L0 层的 workspaceContext 在每次 SEND_MESSAGE 时从 editorMachine 实时读取当前值
 
-## 7. 与现有 agentMachine 的关系
+## 7. 与旧 agentMachine 路径的关系
 
-当前代码中的 `agentMachine` 覆盖了部分状态（idle / validatingProvider / sending / streaming / toolCalling / error），Phase 10 实现时：
+如代码库仍存在旧 `agentMachine` 路径，必须迁移为 `chatMachine`：
 
 1. 将 `agentMachine` 重命名/迁移为 `chatMachine`。
 2. 扩展新增 `noWorkspace` 和 `cancelling` 状态。
@@ -202,7 +202,9 @@ ACTIVE_FILE_CHANGED 在 `ready`、`sending`、`streaming`、`toolCalling`、`err
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
+| 2026-05-25 | v1.4 | 治理修复：移除阶段性实现描述，改为旧路径迁移约束；明确本文只定义状态机契约，不表达实现完成度 |
 | 2026-05-23 | v1.0 | 初始版本，定义 chatMachine 完整状态机（对齐 binder-core 状态机驱动原则，补全 REQ-AG-008/009）|
 | 2026-05-23 | v1.1 | §2 状态图：补充 sending/streaming/toolCalling → noWorkspace 直接边（WORKSPACE_CLOSED）；删除错误的 error → ready WORKSPACE_CLOSED 边；§6.3 说明修正为"直接 → noWorkspace，不经 cancelling" |
 | 2026-05-24 | v1.2 | §2 状态图 cancelling→error 事件改为 ABORT_FAILED（区分正常 CANCEL_DONE）；§4 新增 ABORT_FAILED 事件描述；§5 Context 新增 pendingToolExecutions 队列（D-03 顺序化并行工具调用），补充 RETRY partial message 截断语义（规则 5）；§6.3 WORKSPACE_CLOSED 处理改为先持久化后清空内存（D-04，对齐 REQ-AG-010），补充 WORKSPACE_OPENED 读取历史逻辑 |
+| 2026-05-24 | v1.3 | 冻结前清理：§6.3 将 AG-CAND-PERSIST-001 旧引用替换为正式规则 BR-AG-PERSIST-001 |
 | 2026-05-24 | v1.3 | §4 新增 ACTIVE_FILE_CHANGED 事件（editorMachine → chatMachine）；§5 Context 规则 6 补充文件切换合成系统消息语义；§6.6 新增 ACTIVE_FILE_CHANGED 处理协议（追加合成消息、不触发状态转移、chatMachine 不维护 activeFilePath）|
