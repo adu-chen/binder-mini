@@ -21,7 +21,7 @@ import type {
  * type: RB
  * chain: AG-SEND-MESSAGE, AG-TOOL-CALL
  * rules: BR-AG-STATE-001, BR-AG-OBS-001, BR-AG-DATA-001, BR-CORE-GOV-001
- * boundary: in=ProviderConfig, InputReference, and ToolExecution | out=Agent request readiness and readonly reference assertions | delegate=provider validation, ToolExecution recording, InputReference guard
+ * boundary: in=ProviderConfig, InputReference, and ToolExecution | out=Agent request readiness and structured reference assertions | delegate=provider validation, ToolExecution recording, InputReference guard
  * term_ref: TERM-AG-002
  */
 export function canSendAgentMessage(provider: ProviderConfig): boolean {
@@ -38,8 +38,17 @@ export function normalizeProviderConfig(
   };
 }
 
-export function isReadonlyInputReference(reference: InputReference): boolean {
-  return reference.mode === "readonly";
+export function isStructuredInputReference(reference: InputReference): boolean {
+  if (!reference.id || !reference.displayName || !reference.createdAt) return false;
+  if (reference.kind === "text") {
+    return reference.content.length > 0;
+  }
+  return reference.kind === "url" && /^https?:\/\//.test(reference.url);
+}
+
+export function inputReferenceLabel(reference: InputReference): string {
+  if (reference.kind === "url") return reference.displayName || reference.url;
+  return reference.displayName || reference.content.slice(0, 40);
 }
 
 export function createPendingToolExecution(toolName: ToolName): ToolExecution {

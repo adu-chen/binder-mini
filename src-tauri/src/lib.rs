@@ -1267,6 +1267,25 @@ struct PromptRuntimeContext {
     /// Pre-built XML string from extractDocumentStructure() on the frontend.
     /// Injected as L0 ④ in system prompt for .md files (AG-M-P-02 §3 ④).
     document_structure: Option<String>,
+    input_references: Vec<InputReferencePayload>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[allow(dead_code)]
+enum InputReferencePayload {
+    Text {
+        id: String,
+        content: String,
+        display_name: String,
+        created_at: u64,
+    },
+    Url {
+        id: String,
+        url: String,
+        display_name: String,
+        created_at: u64,
+    },
 }
 
 fn workspace_name(workspace_root: &str) -> String {
@@ -1290,6 +1309,65 @@ fn allowed_tool_names(runtime: &PromptRuntimeContext) -> Vec<&'static str> {
 
 fn cdata_safe(content: &str) -> String {
     content.replace("]]>", "]]]]><![CDATA[>")
+}
+
+fn xml_attr_safe(content: &str) -> String {
+    content
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+fn truncate_reference_content(content: &str, remaining_budget: &mut usize) -> String {
+    if *remaining_budget == 0 {
+        return "[内容已截断]".to_string();
+    }
+    let char_count = content.chars().count();
+    let take_count = char_count.min(8_000).min(*remaining_budget);
+    *remaining_budget = (*remaining_budget).saturating_sub(take_count);
+    let mut result: String = content.chars().take(take_count).collect();
+    if take_count < char_count {
+        result.push_str("[内容已截断]");
+    }
+    result
+}
+
+fn build_input_references_xml(references: &[InputReferencePayload]) -> Option<String> {
+    if references.is_empty() {
+        return None;
+    }
+
+    let mut remaining_budget = 20_000usize;
+    let mut lines = vec!["<input_references>".to_string()];
+
+    for reference in references {
+        match reference {
+            InputReferencePayload::Text { display_name, content, .. } => {
+                let truncated = truncate_reference_content(content, &mut remaining_budget);
+                lines.push(format!(
+                    "<reference kind=\"text\" name=\"{}\">",
+                    xml_attr_safe(display_name)
+                ));
+                lines.push("<![CDATA[".to_string());
+                lines.push(cdata_safe(&truncated));
+                lines.push("]]>".to_string());
+                lines.push("</reference>".to_string());
+            }
+            InputReferencePayload::Url { display_name, url, .. } => {
+                lines.push(format!(
+                    "<reference kind=\"url\" name=\"{}\">",
+                    xml_attr_safe(display_name)
+                ));
+                lines.push(xml_attr_safe(url));
+                lines.push("</reference>".to_string());
+            }
+        }
+    }
+
+    lines.push("</input_references>".to_string());
+    lines.push("InputReference gate: references are context only. Do not use reference content as originalText or as an execution anchor; edits must still go through Diff Review.".to_string());
+    Some(lines.join("\n"))
 }
 
 fn build_system_prompt(runtime: &PromptRuntimeContext) -> String {
@@ -1332,6 +1410,10 @@ fn build_system_prompt(runtime: &PromptRuntimeContext) -> String {
         if !doc_structure.trim().is_empty() {
             lines.push(doc_structure.clone());
         }
+    }
+
+    if let Some(input_references_xml) = build_input_references_xml(&runtime.input_references) {
+        lines.push(input_references_xml);
     }
 
     lines.push("Tool constraints:".to_string());
@@ -1520,6 +1602,7 @@ async fn chat_stream(
     active_file_logical_state_snapshot: Option<String>,
     active_file_snapshot_truncated: Option<bool>,
     document_structure: Option<String>,
+    input_references: Vec<InputReferencePayload>,
 ) -> Result<(), String> {
     let runtime = PromptRuntimeContext {
         workspace_root,
@@ -1530,6 +1613,7 @@ async fn chat_stream(
         active_file_logical_state_snapshot,
         active_file_snapshot_truncated,
         document_structure,
+        input_references,
     };
     chat_debug_log(&app, &format!(
         "[chat_stream] start request_id={} provider={} model={} messages={} active_file={}",

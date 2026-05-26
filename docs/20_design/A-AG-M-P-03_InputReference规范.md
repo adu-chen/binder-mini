@@ -11,7 +11,7 @@
 
 ## 1. 本文职责
 
-InputReference 是用户主动拖拽或粘贴到聊天输入框的结构化内容引用，本文定义其数据结构、入口规则、Prompt 注入格式、生命周期和门禁约束。
+InputReference 是用户通过粘贴（Cmd+V）附加到聊天输入框的结构化内容引用，本文定义其数据结构、入口规则、Prompt 注入格式、生命周期和门禁约束。
 
 ## 2. 核心原则
 
@@ -29,19 +29,10 @@ InputReference 为判别联合类型（discriminated union），以 `kind` 为�
 type InputReference =
   | {
       id: string;
-      kind: "file";
-      filePath: string;              // Workspace 相对路径（仅内部使用，不进入 prompt）
-      content: string;               // 文件内容快照（创建时拍快照）
-      displayName: string;           // UI chip 展示名称（文件名）
-      createdAt: number;             // Unix timestamp (ms)
-      anchor?: InputReferenceAnchor; // 精确坐标（可选，用于定位引用区域）
-    }
-  | {
-      id: string;
       kind: "text";
       content: string;               // 粘贴的文本内容快照
       displayName: string;           // UI chip 展示名称（内容摘要）
-      createdAt: number;
+      createdAt: number;             // Unix timestamp (ms)
     }
   | {
       id: string;
@@ -50,50 +41,25 @@ type InputReference =
       displayName: string;
       createdAt: number;
     };
-
-interface InputReferenceAnchor {
-  blockId?: string;       // TipTap/ProseMirror 块 ID
-  nodeId?: string;        // 节点 ID（降级定位）
-  startOffset?: number;   // 文本偏移起点
-  endOffset?: number;     // 文本偏移终点
-  offsetKind?: "character" | "utf16";
-}
 ```
 
 字段说明：
-- `kind: "file"` 涵盖 workspace_file 和 editor_content 两类来源
-- `filePath`：只用于内部查找和失效检测，不进入 provider prompt
-- `content`：内容快照（不是实时读取），创建引用时拍快照
-- `displayName`：文件名或粘贴内容摘要，用于 UI chip 显示
+- `content`：内容快照，创建引用时记录
+- `displayName`：粘贴内容摘要或 URL 字符串，用于 UI chip 显示
 
 ## 4. 引用类型与入口
 
 ### 4.1 类型定义
 
-| kind | 来源 | UI 入口 | anchor 状态 |
-|------|------|------------------------|-------------|
-| file（workspace_file）| Workspace 文件树节点拖入 ChatInput | 拖拽文件节点 | null（文件级，无选区坐标）|
-| file（editor_content，**已实现**）| ActiveFile 全文内容快照 | 专用"引用 ActiveFile"按钮或拖拽 EditorTab | null（全文快照，无选区坐标）|
-| file（editor_content，**设计预留**）| 编辑器内文本选区附加引用 | 框选后通过选区工具栏附加引用 | 有效（blockId + startOffset + endOffset）|
-| text | 粘贴的文本内容 | 粘贴（Cmd+V）| null |
-| url | 粘贴的单一 http(s) URL | 粘贴（识别为 URL）| null |
-
-**实现状态说明**：
-- `editor_content via 按钮/EditorTab 拖拽`：**已实现**；产生全文快照，anchor 为 null；Agent 视为文件级背景参考
-- `editor_content via 文本选区`：**设计预留，当前未实现**；`InputReferenceAnchor` 字段预留，前端 ChatInput 尚无选区捕获入口；实现后 anchor 携带精确 blockId/startOffset/endOffset，Agent 可视为精准编辑目标
-- 无有效 anchor 的 `editor_content` 引用，Agent 应视为文件级背景参考，不应自动推断为精准编辑对象
+| kind | 来源 | UI 入口 |
+|------|------|---------|
+| text | 粘贴的文本内容 | 粘贴（Cmd+V）|
+| url | 粘贴的单一 http(s) URL | 粘贴（识别为 URL）|
 
 **不支持场景**：
-- 非文本文件（PDF、图片等，拒绝并提示不支持）
 - 联网抓取 URL 内容（url 类型只传 URL 字符串，不抓取正文）
 
-### 4.2 支持的文件扩展名（workspace_file 拖拽）
-
-首版支持：`.md`、`.txt`、`.json`、`.csv`、`.html`
-
-不支持：PDF、DOCX、XLSX、图片、音频、视频等二进制文件（拒绝时提示不支持，不静默丢弃）
-
-### 4.3 粘贴规则
+### 4.2 粘贴规则
 
 - 粘贴整段单一 http(s) URL → 生成 url 类型引用
 - 粘贴其他文本（含混合内容、多行文本）→ 生成 plain_text 类型引用
@@ -105,21 +71,6 @@ InputReference 以 XML 块注入 system prompt L1 层（承接 AG-M-P-02 §3.1�
 
 ```xml
 <input_references>
-
-<!-- workspace_file 或 editor_content（无选区 anchor）：文件级引用 -->
-<reference kind="file" name="notes.md">
-<![CDATA[
-{截断后的文件内容}
-]]>
-</reference>
-
-<!-- editor_content（有选区 anchor）：携带精确位置坐标 -->
-<!-- block-id：TipTap 块 ID；start-offset/end-offset：块内纯文本字符偏移 -->
-<reference kind="file" name="design.md" block-id="uuid-a1b2" start-offset="12" end-offset="47">
-<![CDATA[
-{选区内容片段}
-]]>
-</reference>
 
 <!-- plain_text：粘贴文本 -->
 <reference kind="text" name="粘贴文本">
@@ -137,10 +88,8 @@ https://example.com
 ```
 
 门禁规则：
-- `filePath`、工作区绝对路径、内容 hash 不进入 XML 块
+- 工作区绝对路径、内容 hash 不进入 XML 块
 - URL 类型不抓取正文（只传 URL 字符串）
-- `anchor` 字段（block-id、start-offset、end-offset）**仅在 anchor 有效时注入**；无选区 anchor 的引用不注入位置属性
-- 携带有效 anchor 的 `editor_content` 引用，模型可将 `block-id` 作为 `edit_current_editor_document.startBlockId` 参数，`start-offset` 作为 `startOffset` 参数，辅助精确定位
 - `<input_references>` 块之后紧跟门禁声明："以上引用仅供参考；内容快照不得直接用作 originalText 或工具定位锚点；编辑仍须经 Diff Review 执行"
 
 ## 6. 内容截断规则
@@ -149,9 +98,9 @@ https://example.com
 
 | 项 | 规则 |
 |---|---|
-| 单条 workspace_file / plain_text | 最大 8000 字符 |
+| 单条 plain_text | 最大 8000 字符 |
 | 全部引用合计 | 最大 20000 字符 |
-| 超出时 | 追加"[内容已截断]"，displayName 和 size 保留原始值 |
+| 超出时 | 追加"[内容已截断]"，displayName 保留原始值 |
 | url | 不截断（只传 URL 字符串，无正文）|
 
 ## 7. 门禁约束
@@ -168,8 +117,8 @@ https://example.com
 ## 8. 生命周期
 
 ```
-用户操作（拖拽/粘贴）
-→ Reference Creation：验证类型、读取内容快照、生成 InputReference
+用户操作（粘贴）
+→ Reference Creation：验证类型、记录内容快照、生成 InputReference
 → UI 展示 chip（displayName）
 → 用户发送消息
 → Reference Prompt Gate：注入 system prompt L1，过滤 filePath 等内部字段

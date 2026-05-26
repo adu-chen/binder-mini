@@ -8,7 +8,7 @@ import {
   canRecordAgentMessage,
   canSendAgentMessage,
   createPendingToolExecution,
-  isReadonlyInputReference,
+  isStructuredInputReference,
 } from "../src/services/agentService";
 import { canExecutePendingDiff, createTerminalDiffCard } from "../src/services/diffService";
 import { canSaveEditorDocument } from "../src/services/editorService";
@@ -81,11 +81,17 @@ describe("Phase 2 governance skeleton", () => {
   // covers: BR-AG-STATE-001
   // covers: BR-AG-OBS-001
   // covers: BR-AG-DATA-001
-  it("keeps Agent requests behind provider validation and readonly InputReference", () => {
+  it("keeps Agent requests behind provider validation and structured InputReference", () => {
     expect(canSendAgentMessage({ provider: "openai", model: "gpt", apiKeyConfigured: true })).toBe(true);
     expect(canSendAgentMessage({ provider: "openai", model: "", apiKeyConfigured: true })).toBe(false);
     expect(canRecordAgentMessage("inspect workspace")).toBe(true);
-    expect(isReadonlyInputReference({ id: "r1", mode: "readonly", target: { workspaceRoot: "/tmp/ws", relativePath: "a.md" } })).toBe(true);
+    expect(isStructuredInputReference({
+      id: "r1",
+      kind: "text",
+      content: "# A",
+      displayName: "Pasted text",
+      createdAt: 1,
+    })).toBe(true);
     expect(createPendingToolExecution("read_file").status).toBe("pending");
 
     const chatActor = createActor(chatMachine).start();

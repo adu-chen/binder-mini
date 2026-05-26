@@ -1,4 +1,3 @@
-import type { WorkspaceFileTarget } from "./workspace";
 import type { WorkspaceEntry } from "./workspace";
 
 /**
@@ -34,6 +33,7 @@ export interface AgentRuntimeContext {
   activeFileSnapshotTruncated?: boolean;
   /** XML string built by extractDocumentStructure(); injected as L0 ④ in system prompt. */
   documentStructure?: string;
+  inputReferences?: InputReference[];
 }
 
 export interface AgentMessage {
@@ -43,11 +43,21 @@ export interface AgentMessage {
   streamStatus?: "streaming" | "complete" | "failed";
 }
 
-export interface InputReference {
-  id: string;
-  target: WorkspaceFileTarget;
-  mode: "readonly";
-}
+export type InputReference =
+  | {
+      id: string;
+      kind: "text";
+      content: string;
+      displayName: string;
+      createdAt: number;
+    }
+  | {
+      id: string;
+      kind: "url";
+      url: string;
+      displayName: string;
+      createdAt: number;
+    };
 
 export type ToolName =
   | "read_file"

@@ -1,6 +1,5 @@
 import { useState, useRef } from "react";
 import type { WorkspaceEntry } from "../types/workspace";
-import { writeInputReferenceDragPayload, setPendingDragPayload, clearPendingDragPayload } from "../utils/inputReferenceDrag";
 
 /**
  * @GOV
@@ -270,13 +269,6 @@ function FileTreeNode({
         <div
           onMouseEnter={() => setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
-          draggable
-          onDragStart={(e) => {
-            const payload = { kind: "file" as const, filePath: entry.relativePath };
-            writeInputReferenceDragPayload(e.dataTransfer, payload);
-            setPendingDragPayload(payload);
-          }}
-          onDragEnd={() => { clearPendingDragPayload(); }}
           style={{ position: "relative" }}
         >
           <button

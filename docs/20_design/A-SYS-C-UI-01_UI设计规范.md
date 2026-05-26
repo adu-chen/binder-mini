@@ -381,16 +381,18 @@ Tab 关闭含 preapplied diff 时（三选一对话框）：
 
 ## 7. 交互细节
 
-### 7.1 FileTree 拖拽到 Chat
+### 7.1 InputReference 拖拽到 Chat
 
-用户将文件树节点拖入 ChatInput 区域：
+用户将文件树节点、EditorTab 或编辑器选区拖入 ChatInput 区域：
 - 拖拽进入时：ChatInput 边框高亮（`--accent`）
-- 放下：创建 `kind: "file"` InputReference，追加到 InputReferenceBar
+- 文件树节点：创建 `kind: "file"` workspace_file 引用，追加到 InputReferenceBar
+- EditorTab：创建 `kind: "file"` editor_content 全文引用，anchor 为 null
+- 编辑器选区：创建 `kind: "file"` editor_content 选区引用，携带 blockId/startOffset/endOffset
 
 ### 7.2 ChatInput URL / 文本粘贴
 
 - 粘贴内容以 `http://` 或 `https://` 开头 → 创建 `kind: "url"` InputReference
-- 其他粘贴内容且长度 > 200 chars → 创建 `kind: "text"` InputReference（短文本直接插入输入框）
+- 其他粘贴内容 → 创建 `kind: "text"` InputReference（不按长度分叉）
 
 ### 7.3 Provider 配置入口
 

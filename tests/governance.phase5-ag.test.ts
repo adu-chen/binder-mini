@@ -19,6 +19,14 @@ function repoPath(path: string) {
   return resolve(process.cwd(), path);
 }
 
+const SAMPLE_REFERENCE = {
+  id: "ref-1",
+  kind: "text" as const,
+  content: "Reference body",
+  displayName: "Reference body",
+  createdAt: 1,
+};
+
 // covers: BR-AG-STATE-001
 it("chatMachine: WORKSPACE_OPENED → ready; workspaceRoot recorded in context (BR-AG-STATE-001)", () => {
   const actor = createActor(chatMachine).start();
@@ -41,6 +49,23 @@ it("chatMachine: SEND_MESSAGE → validatingProvider; user message appended to c
   expect(msgs).toHaveLength(1);
   expect(msgs[0].role).toBe("user");
   expect(msgs[0].content).toBe("Hello, binder!");
+});
+
+// covers: BR-AG-DATA-001
+it("chatMachine snapshots InputReference on send and clears after response done", () => {
+  const actor = bootToReady();
+  actor.send({
+    type: "SEND_MESSAGE",
+    userContent: "Use this reference",
+    inputReferences: [SAMPLE_REFERENCE],
+  });
+  expect(actor.getSnapshot().context.inputReferences).toEqual([SAMPLE_REFERENCE]);
+
+  actor.send({ type: "PROVIDER_VALID" });
+  actor.send({ type: "STREAM_STARTED" });
+  actor.send({ type: "TOKEN_RECEIVED", token: "done" });
+  actor.send({ type: "RESPONSE_DONE" });
+  expect(actor.getSnapshot().context.inputReferences).toEqual([]);
 });
 
 // covers: BR-AG-STATE-001
@@ -202,6 +227,7 @@ describe("governance @GOV coverage for Phase 5", () => {
     expect(src).toContain("modelConfigured");
     expect(src).toContain("providerConfigured && modelConfigured");
     expect(src).toContain("请先填写模型名称");
+    expect(src).toContain("handlePaste");
   });
 
   it("App wires ProviderConfig state changes into ChatPanel (BR-AG-UI-001 source check)", () => {
@@ -213,6 +239,7 @@ describe("governance @GOV coverage for Phase 5", () => {
     expect(src).toContain("function handleModelChange");
     expect(src).toContain("defaultModels");
     expect(src).toContain("providerConfig={providerConfig}");
+    expect(src).toContain("inputReferences={inputReferences}");
     expect(src).toContain("onProviderChange={handleProviderChange}");
     expect(src).toContain("onModelChange={handleModelChange}");
   });
@@ -242,6 +269,8 @@ describe("governance @GOV coverage for Phase 5", () => {
     );
     expect(src).toContain("struct PromptRuntimeContext");
     expect(src).toContain("build_system_prompt");
+    expect(src).toContain("build_input_references_xml");
+    expect(src).toContain("<input_references>");
     expect(src).toContain('"read_file"');
     expect(src).toContain('"list_files"');
     expect(src).toContain('"search_files"');

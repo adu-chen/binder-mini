@@ -1,4 +1,3 @@
-import { writeInputReferenceDragPayload, setPendingDragPayload, clearPendingDragPayload } from "../utils/inputReferenceDrag";
 
 /**
  * @GOV
@@ -44,13 +43,6 @@ export function EditorTabs({ tabs, activeTabId, onTabClick, onTabClose }: Editor
         return (
           <div
             key={tab.id}
-            draggable
-            onDragStart={(e) => {
-              const payload = { kind: "file" as const, filePath: tab.filePath };
-              writeInputReferenceDragPayload(e.dataTransfer, payload);
-              setPendingDragPayload(payload);
-            }}
-            onDragEnd={() => { clearPendingDragPayload(); }}
             style={{
               display: "flex",
               alignItems: "center",

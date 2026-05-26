@@ -116,19 +116,6 @@ export function ChatInput({
         onCompositionEnd={() => { setTimeout(() => { isComposingRef.current = false; }, 0); }}
         onKeyDown={handleKeyDown}
         onPaste={handlePaste}
-        onDragOver={(e) => {
-          // Allow drop cursor over the textarea so the section's onDropCapture
-          // receives the event. Without this, WKWebView may show a "forbidden"
-          // cursor and suppress the drop entirely.
-          e.preventDefault();
-          e.dataTransfer.dropEffect = "copy";
-        }}
-        onDrop={(e) => {
-          // Prevent Cocoa's NSTextView from natively inserting text/plain into
-          // the textarea. Reference creation is handled by the parent <section>'s
-          // capture-phase onDropCapture, which fires before this handler.
-          e.preventDefault();
-        }}
         placeholder={
           disabled
             ? "请先打开 Workspace"

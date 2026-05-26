@@ -19,7 +19,6 @@ import { Plugin, PluginKey } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
 import { BlockIdExtension, blockIdPluginKey } from "./extensions/BlockIdExtension";
 import { getEditorSelectionReference, registerEditor, unregisterEditor } from "../stores/editorRegistry";
-import { writeInputReferenceDragPayload, setPendingDragPayload, clearPendingDragPayload } from "../utils/inputReferenceDrag";
 
 type EditorStateName =
   | "noWorkspace"
@@ -285,21 +284,6 @@ function TiptapEditorSurface({
 
   return (
     <div
-      onDragStart={(e) => {
-        if (!editor || !filePath) return;
-        const selection = getEditorSelectionReference(editor);
-        if (!selection) return;
-        const payload = {
-          kind: "selection" as const,
-          filePath,
-          content: selection.content,
-          displayName: selection.content,
-          anchor: selection.anchor,
-        };
-        writeInputReferenceDragPayload(e.dataTransfer, payload);
-        setPendingDragPayload(payload);
-      }}
-      onDragEnd={() => { clearPendingDragPayload(); }}
       style={{
         flex: 1,
         overflowY: "auto",

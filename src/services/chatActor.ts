@@ -7,7 +7,7 @@ import { saveChatMessages, loadChatMessages, readFile, listFiles, searchFiles } 
 import type { AgentMessage } from "../machines/chatMachine";
 import { applyDiffReplaceInEditor } from "./editorActor";
 import { diffStore } from "../stores/diffStore";
-import type { AgentRuntimeContext } from "../types/agent";
+import type { AgentRuntimeContext, InputReference } from "../types/agent";
 
 /**
  * @GOV
@@ -435,6 +435,7 @@ export function useChatActor() {
       activeFileLogicalStateSnapshot: runtimeContextRef.current.activeFileLogicalStateSnapshot ?? null,
       activeFileSnapshotTruncated: runtimeContextRef.current.activeFileSnapshotTruncated ?? null,
       documentStructure: runtimeContextRef.current.documentStructure ?? null,
+      inputReferences: runtimeContextRef.current.inputReferences ?? [],
     }).catch((err: unknown) => {
       console.error("[chat] stream:ipc-error", { requestId, error: err });
       chatActor.send({
@@ -453,6 +454,7 @@ export function useChatActor() {
     model: string,
     apiKeyConfigured: boolean,
     runtimeContext: AgentRuntimeContext = {},
+    inputReferences: InputReference[] = [],
   ) {
     const trimmed = userContent.trim();
     // BR-AG-STATE-001: SEND_MESSAGE guard
@@ -475,13 +477,13 @@ export function useChatActor() {
     chatActor.send({
       type: "SEND_MESSAGE",
       userContent: trimmed,
-      inputReferences: [],
+      inputReferences,
     });
     chatActor.send({ type: "PROVIDER_VALID" });
     chatActor.send({ type: "STREAM_STARTED" });
 
     streamingProviderRef.current = { providerType, model: modelName };
-    runtimeContextRef.current = runtimeContext;
+    runtimeContextRef.current = { ...runtimeContext, inputReferences };
 
     // XState sends are synchronous — snapshot after SEND_MESSAGE already contains the new user message.
     const snap = chatActor.getSnapshot();

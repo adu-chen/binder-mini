@@ -144,6 +144,7 @@ export function EditorColumn({
 
       <EditorArea
         stateName={stateName}
+        filePath={activeTab?.filePath ?? null}
         content={content}
         fileType={fileType}
         appliedRange={appliedRange}

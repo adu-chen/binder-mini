@@ -40,7 +40,7 @@ Agent 需求必须满足以下原则：
 | REQ-AG-004 | 内容编辑工具 | Agent 对已打开文件（edit_current_editor_document）或未打开文件（update_file）的内容编辑必须生成 PendingDiff，不得直接写入目标文件。已打开文件编辑必须以 ED LogicalStateSnapshot 为上下文源，不得以 DiskState/read_file 结果替代当前编辑器内容。 | 内容编辑工具调用结果必须出现在 Diff Review 链路；目标文件内容在 PendingDiff 被接受前不得变化；当 ActiveFile 存在未保存编辑时，Agent 仍能基于当前编辑器 LogicalState 执行精确替换。 |
 | REQ-AG-004-B | 结构操作工具 | Agent 可在 Workspace 内执行文件结构操作：创建文件（create_file，支持必填 content 参数直接写入文件内容，写盘不经 Diff Review）、创建目录（create_folder）、重命名（rename_file）、移动（move_file）、删除（delete_file）。 | 结构操作不经过 Diff Review，直接执行磁盘操作；PathConflict 检查前置（create/rename/move 时）；操作成功后文件树刷新；越界或冲突时返回明确错误，不产生磁盘副作用。 |
 | REQ-AG-005 | 工具执行记录 | 每次工具调用必须记录工具名称、输入边界、执行状态和结果摘要。 | 工具执行记录在对话消息流中可见；成功/失败状态可区分；错误原因可读。 |
-| REQ-AG-006 | InputReference | 用户可通过拖拽或选区操作将 Workspace 文件、编辑器内容片段或文本作为引用附加到 Agent 请求；引用作为结构化内容载体传递，包含引用标签、内容快照和精确坐标（blockId、lineRange、textOffset）。 | 引用内容以结构化 XML 块注入 Provider payload；Agent 自行判断引用是编辑对象还是参考上下文；若作为编辑对象则通过 Diff Review 执行；引用不直接触发文件写入；消息发送成功后清空，Workspace 切换后失效。 |
+| REQ-AG-006 | InputReference | 用户可通过粘贴（Cmd+V）将文本或 URL 作为引用附加到 Agent 请求；引用作为结构化内容载体传递，包含引用标签和内容快照。 | 引用内容以结构化 XML 块注入 Provider payload；引用不直接触发文件写入；消息发送成功后清空，Workspace 切换后失效。 |
 | REQ-AG-007 | Prompt Runtime | Agent 请求必须包含当前操作上下文（Workspace、ActiveFile、ActiveFile LogicalStateSnapshot），并过滤模型不应接触的敏感字段。 | Provider payload 中不含 API key；只有 allowedTools 中的工具可被模型调用；请求内容可调试审计；ActiveFile 编辑上下文来自 ED LogicalState，不来自磁盘读取工具。 |
 | REQ-AG-008 | 取消流式响应 | 用户可在消息发送、SSE 流式响应或工具调用执行的任意阶段主动取消本次请求。 | 取消后 chatMachine 回到 ready 状态，输入区恢复可发送；已生成的部分流内容在 UI 中保留展示；不追加完整轮次到历史；工具调用若未完成则中止并标记 cancelled。 |
 | REQ-AG-009 | Chat 状态机 | Agent 对话链路必须由 chatMachine 状态机驱动，覆盖会话生命周期、Provider 校验、发送、流式、工具调用、取消和错误恢复全链路。 | chatMachine 明确声明所有合法状态和转移事件；不存在无状态机驱动的中间状态；状态转移可通过 XState devtools 审计。 |
@@ -274,23 +274,15 @@ status: active
 
 ### REQ-AG-006 InputReference（P1）
 
-用户可通过拖拽（Workspace 文件节点或 Editor Tab 拖入输入框）或在编辑器中选区后附加引用。引用支持 4 种类型：`workspace_file`、`editor_content`、`plain_text`、`url`。
+用户可通过粘贴（Cmd+V）将文本或 URL 附加为引用。引用支持 2 种类型：`plain_text`、`url`。
 
 引用作为结构化内容载体传递，包含：
-- **referenceTag**：引用来源标签（文件名、引用类型）
+- **referenceTag**：引用来源标签（引用类型摘要）
 - **contentSnapshot**：引用时刻的内容快照
-- **精确坐标（anchor）**：`blockId`（TipTap 节点 ID）、`startOffset`/`endOffset`（块内纯文本字符偏移）——仅在 `editor_content` 携带有效选区时存在，其余类型 anchor 为 null
 
-`editor_content` 当前支持两种入口，行为不同：
-- **已实现**：专用"引用 ActiveFile"按钮或拖拽 EditorTab → 全文快照，anchor 为 null；Agent 视为文件级背景参考
-- **设计预留（未实现）**：编辑器内文本选区附加引用 → 局部内容快照，anchor 有效；Agent 可视为精准编辑目标，anchor 信息可作为 `edit_current_editor_document` 的 `startBlockId`/`startOffset` 辅助参数
-
-Agent 根据引用类型和 anchor 状态自行判断引用语义：
-- `editor_content` 且 anchor 有效 → 优先视为精准编辑目标，通过 Diff Review 执行定点修改
-- `editor_content` anchor 为 null，或 `workspace_file` → 通常视为参考上下文（Agent 也可决定将其作为编辑对象调用 update_file）
-- `plain_text` / `url` → 作为背景参考
-
-`url` 类型注意：系统只传递 URL 字符串，不发起 fetch 请求，不获取页面内容；模型如需读取页面内容，须自行调用 web_search 工具；模型不得声称已读取页面内容。
+Agent 根据引用类型自行判断引用语义：
+- `plain_text` → 作为背景参考文本
+- `url` → 作为背景参考链接；系统只传递 URL 字符串，不发起 fetch 请求；模型如需读取页面内容，须自行调用 web_search 工具
 
 引用内容以 XML 块格式注入 Provider payload L1 层，不拼入 user message；引用本身不直接触发文件写入；消息发送成功后清空，Workspace 切换后失效，发送失败则保留。
 

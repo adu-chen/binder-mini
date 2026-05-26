@@ -1,4 +1,5 @@
 import { setup, assign } from "xstate";
+import type { InputReference } from "../types/agent";
 
 /**
  * @GOV
@@ -26,11 +27,6 @@ export interface ToolExecution {
   toolName: string;
   input: Record<string, unknown>;
   result?: unknown;
-}
-
-export interface InputReference {
-  type: string;
-  value: string;
 }
 
 export interface ChatMachineContext {
@@ -92,7 +88,10 @@ export const chatMachine = setup({
         createdAt: Date.now(),
         sessionId: context.workspaceRoot ?? "",
       };
-      return { messages: [...context.messages, userMsg] };
+      return {
+        messages: [...context.messages, userMsg],
+        inputReferences: event.inputReferences,
+      };
     }),
     finalizeStreamingMessage: assign(({ context }) => {
       if (!context.streamingContent) return {};
@@ -104,7 +103,7 @@ export const chatMachine = setup({
         createdAt: Date.now(),
         sessionId: context.workspaceRoot ?? "",
       };
-      return { messages: [...context.messages, assistantMsg], streamingContent: "" };
+      return { messages: [...context.messages, assistantMsg], streamingContent: "", inputReferences: [] };
     }),
     accumulateToken: assign(({ context, event }) => {
       if (event.type !== "TOKEN_RECEIVED") return {};

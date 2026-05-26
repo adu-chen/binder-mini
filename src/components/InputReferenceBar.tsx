@@ -8,7 +8,7 @@
  * term_ref: TERM-AG-002
  */
 
-import type { InputReference } from "../machines/chatMachine";
+import type { InputReference } from "../types/agent";
 
 interface InputReferenceBarProps {
   references: InputReference[];
@@ -42,7 +42,7 @@ export function InputReferenceBar({ references, onRemove }: InputReferenceBarPro
             color: "var(--text-secondary)",
           }}
         >
-          <span style={{ color: "var(--accent)", fontSize: 10 }}>{ref.type}</span>
+          <span style={{ color: "var(--accent)", fontSize: 10 }}>{referenceIcon(ref)}</span>
           <span
             style={{
               maxWidth: 120,
@@ -51,7 +51,7 @@ export function InputReferenceBar({ references, onRemove }: InputReferenceBarPro
               whiteSpace: "nowrap",
             }}
           >
-            {ref.value}
+            {ref.displayName}
           </span>
           <button
             onClick={() => onRemove(i)}
@@ -74,4 +74,9 @@ export function InputReferenceBar({ references, onRemove }: InputReferenceBarPro
       ))}
     </div>
   );
+}
+
+function referenceIcon(reference: InputReference): string {
+  if (reference.kind === "url") return "url";
+  return "text";
 }

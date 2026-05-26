@@ -22,7 +22,7 @@ import { ChatPanel } from "./components/ChatPanel";
 import { WorkspaceCloseGuardDialog } from "./components/WorkspaceCloseGuardDialog";
 import { PreappliedSaveDialog } from "./components/PreappliedSaveDialog";
 import { PreappliedTabCloseDialog } from "./components/PreappliedTabCloseDialog";
-import type { ProviderConfig } from "./types/agent";
+import type { InputReference, ProviderConfig } from "./types/agent";
 import type { PendingDiff, TerminalDiffCard } from "./types/diff";
 import type { WorkspaceMutationResult } from "./types/workspace";
 import type { PendingDiffStatus } from "./machines/diffMachine";
@@ -30,7 +30,6 @@ import type { ChatMessageRecord } from "./ipc";
 import { saveApiKey, isApiKeyConfigured } from "./ipc";
 
 const MAX_ACTIVE_FILE_LOGICAL_STATE_SNAPSHOT = 12_000;
-
 /**
  * @GOV
  * codes: BR-SYS-UI-001, BR-SYS-UI-002, BR-WS-STATE-001, BR-WS-STATE-002, BR-WS-STATE-003, BR-WS-PERSIST-001, BR-WS-DATA-005, BR-ED-STATE-001, BR-ED-STATE-002, BR-ED-STATE-003, BR-ED-STATE-004, BR-ED-PERSIST-001, BR-ED-PERSIST-002, BR-ED-PERSIST-003, BR-ED-STATE-005, BR-ED-STATE-006, BR-AG-SEC-001, BR-AG-UI-001, BR-AG-PERSIST-001, BR-AG-PERSIST-002, BR-AG-DATA-004, BR-DE-PERSIST-001, BR-DE-STATE-014, BR-DE-UI-001, BR-DE-UI-002
@@ -77,6 +76,7 @@ export default function App() {
       void chatOnWorkspaceClosed();
       setShowPreappliedSaveDialog(false);
       setPreappliedCloseTabId(null);
+      setInputReferences([]);
       // BR-DE-STATE-013: all non-terminal PendingDiffs cleared — diffStore.clear() stops
       // all per-diff actors and notifies subscribers, which re-renders allDiffs as [].
       diffStore.clear();
@@ -89,11 +89,19 @@ export default function App() {
   // ── PathConflict error banner (BR-WS-DATA-002, BR-AG-TOOL-001) ─
   const conflictTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [conflictError, setConflictError] = useState<string | null>(null);
+  const referenceErrorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [referenceError, setReferenceError] = useState<string | null>(null);
 
   function showConflictError(message: string) {
     if (conflictTimeoutRef.current) clearTimeout(conflictTimeoutRef.current);
     setConflictError(message);
     conflictTimeoutRef.current = setTimeout(() => setConflictError(null), 3000);
+  }
+
+  function showReferenceError(message: string) {
+    if (referenceErrorTimeoutRef.current) clearTimeout(referenceErrorTimeoutRef.current);
+    setReferenceError(message);
+    referenceErrorTimeoutRef.current = setTimeout(() => setReferenceError(null), 3000);
   }
 
   // ── Agent / Chat (Issue 5-A) ────────────────────────────────────
@@ -109,6 +117,17 @@ export default function App() {
     retryMessage: chatRetryMessage,
     notifyActiveFileChanged,
   } = useChatActor();
+
+  const [inputReferences, setInputReferences] = useState<InputReference[]>([]);
+  const previousChatValueRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const previous = previousChatValueRef.current;
+    if (previous === "streaming" && chatValue === "ready") {
+      setInputReferences([]);
+    }
+    previousChatValueRef.current = chatValue;
+  }, [chatValue]);
 
   const [providerConfig, setProviderConfig] = useState<ProviderConfig>({
     provider: "anthropic",
@@ -489,6 +508,41 @@ export default function App() {
     if (diff && diff.status === "preapplied") rejectDiff(diff);
   }
 
+  function appendInputReference(reference: InputReference) {
+    setInputReferences((current) => [...current, reference]);
+  }
+
+  function handleRemoveReference(index: number) {
+    setInputReferences((current) => current.filter((_, i) => i !== index));
+  }
+
+  function handleCreateTextReference(content: string) {
+    const trimmed = content.trim();
+    if (!trimmed) return;
+    appendInputReference({
+      id: `ref-text-${Date.now()}`,
+      kind: "text",
+      content,
+      displayName: summarizeReferenceText(trimmed),
+      createdAt: Date.now(),
+    });
+  }
+
+  function handleCreateUrlReference(url: string) {
+    const trimmed = url.trim();
+    if (!/^https?:\/\/\S+$/i.test(trimmed)) {
+      handleCreateTextReference(url);
+      return;
+    }
+    appendInputReference({
+      id: `ref-url-${Date.now()}`,
+      kind: "url",
+      url: trimmed,
+      displayName: trimmed,
+      createdAt: Date.now(),
+    });
+  }
+
   // ── Agent / Chat handlers (Issue 5-A / 5-B / 5-C) ────────────
   async function handleSendAgentMessage(userContent: string) {
     await chatSendMessage(
@@ -508,6 +562,7 @@ export default function App() {
             ? (extractDocumentStructure(activeFilePath) ?? undefined)
             : undefined,
       },
+      inputReferences,
     );
   }
 
@@ -633,10 +688,11 @@ export default function App() {
             stateName={chatStateName()}
             messages={chatMessages}
             streamingContent={chatStreamingContent}
-            inputReferences={[]}
+            inputReferences={inputReferences}
             diffs={diffEntries}
             providerConfig={providerConfig}
             errorMessage={chatErrorMessage}
+            referenceError={referenceError}
             onSend={(content) => void handleSendAgentMessage(content)}
             onCancel={handleCancelMessage}
             onRetry={handleRetryMessage}
@@ -651,7 +707,9 @@ export default function App() {
                 ),
               );
             }}
-            onRemoveReference={() => {}}
+            onRemoveReference={handleRemoveReference}
+            onCreateTextReference={handleCreateTextReference}
+            onCreateUrlReference={handleCreateUrlReference}
             onAcceptDiff={(diffId) => handleAcceptDiffById(diffId)}
             onRejectDiff={(diffId) => handleRejectDiffById(diffId)}
             onAcceptAll={handleAcceptAllDiffs}
@@ -684,4 +742,9 @@ export default function App() {
       )}
     </>
   );
+}
+
+function summarizeReferenceText(text: string): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length > 40 ? `${oneLine.slice(0, 40)}...` : oneLine;
 }

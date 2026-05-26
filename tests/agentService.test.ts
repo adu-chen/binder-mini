@@ -8,7 +8,8 @@ import {
   createPendingToolExecution,
   createUserAgentMessage,
   failToolExecution,
-  isReadonlyInputReference,
+  inputReferenceLabel,
+  isStructuredInputReference,
   normalizeProviderConfig,
   summarizeSearchResults,
   summarizeText,
@@ -51,14 +52,23 @@ describe("Agent Provider MVP service behavior", () => {
   });
 
   // covers: BR-AG-DATA-001
-  it("keeps InputReference readonly and message content normalized", () => {
+  it("keeps InputReference structured and message content normalized", () => {
     expect(
-      isReadonlyInputReference({
+      isStructuredInputReference({
         id: "ref-1",
-        mode: "readonly",
-        target: { workspaceRoot: "/tmp/ws", relativePath: "notes.md" },
+        kind: "text",
+        content: "Some pasted content",
+        displayName: "Pasted text",
+        createdAt: 1,
       }),
     ).toBe(true);
+    expect(inputReferenceLabel({
+      id: "ref-2",
+      kind: "url",
+      url: "https://example.com",
+      displayName: "https://example.com",
+      createdAt: 2,
+    })).toBe("https://example.com");
     expect(canRecordAgentMessage("  hello  ")).toBe(true);
     expect(canRecordAgentMessage("   ")).toBe(false);
     expect(createUserAgentMessage("  hello  ").content).toBe("hello");
