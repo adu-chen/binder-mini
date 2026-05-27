@@ -85,6 +85,19 @@ export interface PendingDiffRecord {
   createdAt: number;
 }
 
+export interface TerminalDiffCardRecord {
+  diffId: string;
+  status: "accepted" | "rejected" | "expired" | "error";
+  message: string;
+  sourceToolId: string;
+  resolvedAt: number;
+}
+
+export interface RecoveredDiffsRecord {
+  restored: PendingDiffRecord[];
+  expired: TerminalDiffCardRecord[];
+}
+
 export interface ChatMessageRecord {
   id: string;
   /** BR-AG-DATA-002: includes "tool" for ToolResult messages that carry callId. */
@@ -92,6 +105,12 @@ export interface ChatMessageRecord {
   content: string;
   streamStatus: string | null;
   toolCallId: string | null;
+  inputReferencesJson: string | null;
+  /**
+   * BR-AG-DATA-004: active file path at message creation time; used by buildChatPayload()
+   * for epoch-based history sanitisation. null = no active file; undefined = legacy message.
+   */
+  activeFilePath: string | null;
   createdAt: number;
   sessionId: string;
 }
@@ -126,6 +145,32 @@ export function updateDiffStatus(_workspaceRoot: string, _diffId: string, _statu
 
 /**
  * @GOV
+ * codes: BR-DE-PERSIST-002
+ * type: DATA
+ * chain: DE-ACCEPT-DIFF, DE-REJECT-DIFF, DE-EXPIRE-DIFF
+ * rules: BR-DE-PERSIST-002
+ * boundary: in=TerminalDiffCardRecord and workspace_root path | out=terminal_diff_cards row upserted and pending_diffs row deleted
+ * term_ref: TERM-WS-002, TERM-DE-002
+ */
+export function saveTerminalCard(_workspaceRoot: string, _card: TerminalDiffCardRecord): Promise<void> {
+  return invoke("save_terminal_card", { workspaceRoot: _workspaceRoot, card: _card });
+}
+
+/**
+ * @GOV
+ * codes: BR-DE-PERSIST-002, BR-DE-STATE-013
+ * type: DATA
+ * chain: WS-CLOSE, DE-EXPIRE-DIFF
+ * rules: BR-DE-PERSIST-002, BR-DE-STATE-013
+ * boundary: in=TerminalDiffCardRecord list and workspace_root path | out=batch terminal_diff_cards upsert and pending_diffs cleanup
+ * term_ref: TERM-WS-002, TERM-DE-002
+ */
+export function saveTerminalCards(_workspaceRoot: string, _cards: TerminalDiffCardRecord[]): Promise<void> {
+  return invoke("save_terminal_cards", { workspaceRoot: _workspaceRoot, cards: _cards });
+}
+
+/**
+ * @GOV
  * codes: BR-DE-PERSIST-002, BR-WS-STATE-002
  * type: DATA
  * chain: WS-OPEN, DE-CREATE-DIFF
@@ -135,6 +180,23 @@ export function updateDiffStatus(_workspaceRoot: string, _diffId: string, _statu
  */
 export function loadDiffsFromWorkspace(_workspaceRoot: string): Promise<PendingDiffRecord[]> {
   return invoke("load_diffs_from_workspace", { workspaceRoot: _workspaceRoot });
+}
+
+/**
+ * @GOV
+ * codes: BR-DE-PERSIST-002, BR-WS-STATE-002
+ * type: DATA
+ * chain: WS-OPEN, DE-CREATE-DIFF, DE-EXPIRE-DIFF
+ * rules: BR-DE-PERSIST-002, BR-WS-STATE-002
+ * boundary: in=workspace_root path | out=baseRevision-checked restored PendingDiff records and auto-expired TerminalDiffCard records
+ * term_ref: TERM-WS-002, TERM-DE-001, TERM-DE-002, TERM-DE-005
+ */
+export function recoverDiffsFromWorkspace(_workspaceRoot: string): Promise<RecoveredDiffsRecord> {
+  return invoke("recover_diffs_from_workspace", { workspaceRoot: _workspaceRoot });
+}
+
+export function hashWorkspaceFile(_workspaceRoot: string, _filePath: string): Promise<string> {
+  return invoke("hash_workspace_file", { workspaceRoot: _workspaceRoot, filePath: _filePath });
 }
 
 /**

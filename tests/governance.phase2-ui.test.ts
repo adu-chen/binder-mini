@@ -54,7 +54,7 @@ describe("Phase 2 UI governance", () => {
     actor.send({ type: "WORKSPACE_OPENED", workspaceRoot: "/tmp/ws" });
     expect(actor.getSnapshot().value).toBe("ready");
 
-    actor.send({ type: "SEND_MESSAGE", userContent: "hello", inputReferences: [] });
+    actor.send({ type: "SEND_MESSAGE", userContent: "hello", inputReferences: [], activeFilePath: null });
     expect(actor.getSnapshot().value).toBe("validatingProvider");
 
     actor.send({ type: "PROVIDER_VALID" });

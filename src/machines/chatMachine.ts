@@ -18,6 +18,15 @@ export interface AgentMessage {
   content: string;
   streamStatus?: "streaming" | "done" | "cancelled";
   toolCallId?: string;
+  /** InputReference snapshot attached to the user message that submitted it. */
+  inputReferences?: InputReference[];
+  /**
+   * BR-AG-DATA-004: Active file path at the time this message was created.
+   * Used by buildChatPayload() to detect epoch boundaries (stale file context).
+   * null  = no active file when message was created.
+   * undefined = legacy message created before epoch tracking was added (treat as current epoch).
+   */
+  activeFilePath?: string | null;
   createdAt: number;
   sessionId: string;
 }
@@ -31,6 +40,8 @@ export interface ToolExecution {
 
 export interface ChatMachineContext {
   workspaceRoot: string | null;
+  /** BR-AG-DATA-004: current active file path, updated on SEND_MESSAGE and ACTIVE_FILE_CHANGED. */
+  activeFilePath: string | null;
   messages: AgentMessage[];
   streamingContent: string;
   pendingToolExecutions: ToolExecution[];
@@ -44,7 +55,7 @@ export type ChatMachineEvent =
   | { type: "WORKSPACE_OPENED"; workspaceRoot: string }
   | { type: "WORKSPACE_CLOSED" }
   | { type: "MESSAGES_RESTORED"; messages: AgentMessage[] }
-  | { type: "SEND_MESSAGE"; userContent: string; inputReferences: InputReference[] }
+  | { type: "SEND_MESSAGE"; userContent: string; inputReferences: InputReference[]; activeFilePath: string | null }
   | { type: "PROVIDER_VALID" }
   | { type: "PROVIDER_INVALID"; errorCode: string; errorMessage: string }
   | { type: "STREAM_STARTED" }
@@ -71,6 +82,7 @@ export const chatMachine = setup({
     }),
     persistAndClearSession: assign({
       workspaceRoot: null,
+      activeFilePath: null,
       messages: [],
       streamingContent: "",
       pendingToolExecutions: [],
@@ -86,12 +98,17 @@ export const chatMachine = setup({
         role: "user",
         content: event.userContent,
         streamStatus: undefined,
+        inputReferences: event.inputReferences,
+        // BR-AG-DATA-004: stamp with active file at send time for epoch tracking
+        activeFilePath: event.activeFilePath,
         createdAt: Date.now(),
         sessionId: context.workspaceRoot ?? "",
       };
       return {
         messages: [...context.messages, userMsg],
-        inputReferences: event.inputReferences,
+        // Update context epoch so subsequent messages (assistant, tool) inherit same file
+        activeFilePath: event.activeFilePath,
+        inputReferences: [],
       };
     }),
     restoreMessages: assign(({ context, event }) => {
@@ -109,6 +126,8 @@ export const chatMachine = setup({
         role: "assistant",
         content: context.streamingContent,
         streamStatus: "done",
+        // BR-AG-DATA-004: inherit epoch from context (set when SEND_MESSAGE was processed)
+        activeFilePath: context.activeFilePath,
         createdAt: Date.now(),
         sessionId: context.workspaceRoot ?? "",
       };
@@ -132,10 +151,16 @@ export const chatMachine = setup({
         id: `ctx-switch-${Date.now()}`,
         role: "system",
         content: `[Context: Active file switched from ${event.oldPath} to ${event.newPath}]`,
+        // BR-AG-DATA-004: mark epoch boundary; buildChatPayload drops role=system messages
+        activeFilePath: event.newPath,
         createdAt: Date.now(),
         sessionId: context.workspaceRoot ?? "",
       };
-      return { messages: [...context.messages, syntheticMessage] };
+      return {
+        messages: [...context.messages, syntheticMessage],
+        // Advance epoch so the next send picks up the new file
+        activeFilePath: event.newPath,
+      };
     }),
     // BR-DE-UI-003: when TOOL_REQUESTED fires, finalize the in-progress streaming text
     // as an assistant message that carries toolCallId. This makes the toolCallId available
@@ -149,6 +174,8 @@ export const chatMachine = setup({
         content: context.streamingContent,
         toolCallId: event.execution.id,
         streamStatus: "done",
+        // BR-AG-DATA-004: inherit epoch from context
+        activeFilePath: context.activeFilePath,
         createdAt: Date.now(),
         sessionId: context.workspaceRoot ?? "",
       };
@@ -165,6 +192,7 @@ export const chatMachine = setup({
   initial: "noWorkspace",
   context: {
     workspaceRoot: null,
+    activeFilePath: null,
     messages: [],
     streamingContent: "",
     pendingToolExecutions: [],

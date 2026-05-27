@@ -23,9 +23,8 @@ import type { Editor } from "@tiptap/core";
  *         BR-DE-UI-001, BR-DE-UI-002
  *
  * Issue 6-A tests cover the data layer (diffMachine + DiffStore).
- * Issues 6-B through 6-D and 6-F are activated in this revision.
- * Issue 6-E (persistence: Rust-side workspace.db) remains todo pending
- * a Tauri mock layer.
+ * Issues 6-B through 6-F are activated in this revision, including the
+ * Rust-side persistence source checks for Issue 6-E.
  */
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -313,7 +312,7 @@ describe("Issue 6-B — AG-TOOL-CALL execution loop + applyDiffReplaceInEditor",
   it("chatMachine: TOOL_REQUESTED → toolCalling; streamingContent cleared; TOOL_FINISHED → streaming (BR-AG-DATA-002)", () => {
     const actor = createActor(chatMachine).start();
     actor.send({ type: "WORKSPACE_OPENED", workspaceRoot: "/ws" });
-    actor.send({ type: "SEND_MESSAGE", userContent: "edit the file", inputReferences: [] });
+    actor.send({ type: "SEND_MESSAGE", userContent: "edit the file", inputReferences: [], activeFilePath: null });
     actor.send({ type: "PROVIDER_VALID" });
     actor.send({ type: "STREAM_STARTED" });
     actor.send({ type: "TOKEN_RECEIVED", token: "I'll edit " });
@@ -346,6 +345,24 @@ describe("Issue 6-B — AG-TOOL-CALL execution loop + applyDiffReplaceInEditor",
     expect(src).toContain("assistantBlocks");
     expect(src).toContain('type: "tool_use"');
     expect(src).toContain('type: "text"');
+  });
+
+  // covers: BR-AG-DATA-004
+  it("chatActor.ts: edit_current_editor_document refuses when active file changed before tool execution", () => {
+    const src = readFileSync(
+      repoPath("src/services/chatActor.ts"),
+      "utf8",
+    );
+    const fn = src.slice(
+      src.indexOf("async function executeToolCall"),
+      src.indexOf("function createToolResult"),
+    );
+
+    expect(fn).toContain("const currentActiveFilePath = toolRuntime?.getActiveFilePath() ?? null");
+    expect(fn).toContain("currentActiveFilePath !== filePath");
+    expect(fn).toContain('return createFailedToolResult(call, "active-file-changed")');
+    expect(fn).toContain("toolRuntime.applyDiffReplaceInTab(filePath, originalText, newText");
+    expect(fn).not.toContain("applyDiffReplaceInEditor(originalText, newText");
   });
 
   // covers: BR-AG-DATA-003
@@ -439,7 +456,7 @@ describe("Issue 6-C — GreenAdditionDecoration + syncPendingDiffsWithDocument",
   });
 
   // covers: BR-DE-UI-002
-  it("GreenAdditionDecoration: apply() handles three meta cases: undefined → map, null → empty, object → new decoration (source check)", () => {
+  it("GreenAdditionDecoration: apply() handles undefined → map, null/empty → empty, ranges → decorations (source check)", () => {
     const src = readFileSync(
       repoPath("src/components/EditorArea.tsx"),
       "utf8",
@@ -447,6 +464,8 @@ describe("Issue 6-C — GreenAdditionDecoration + syncPendingDiffsWithDocument",
     expect(src).toContain("if (meta === undefined)");
     expect(src).toContain("return prevSet.map(tr.mapping, tr.doc)");
     expect(src).toContain("if (!meta) return DecorationSet.empty");
+    expect(src).toContain("if (meta.length === 0) return DecorationSet.empty");
+    expect(src).toContain(".map(({ from, to }) =>");
     expect(src).toContain("Decoration.inline(from, to, {");
   });
 
@@ -492,7 +511,7 @@ describe("Issue 6-C — GreenAdditionDecoration + syncPendingDiffsWithDocument",
     expect(fn).toContain("BR-DE-STATE-012");
     expect(fn).toContain('diff.status === "preapplied"');
     expect(fn).toContain("!diff.newText");
-    expect(fn).toContain("content.includes(diff.newText)");
+    expect(fn).toContain("edIsActiveEditorRangeText(diff.appliedRange, diff.newText)");
     expect(fn).toContain("expireDiff(diff)");
   });
 });
@@ -568,8 +587,8 @@ describe("Issue 6-D — Accept / Reject / Expire full chains", () => {
       src.indexOf("function rejectDiff"),
       src.indexOf("function handleAcceptPendingDiff"),
     );
-    // Inverse replace: newText becomes the old content, originalText is restored.
-    expect(rejectFn).toContain("edApplyDiffReplaceInTab(tabId, diff.newText, diff.originalText)");
+    // Range rollback: the exact appliedRange must still contain newText before originalText is restored.
+    expect(rejectFn).toContain("edRollbackDiffInTab(tabId, diff.appliedRange, diff.newText, diff.originalText)");
     expect(rejectFn).toContain('actor?.send({ type: "FAILED" })');
     expect(rejectFn).toContain('createTerminalDiffCard(diff.id, "error"');
     expect(rejectFn).toContain("return false");
@@ -609,15 +628,56 @@ describe("Issue 6-D — Accept / Reject / Expire full chains", () => {
 
 // ── Issue 6-E: workspace.db persistence + Inherit Flow (pending Tauri mock) ──
 
-describe("Issue 6-E — workspace.db persistence + Inherit Flow (todo)", () => {
+describe("Issue 6-E — workspace.db persistence + Inherit Flow", () => {
   // covers: BR-DE-STATE-013
-  it.todo("expireAllOnClose: all non-terminal diffs → expired and written to terminal_diff_cards on WORKSPACE_CLOSED");
+  it("expireAllOnClose: all non-terminal diffs → expired and written to terminal_diff_cards on WORKSPACE_CLOSED", () => {
+    const store = createDiffStoreInstance();
+    const d1 = store.createDiff(BASE_PARAMS);
+    const d2 = store.createDiff({ ...BASE_PARAMS, sourceToolId: "tool-2", newText: "v2" });
+    store.getDiffActor(d1.id)?.send({ type: "LOGICAL_STATE_APPLIED" });
+
+    const cards = store.expireAllOnClose();
+
+    expect(cards).toHaveLength(2);
+    expect(cards.every((card) => card.status === "expired")).toBe(true);
+    expect(store.getAllDiffs()).toHaveLength(0);
+    expect(store.getDiffActor(d1.id)).toBeUndefined();
+    expect(store.getDiffActor(d2.id)).toBeUndefined();
+
+    const appSrc = readFileSync(repoPath("src/App.tsx"), "utf8");
+    expect(appSrc).toContain("diffStore.expireAllOnClose()");
+    expect(appSrc).toContain("await saveTerminalCards(root, expiredCards)");
+
+    const rustSrc = readFileSync(repoPath("src-tauri/src/lib.rs"), "utf8");
+    expect(rustSrc).toContain("fn save_terminal_cards");
+    expect(rustSrc).toContain("INSERT OR REPLACE INTO terminal_diff_cards");
+    expect(rustSrc).toContain("DELETE FROM pending_diffs WHERE id = ?1");
+  });
 
   // covers: BR-DE-PERSIST-002
-  it.todo("loadDiffsFromWorkspace: baseRevision consistent → restored as pending");
+  it("loadDiffsFromWorkspace: baseRevision consistent → restored as pending", () => {
+    const appSrc = readFileSync(repoPath("src/App.tsx"), "utf8");
+    expect(appSrc).toContain('const recoveredStatus: PendingDiffStatus = status === "preapplied" ? "pending" : status');
+    expect(appSrc).toContain('effectivePath: status === "preapplied" ? "closed-file" : record.effectivePath');
+
+    const workspaceActorSrc = readFileSync(repoPath("src/services/workspaceActor.ts"), "utf8");
+    expect(workspaceActorSrc).toContain("recoverDiffsFromWorkspace");
+    expect(workspaceActorSrc).toContain("setLoadedDiffs(recovery.restored)");
+
+    const rustSrc = readFileSync(repoPath("src-tauri/src/lib.rs"), "utf8");
+    expect(rustSrc).toContain("hash == record.base_revision");
+    expect(rustSrc).toContain("record.status = \"pending\".to_string()");
+    expect(rustSrc).toContain("record.effective_path = \"closed-file\".to_string()");
+  });
 
   // covers: BR-DE-PERSIST-002
-  it.todo("loadDiffsFromWorkspace: baseRevision mismatch → auto-expired on load");
+  it("loadDiffsFromWorkspace: baseRevision mismatch → auto-expired on load", () => {
+    const rustSrc = readFileSync(repoPath("src-tauri/src/lib.rs"), "utf8");
+    expect(rustSrc).toContain("fn recover_diffs_from_workspace");
+    expect(rustSrc).toContain("unwrap_or(false)");
+    expect(rustSrc).toContain("status: \"expired\".to_string()");
+    expect(rustSrc).toContain("save_terminal_card_with_conn(&tx, &card)");
+  });
 });
 
 // ── Issue 6-F: Composite scenarios + DiffCard UI + @GOV coverage ──────────────

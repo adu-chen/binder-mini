@@ -43,6 +43,7 @@ it("chatMachine: SEND_MESSAGE → validatingProvider; user message appended to c
     type: "SEND_MESSAGE",
     userContent: "Hello, binder!",
     inputReferences: [],
+    activeFilePath: null,
   });
   expect(actor.getSnapshot().value).toBe("validatingProvider");
   const msgs = actor.getSnapshot().context.messages;
@@ -85,7 +86,7 @@ it("chatMachine: MESSAGES_RESTORED writes persisted history into context.message
 // covers: BR-AG-PERSIST-001
 it("chatMachine: MESSAGES_RESTORED merges with live messages when restore finishes late", () => {
   const actor = bootToReady("/tmp/ws");
-  actor.send({ type: "SEND_MESSAGE", userContent: "new prompt", inputReferences: [] });
+  actor.send({ type: "SEND_MESSAGE", userContent: "new prompt", inputReferences: [], activeFilePath: null });
   actor.send({
     type: "MESSAGES_RESTORED",
     messages: [
@@ -102,15 +103,33 @@ it("chatMachine: MESSAGES_RESTORED merges with live messages when restore finish
   expect(msgs.map((m) => m.content)).toEqual(["old prompt", "new prompt"]);
 });
 
+// covers: BR-AG-DATA-004
+it("chatActor filters persisted context-switch system messages from provider payload", () => {
+  // BR-AG-STATE-001: context-switch system messages (role=system) must never reach the provider.
+  // The new Prompt Assembly Pipeline classifies role=system messages as "runtime-system" and
+  // drops them before the payload is sent (buildChatPayload strips them in the classify step).
+  const src = readFileSync(
+    repoPath("src/services/chatActor.ts"),
+    "utf8",
+  );
+
+  // Pipeline classifier: role=system → "runtime-system" → dropped from payload
+  expect(src).toContain('if (msg.role === "system") return "runtime-system"');
+  // buildChatPayload filters out runtime-system messages before epochGate
+  expect(src).toContain('withoutSystem');
+});
+
 // covers: BR-AG-DATA-001
-it("chatMachine snapshots InputReference on send and clears after response done", () => {
+it("chatMachine attaches InputReference snapshot to user message and clears composer references", () => {
   const actor = bootToReady();
   actor.send({
     type: "SEND_MESSAGE",
     userContent: "Use this reference",
     inputReferences: [SAMPLE_REFERENCE],
+    activeFilePath: null,
   });
-  expect(actor.getSnapshot().context.inputReferences).toEqual([SAMPLE_REFERENCE]);
+  expect(actor.getSnapshot().context.messages[0].inputReferences).toEqual([SAMPLE_REFERENCE]);
+  expect(actor.getSnapshot().context.inputReferences).toEqual([]);
 
   actor.send({ type: "PROVIDER_VALID" });
   actor.send({ type: "STREAM_STARTED" });
@@ -122,7 +141,7 @@ it("chatMachine snapshots InputReference on send and clears after response done"
 // covers: BR-AG-STATE-001
 it("chatMachine: PROVIDER_INVALID in validatingProvider → error (BR-AG-STATE-001)", () => {
   const actor = bootToReady();
-  actor.send({ type: "SEND_MESSAGE", userContent: "test", inputReferences: [] });
+  actor.send({ type: "SEND_MESSAGE", userContent: "test", inputReferences: [], activeFilePath: null });
   expect(actor.getSnapshot().value).toBe("validatingProvider");
   actor.send({
     type: "PROVIDER_INVALID",
@@ -163,7 +182,7 @@ it("chatMachine: RETRY from error clears error and re-enters provider validation
 // covers: BR-AG-STATE-002
 it("chatMachine: STREAM_STARTED → streaming; TOKEN_RECEIVED accumulates streamingContent (BR-AG-STATE-002)", () => {
   const actor = bootToReady();
-  actor.send({ type: "SEND_MESSAGE", userContent: "Hello", inputReferences: [] });
+  actor.send({ type: "SEND_MESSAGE", userContent: "Hello", inputReferences: [], activeFilePath: null });
   actor.send({ type: "PROVIDER_VALID" });
   expect(actor.getSnapshot().value).toBe("sending");
   actor.send({ type: "STREAM_STARTED" });
@@ -176,7 +195,7 @@ it("chatMachine: STREAM_STARTED → streaming; TOKEN_RECEIVED accumulates stream
 // covers: BR-AG-STATE-002
 it("chatMachine: RESPONSE_DONE → ready; assistant message finalized, streamingContent cleared (BR-AG-STATE-002)", () => {
   const actor = bootToReady();
-  actor.send({ type: "SEND_MESSAGE", userContent: "Hi", inputReferences: [] });
+  actor.send({ type: "SEND_MESSAGE", userContent: "Hi", inputReferences: [], activeFilePath: null });
   actor.send({ type: "PROVIDER_VALID" });
   actor.send({ type: "STREAM_STARTED" });
   actor.send({ type: "TOKEN_RECEIVED", token: "World" });
@@ -193,7 +212,7 @@ it("chatMachine: RESPONSE_DONE → ready; assistant message finalized, streaming
 // covers: BR-AG-STATE-001
 it("chatMachine: CANCEL in streaming → cancelling → CANCEL_DONE → ready (BR-AG-STATE-001)", () => {
   const actor = bootToReady();
-  actor.send({ type: "SEND_MESSAGE", userContent: "test", inputReferences: [] });
+  actor.send({ type: "SEND_MESSAGE", userContent: "test", inputReferences: [], activeFilePath: null });
   actor.send({ type: "PROVIDER_VALID" });
   actor.send({ type: "STREAM_STARTED" });
   expect(actor.getSnapshot().value).toBe("streaming");
@@ -206,7 +225,7 @@ it("chatMachine: CANCEL in streaming → cancelling → CANCEL_DONE → ready (B
 // covers: BR-AG-PERSIST-001
 it("chatMachine: WORKSPACE_CLOSED → noWorkspace; context fully cleared (BR-AG-PERSIST-001)", () => {
   const actor = bootToReady();
-  actor.send({ type: "SEND_MESSAGE", userContent: "hello", inputReferences: [] });
+  actor.send({ type: "SEND_MESSAGE", userContent: "hello", inputReferences: [], activeFilePath: null });
   actor.send({ type: "PROVIDER_VALID" });
   actor.send({ type: "STREAM_STARTED" });
   actor.send({ type: "TOKEN_RECEIVED", token: "partial" });
@@ -330,6 +349,23 @@ describe("governance @GOV coverage for Phase 5", () => {
     expect(src).toContain("active_file_logical_state_snapshot");
     expect(src).toContain("<active_file_logical_state");
     expect(src).toContain("Do not use read_file/DiskState");
+    expect(src).not.toContain("- update_file:");
+  });
+
+  // covers: BR-AG-DATA-004
+  it("OpenAI-compatible payload excludes restored historical system messages", () => {
+    const src = readFileSync(
+      repoPath("src-tauri/src/lib.rs"),
+      "utf8",
+    );
+    const fn = src.slice(
+      src.indexOf("fn openai_compatible_messages"),
+      src.indexOf("async fn openai_compatible_chat_stream"),
+    );
+
+    expect(fn).toContain('if m.role == "system"');
+    expect(fn).toContain("continue;");
+    expect(fn).not.toContain('m.role == "user" || m.role == "assistant" || m.role == "system"');
   });
 
   // covers: BR-AG-DATA-004

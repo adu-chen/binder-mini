@@ -98,7 +98,7 @@ describe("Phase 2 governance skeleton", () => {
     expect(chatActor.getSnapshot().value).toBe("noWorkspace");
     chatActor.send({ type: "WORKSPACE_OPENED", workspaceRoot: "/tmp/ws" });
     expect(chatActor.getSnapshot().value).toBe("ready");
-    chatActor.send({ type: "SEND_MESSAGE", userContent: "hello", inputReferences: [] });
+    chatActor.send({ type: "SEND_MESSAGE", userContent: "hello", inputReferences: [], activeFilePath: null });
     expect(chatActor.getSnapshot().value).toBe("validatingProvider");
   });
 

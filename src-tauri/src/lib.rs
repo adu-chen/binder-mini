@@ -1,6 +1,7 @@
 use futures_util::StreamExt;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -107,6 +108,23 @@ struct PendingDiffRecord {
     created_at: i64,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalDiffCardRecord {
+    diff_id: String,
+    status: String,
+    message: String,
+    source_tool_id: String,
+    resolved_at: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecoveredDiffsRecord {
+    restored: Vec<PendingDiffRecord>,
+    expired: Vec<TerminalDiffCardRecord>,
+}
+
 /*
  * @GOV
  * codes: BR-AG-PERSIST-001
@@ -124,6 +142,10 @@ struct ChatMessageRecord {
     content: String,
     stream_status: Option<String>,
     tool_call_id: Option<String>,
+    input_references_json: Option<String>,
+    /// BR-AG-DATA-004: active file path at message creation time; epoch stamp for
+    /// buildChatPayload() history sanitisation. NULL = no active file.
+    active_file_path: Option<String>,
     created_at: i64,
     session_id: String,
 }
@@ -272,6 +294,13 @@ fn current_unix_seconds() -> u64 {
         .unwrap_or(0)
 }
 
+fn current_unix_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 fn chat_debug_log(app: &tauri::AppHandle, line: &str) {
     println!("{line}");
     let Ok(config_dir) = app.path().app_config_dir() else {
@@ -358,7 +387,11 @@ fn migrate_workspace_database_schema(connection: &Connection) {
         "ALTER TABLE pending_diffs ADD COLUMN applied_range_to INTEGER;",
         "ALTER TABLE chat_messages ADD COLUMN stream_status TEXT;",
         "ALTER TABLE chat_messages ADD COLUMN tool_call_id TEXT;",
+        "ALTER TABLE chat_messages ADD COLUMN input_references_json TEXT;",
         "ALTER TABLE chat_messages ADD COLUMN session_id TEXT NOT NULL DEFAULT '';",
+        // BR-AG-DATA-004: epoch stamp for prompt assembly pipeline history sanitisation
+        "ALTER TABLE chat_messages ADD COLUMN active_file_path TEXT;",
+        "ALTER TABLE terminal_diff_cards ADD COLUMN source_tool_id TEXT NOT NULL DEFAULT '';",
     ];
     for stmt in migrations {
         // Silence "duplicate column name" errors — they mean the column already exists.
@@ -387,15 +420,59 @@ fn migrate_workspace_database_schema(connection: &Connection) {
                 content TEXT NOT NULL, \
                 stream_status TEXT, \
                 tool_call_id TEXT, \
+                input_references_json TEXT, \
+                active_file_path TEXT, \
                 created_at INTEGER NOT NULL, \
                 session_id TEXT NOT NULL \
             ); \
             INSERT OR IGNORE INTO chat_messages_v2 \
-                (id, role, content, stream_status, tool_call_id, created_at, session_id) \
-                SELECT id, role, content, stream_status, tool_call_id, created_at, session_id \
+                (id, role, content, stream_status, tool_call_id, input_references_json, active_file_path, created_at, session_id) \
+                SELECT id, role, content, stream_status, tool_call_id, input_references_json, active_file_path, created_at, session_id \
                 FROM chat_messages; \
             DROP TABLE chat_messages; \
             ALTER TABLE chat_messages_v2 RENAME TO chat_messages;",
+        );
+    }
+
+    // Remove the legacy `source TEXT NOT NULL` column from older pending_diffs
+    // tables. Current writes use `source_tool_id`; leaving `source` in place
+    // makes INSERTs fail because SQLite still enforces the orphan NOT NULL column.
+    let has_pending_diff_source = connection
+        .prepare("PRAGMA table_info(pending_diffs)")
+        .ok()
+        .and_then(|mut stmt| {
+            stmt.query_map([], |row| row.get::<_, String>(1))
+                .ok()
+                .map(|rows| rows.filter_map(|r| r.ok()).any(|col| col == "source"))
+        })
+        .unwrap_or(false);
+
+    if has_pending_diff_source {
+        let _ = connection.execute_batch(
+            "DROP TABLE IF EXISTS pending_diffs_v2; \
+            CREATE TABLE pending_diffs_v2 (\
+                id TEXT PRIMARY KEY, \
+                file_path TEXT NOT NULL, \
+                original_text TEXT NOT NULL, \
+                new_text TEXT NOT NULL, \
+                summary TEXT NOT NULL, \
+                status TEXT NOT NULL, \
+                effective_path TEXT NOT NULL CHECK(effective_path IN ('open-file','closed-file')), \
+                source_tool_id TEXT NOT NULL, \
+                base_revision TEXT NOT NULL, \
+                applied_range_from INTEGER, \
+                applied_range_to INTEGER, \
+                created_at INTEGER NOT NULL \
+            ); \
+            INSERT OR IGNORE INTO pending_diffs_v2 \
+                (id, file_path, original_text, new_text, summary, status, effective_path, \
+                 source_tool_id, base_revision, applied_range_from, applied_range_to, created_at) \
+                SELECT id, file_path, original_text, new_text, summary, status, effective_path, \
+                       CASE WHEN source_tool_id IS NOT NULL AND source_tool_id <> '' THEN source_tool_id ELSE source END, \
+                       base_revision, applied_range_from, applied_range_to, created_at \
+                FROM pending_diffs; \
+            DROP TABLE pending_diffs; \
+            ALTER TABLE pending_diffs_v2 RENAME TO pending_diffs;",
         );
     }
 }
@@ -436,6 +513,7 @@ fn initialize_workspace_database_schema(connection: &Connection) -> Result<(), S
                 diff_id TEXT NOT NULL,
                 status TEXT NOT NULL,
                 message TEXT NOT NULL,
+                source_tool_id TEXT NOT NULL DEFAULT '',
                 resolved_at INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS chat_messages (
@@ -444,6 +522,8 @@ fn initialize_workspace_database_schema(connection: &Connection) -> Result<(), S
                 content TEXT NOT NULL,
                 stream_status TEXT,
                 tool_call_id TEXT,
+                input_references_json TEXT,
+                active_file_path TEXT,
                 created_at INTEGER NOT NULL,
                 session_id TEXT NOT NULL
             );
@@ -906,6 +986,70 @@ fn update_diff_status(workspace_root: String, diff_id: String, status: String) -
     Ok(())
 }
 
+fn save_terminal_card_with_conn(
+    conn: &Connection,
+    card: &TerminalDiffCardRecord,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR REPLACE INTO terminal_diff_cards \
+         (id, diff_id, status, message, source_tool_id, resolved_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            &card.diff_id,
+            &card.diff_id,
+            &card.status,
+            &card.message,
+            &card.source_tool_id,
+            card.resolved_at,
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    conn.execute(
+        "DELETE FROM pending_diffs WHERE id = ?1",
+        params![&card.diff_id],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+/*
+ * @GOV
+ * codes: BR-DE-PERSIST-002
+ * type: IO
+ * chain: DE-ACCEPT-DIFF, DE-REJECT-DIFF, DE-EXPIRE-DIFF
+ * rules: BR-DE-PERSIST-002
+ * boundary: in=TerminalDiffCardRecord and workspace_root path | out=terminal_diff_cards upserted and matching pending_diffs row deleted
+ * term_ref: TERM-WS-002, TERM-DE-002
+ */
+#[tauri::command]
+fn save_terminal_card(workspace_root: String, card: TerminalDiffCardRecord) -> Result<(), String> {
+    save_terminal_cards(workspace_root, vec![card])
+}
+
+/*
+ * @GOV
+ * codes: BR-DE-PERSIST-002, BR-DE-STATE-013
+ * type: IO
+ * chain: WS-CLOSE, DE-EXPIRE-DIFF
+ * rules: BR-DE-PERSIST-002, BR-DE-STATE-013
+ * boundary: in=TerminalDiffCardRecord list and workspace_root path | out=batch terminal_diff_cards upsert and pending_diffs cleanup in one transaction
+ * term_ref: TERM-WS-002, TERM-DE-002
+ */
+#[tauri::command]
+fn save_terminal_cards(
+    workspace_root: String,
+    cards: Vec<TerminalDiffCardRecord>,
+) -> Result<(), String> {
+    let db_path = workspace_database_path(&PathBuf::from(&workspace_root));
+    let mut conn = open_workspace_database(&db_path)?;
+    let tx = conn.transaction().map_err(|error| error.to_string())?;
+    for card in &cards {
+        save_terminal_card_with_conn(&tx, card)?;
+    }
+    tx.commit().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 /*
  * @GOV
  * codes: BR-DE-PERSIST-002, BR-WS-STATE-002
@@ -955,6 +1099,82 @@ fn load_diffs_from_workspace(workspace_root: String) -> Result<Vec<PendingDiffRe
     Ok(records)
 }
 
+fn sha256_file_hex(path: &Path) -> Result<String, String> {
+    let bytes = fs::read(path).map_err(|error| error.to_string())?;
+    let digest = Sha256::digest(&bytes);
+    Ok(format!("{:x}", digest))
+}
+
+#[tauri::command]
+fn hash_workspace_file(workspace_root: String, file_path: String) -> Result<String, String> {
+    let path = resolve_workspace_file(&workspace_root, &file_path)?;
+    sha256_file_hex(&path)
+}
+
+/*
+ * @GOV
+ * codes: BR-DE-PERSIST-002, BR-WS-STATE-002
+ * type: IO
+ * chain: WS-OPEN, DE-CREATE-DIFF, DE-EXPIRE-DIFF
+ * rules: BR-DE-PERSIST-002, BR-WS-STATE-002
+ * boundary: in=workspace_root path | out=baseRevision-checked PendingDiff records restored or expired terminal_diff_cards persisted
+ * term_ref: TERM-WS-002, TERM-DE-001, TERM-DE-002, TERM-DE-005
+ */
+#[tauri::command]
+fn recover_diffs_from_workspace(workspace_root: String) -> Result<RecoveredDiffsRecord, String> {
+    let records = load_diffs_from_workspace(workspace_root.clone())?;
+    if records.is_empty() {
+        return Ok(RecoveredDiffsRecord {
+            restored: Vec::new(),
+            expired: Vec::new(),
+        });
+    }
+
+    let db_path = workspace_database_path(&PathBuf::from(&workspace_root));
+    let mut conn = open_workspace_database(&db_path)?;
+    let tx = conn.transaction().map_err(|error| error.to_string())?;
+    let mut restored = Vec::new();
+    let mut expired = Vec::new();
+
+    for mut record in records {
+        let matches_base = resolve_workspace_file(&workspace_root, &record.file_path)
+            .and_then(|path| sha256_file_hex(&path))
+            .map(|hash| hash == record.base_revision)
+            .unwrap_or(false);
+
+        if matches_base {
+            if record.status == "preapplied" {
+                record.status = "pending".to_string();
+                record.effective_path = "closed-file".to_string();
+                record.applied_range_from = None;
+                record.applied_range_to = None;
+                tx.execute(
+                    "UPDATE pending_diffs \
+                     SET status = 'pending', effective_path = 'closed-file', \
+                         applied_range_from = NULL, applied_range_to = NULL \
+                     WHERE id = ?1",
+                    params![record.id],
+                )
+                .map_err(|error| error.to_string())?;
+            }
+            restored.push(record);
+        } else {
+            let card = TerminalDiffCardRecord {
+                diff_id: record.id,
+                status: "expired".to_string(),
+                message: "Diff expired".to_string(),
+                source_tool_id: record.source_tool_id,
+                resolved_at: current_unix_millis(),
+            };
+            save_terminal_card_with_conn(&tx, &card)?;
+            expired.push(card);
+        }
+    }
+
+    tx.commit().map_err(|error| error.to_string())?;
+    Ok(RecoveredDiffsRecord { restored, expired })
+}
+
 /*
  * @GOV
  * codes: BR-AG-PERSIST-001
@@ -979,12 +1199,14 @@ fn save_chat_messages(workspace_root: String, messages: Vec<ChatMessageRecord>) 
     .map_err(|error| error.to_string())?;
     for msg in &messages {
         tx.execute(
-            "INSERT INTO chat_messages \
-             (id, role, content, stream_status, tool_call_id, created_at, session_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO chat_messages \
+             (id, role, content, stream_status, tool_call_id, input_references_json, \
+              active_file_path, created_at, session_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 msg.id, msg.role, msg.content, msg.stream_status,
-                msg.tool_call_id, msg.created_at, workspace_root
+                msg.tool_call_id, msg.input_references_json,
+                msg.active_file_path, msg.created_at, workspace_root
             ],
         )
         .map_err(|error| error.to_string())?;
@@ -1010,7 +1232,8 @@ fn load_chat_messages(workspace_root: String) -> Result<Vec<ChatMessageRecord>, 
     let conn = Connection::open(&db_path).map_err(|error| error.to_string())?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, role, content, stream_status, tool_call_id, created_at, session_id \
+            "SELECT id, role, content, stream_status, tool_call_id, input_references_json, \
+             active_file_path, created_at, session_id \
              FROM chat_messages WHERE session_id = ?1 ORDER BY created_at ASC",
         )
         .map_err(|error| error.to_string())?;
@@ -1022,8 +1245,10 @@ fn load_chat_messages(workspace_root: String) -> Result<Vec<ChatMessageRecord>, 
                 content: row.get(2)?,
                 stream_status: row.get(3)?,
                 tool_call_id: row.get(4)?,
-                created_at: row.get(5)?,
-                session_id: row.get(6)?,
+                input_references_json: row.get(5)?,
+                active_file_path: row.get(6)?,
+                created_at: row.get(7)?,
+                session_id: row.get(8)?,
             })
         })
         .map_err(|error| error.to_string())?;
@@ -1462,7 +1687,6 @@ fn build_system_prompt(runtime: &PromptRuntimeContext) -> String {
     lines.push("  The <active_file_logical_state> CDATA shows Markdown formatting so you can understand document structure and style context. Do NOT copy those syntax characters into originalText.".to_string());
     lines.push("- For ActiveFile edits, extract originalText from <active_file_logical_state> after stripping Markdown syntax. Do not use read_file/DiskState as the edit source.".to_string());
     lines.push("- newText is the plain text replacement. Provide only the text content; do not wrap with Markdown syntax characters.".to_string());
-    lines.push("- update_file: only for files NOT currently open in the editor. MUST call read_file first to get the file content, then extract originalText (plain text, no Markdown syntax chars).".to_string());
     lines.push("- Do not replace the whole file. Always provide a precise originalText fragment.".to_string());
     lines.push("- API keys, absolute system paths, and internal credential storage are never available to the model.".to_string());
 
@@ -1766,11 +1990,12 @@ async fn anthropic_chat_stream(
         return Ok(());
     }
 
+    let system_prompt = build_system_prompt(&runtime);
     let body = serde_json::json!({
         "model": model,
         "max_tokens": 8192,
         "stream": true,
-        "system": build_system_prompt(&runtime),
+        "system": system_prompt,
         "tools": anthropic_tools(&runtime),
         "messages": api_messages
     });
@@ -1778,6 +2003,13 @@ async fn anthropic_chat_stream(
     // ── PROMPT BUILD LOG ────────────────────────────────────────────────────────
     // Prints the fully-constructed request body (system, tools, messages) to
     // stdout and the chat-debug.log file before every Anthropic model call.
+    chat_debug_log(&app, &format!(
+        "\n╔══ PROMPT SYSTEM [anthropic] request_id={} model={} active_file={} ══╗\n{}\n╚══ END PROMPT SYSTEM ══╝",
+        request_id,
+        model,
+        runtime.active_file_path.as_deref().unwrap_or("none"),
+        system_prompt
+    ));
     chat_debug_log(&app, &format!(
         "\n╔══ PROMPT BUILD [anthropic] request_id={} model={} ══╗\n{}\n╚══ END PROMPT BUILD ══╝",
         request_id,
@@ -1939,69 +2171,102 @@ async fn anthropic_chat_stream(
 }
 
 fn openai_compatible_messages(messages: &[ChatMessagePayload]) -> Vec<serde_json::Value> {
-    messages
-        .iter()
-        .filter_map(|m| {
-            if m.role == "tool" {
-                return Some(serde_json::json!({
+    let mut api_messages: Vec<serde_json::Value> = Vec::new();
+    let mut pending_tool_call_ids: Vec<String> = Vec::new();
+
+    for m in messages {
+        if m.role == "tool" {
+            let tool_call_id = m.tool_call_id.as_deref().unwrap_or("");
+            if !tool_call_id.is_empty() && pending_tool_call_ids.iter().any(|id| id == tool_call_id) {
+                api_messages.push(serde_json::json!({
                     "role": "tool",
-                    "tool_call_id": m.tool_call_id.as_deref().unwrap_or(""),
+                    "tool_call_id": tool_call_id,
                     "content": m.content
                 }));
+                pending_tool_call_ids.retain(|id| id != tool_call_id);
             }
+            continue;
+        }
 
-            if m.role == "assistant" && m.tool_call_id.is_some() {
-                let blocks: serde_json::Value = serde_json::from_str(&m.content)
-                    .unwrap_or_else(|_| serde_json::json!([]));
-                let mut content_parts: Vec<String> = Vec::new();
-                let mut tool_calls: Vec<serde_json::Value> = Vec::new();
-                if let Some(items) = blocks.as_array() {
-                    for item in items {
-                        match item["type"].as_str() {
-                            Some("text") => {
-                                if let Some(text) = item["text"].as_str() {
-                                    content_parts.push(text.to_string());
-                                }
+        if m.role == "assistant" && m.tool_call_id.is_some() {
+            let blocks: serde_json::Value = serde_json::from_str(&m.content)
+                .unwrap_or_else(|_| serde_json::json!([]));
+            let mut content_parts: Vec<String> = Vec::new();
+            let mut tool_calls: Vec<serde_json::Value> = Vec::new();
+            if let Some(items) = blocks.as_array() {
+                for item in items {
+                    match item["type"].as_str() {
+                        Some("text") => {
+                            if let Some(text) = item["text"].as_str() {
+                                content_parts.push(text.to_string());
                             }
-                            Some("tool_use") => {
-                                let id = item["id"].as_str().unwrap_or("");
-                                let name = item["name"].as_str().unwrap_or("");
-                                let arguments = serde_json::to_string(
-                                    item.get("input").unwrap_or(&serde_json::Value::Null),
-                                )
-                                .unwrap_or_else(|_| "{}".to_string());
-                                tool_calls.push(serde_json::json!({
-                                    "id": id,
-                                    "type": "function",
-                                    "function": {
-                                        "name": name,
-                                        "arguments": arguments
-                                    }
-                                }));
-                            }
-                            _ => {}
                         }
+                        Some("tool_use") => {
+                            let id = item["id"].as_str().unwrap_or("");
+                            let name = item["name"].as_str().unwrap_or("");
+                            if id.is_empty() || name.is_empty() {
+                                continue;
+                            }
+                            let arguments = serde_json::to_string(
+                                item.get("input").unwrap_or(&serde_json::Value::Null),
+                            )
+                            .unwrap_or_else(|_| "{}".to_string());
+                            tool_calls.push(serde_json::json!({
+                                "id": id,
+                                "type": "function",
+                                "function": {
+                                    "name": name,
+                                    "arguments": arguments
+                                }
+                            }));
+                        }
+                        _ => {}
                     }
                 }
-                let content = if content_parts.is_empty() {
+            }
+            let content_text = content_parts.join("");
+            if tool_calls.is_empty() {
+                if !content_text.trim().is_empty() {
+                    api_messages.push(serde_json::json!({
+                        "role": "assistant",
+                        "content": content_text
+                    }));
+                }
+                pending_tool_call_ids.clear();
+            } else {
+                pending_tool_call_ids = tool_calls
+                    .iter()
+                    .filter_map(|call| call["id"].as_str().map(|id| id.to_string()))
+                    .collect();
+                let content = if content_text.trim().is_empty() {
                     serde_json::Value::Null
                 } else {
-                    serde_json::Value::String(content_parts.join(""))
+                    serde_json::Value::String(content_text)
                 };
-                return Some(serde_json::json!({
+                api_messages.push(serde_json::json!({
                     "role": "assistant",
                     "content": content,
                     "tool_calls": tool_calls
                 }));
             }
+            continue;
+        }
 
-            if m.role == "user" || m.role == "assistant" || m.role == "system" {
-                Some(serde_json::json!({ "role": m.role, "content": m.content }))
-            } else {
-                None
+        if m.role == "system" {
+            continue;
+        }
+
+        if m.role == "user" || m.role == "assistant" {
+            if m.role == "assistant" && m.content.trim().is_empty() {
+                pending_tool_call_ids.clear();
+                continue;
             }
-        })
-        .collect()
+            pending_tool_call_ids.clear();
+            api_messages.push(serde_json::json!({ "role": m.role, "content": m.content }));
+        }
+    }
+
+    api_messages
 }
 
 async fn openai_compatible_chat_stream(
@@ -2014,9 +2279,10 @@ async fn openai_compatible_chat_stream(
     runtime: PromptRuntimeContext,
 ) -> Result<(), String> {
     let mut api_messages = openai_compatible_messages(&messages);
+    let system_prompt = build_system_prompt(&runtime);
     api_messages.insert(0, serde_json::json!({
         "role": "system",
-        "content": build_system_prompt(&runtime)
+        "content": system_prompt
     }));
     if api_messages.is_empty() {
         chat_debug_error(&app, &format!(
@@ -2044,6 +2310,14 @@ async fn openai_compatible_chat_stream(
     // ── PROMPT BUILD LOG ────────────────────────────────────────────────────────
     // Prints the fully-constructed request body (system message, tools, messages)
     // to stdout and the chat-debug.log file before every OpenAI-compatible model call.
+    chat_debug_log(&app, &format!(
+        "\n╔══ PROMPT SYSTEM [openai-compat] request_id={} endpoint={} model={} active_file={} ══╗\n{}\n╚══ END PROMPT SYSTEM ══╝",
+        request_id,
+        endpoint,
+        model,
+        runtime.active_file_path.as_deref().unwrap_or("none"),
+        system_prompt
+    ));
     chat_debug_log(&app, &format!(
         "\n╔══ PROMPT BUILD [openai-compat] request_id={} endpoint={} model={} ══╗\n{}\n╚══ END PROMPT BUILD ══╝",
         request_id,
@@ -2591,6 +2865,96 @@ mod tests {
     }
 
     #[test]
+    fn test_save_terminal_cards_deletes_pending_rows() {
+        let root = test_workspace_root("terminal-card");
+        fs::create_dir_all(&root).expect("fixture workspace should be created");
+        initialize_workspace_metadata(&root).expect("metadata should initialize");
+        let root_string = root.to_string_lossy().to_string();
+
+        save_pending_diff(root_string.clone(), make_diff("d-terminal", "pending"))
+            .expect("pending diff should be saved");
+        save_terminal_cards(
+            root_string.clone(),
+            vec![TerminalDiffCardRecord {
+                diff_id: "d-terminal".to_string(),
+                status: "expired".to_string(),
+                message: "Diff expired".to_string(),
+                source_tool_id: "t1".to_string(),
+                resolved_at: 2_000,
+            }],
+        )
+        .expect("terminal card should save");
+
+        let loaded = load_diffs_from_workspace(root_string.clone()).expect("diffs should load");
+        assert_eq!(loaded.len(), 0);
+
+        let conn = Connection::open(workspace_database_path(&root)).expect("db should open");
+        let terminal_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM terminal_diff_cards WHERE diff_id = 'd-terminal' AND source_tool_id = 't1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("terminal card should be queryable");
+        assert_eq!(terminal_count, 1);
+
+        fs::remove_dir_all(root).expect("fixture workspace should be removed");
+    }
+
+    #[test]
+    fn test_recover_diffs_restores_matching_base_revision_as_pending() {
+        let root = test_workspace_root("recover-match");
+        fs::create_dir_all(&root).expect("fixture workspace should be created");
+        fs::write(root.join("notes.md"), "old").expect("fixture file should be written");
+        initialize_workspace_metadata(&root).expect("metadata should initialize");
+        let root_string = root.to_string_lossy().to_string();
+        let mut diff = make_diff("d-match", "preapplied");
+        diff.base_revision = sha256_file_hex(&root.join("notes.md")).expect("hash should compute");
+        diff.applied_range_from = Some(1);
+        diff.applied_range_to = Some(3);
+
+        save_pending_diff(root_string.clone(), diff).expect("diff should be saved");
+        let recovered = recover_diffs_from_workspace(root_string).expect("diffs should recover");
+
+        assert_eq!(recovered.restored.len(), 1);
+        assert_eq!(recovered.expired.len(), 0);
+        assert_eq!(recovered.restored[0].id, "d-match");
+        assert_eq!(recovered.restored[0].status, "pending");
+        assert_eq!(recovered.restored[0].effective_path, "closed-file");
+        assert_eq!(recovered.restored[0].applied_range_from, None);
+        assert_eq!(recovered.restored[0].applied_range_to, None);
+
+        fs::remove_dir_all(root).expect("fixture workspace should be removed");
+    }
+
+    #[test]
+    fn test_recover_diffs_expires_mismatched_base_revision() {
+        let root = test_workspace_root("recover-mismatch");
+        fs::create_dir_all(&root).expect("fixture workspace should be created");
+        fs::write(root.join("notes.md"), "new content").expect("fixture file should be written");
+        initialize_workspace_metadata(&root).expect("metadata should initialize");
+        let root_string = root.to_string_lossy().to_string();
+        let mut diff = make_diff("d-mismatch", "pending");
+        diff.base_revision = "0".repeat(64);
+
+        save_pending_diff(root_string.clone(), diff).expect("diff should be saved");
+        let recovered = recover_diffs_from_workspace(root_string.clone()).expect("diffs should recover");
+
+        assert_eq!(recovered.restored.len(), 0);
+        assert_eq!(recovered.expired.len(), 1);
+        assert_eq!(recovered.expired[0].diff_id, "d-mismatch");
+        assert_eq!(recovered.expired[0].status, "expired");
+        assert_eq!(
+            load_diffs_from_workspace(root_string)
+                .expect("diffs should load")
+                .len(),
+            0,
+        );
+
+        fs::remove_dir_all(root).expect("fixture workspace should be removed");
+    }
+
+    #[test]
     fn test_save_and_load_chat_messages() {
         let root = test_workspace_root("chat-messages");
         fs::create_dir_all(&root).expect("fixture workspace should be created");
@@ -2601,16 +2965,19 @@ mod tests {
             ChatMessageRecord {
                 id: "m1".to_string(), role: "user".to_string(),
                 content: "hello".to_string(), stream_status: None, tool_call_id: None,
+                input_references_json: Some("[{\"id\":\"r1\",\"kind\":\"text\",\"content\":\"ref\",\"displayName\":\"Ref\",\"createdAt\":100}]".to_string()),
                 created_at: 1_000, session_id: root_string.clone(),
             },
             ChatMessageRecord {
                 id: "m2".to_string(), role: "assistant".to_string(),
                 content: "world".to_string(), stream_status: Some("done".to_string()),
-                tool_call_id: None, created_at: 2_000, session_id: root_string.clone(),
+                tool_call_id: None, input_references_json: None,
+                created_at: 2_000, session_id: root_string.clone(),
             },
             ChatMessageRecord {
                 id: "m3".to_string(), role: "user".to_string(),
                 content: "again".to_string(), stream_status: None, tool_call_id: None,
+                input_references_json: None,
                 created_at: 3_000, session_id: root_string.clone(),
             },
         ];
@@ -2622,6 +2989,10 @@ mod tests {
         assert_eq!(loaded[1].id, "m2");
         assert_eq!(loaded[2].id, "m3");
         assert_eq!(loaded[1].stream_status, Some("done".to_string()));
+        assert_eq!(
+            loaded[0].input_references_json,
+            Some("[{\"id\":\"r1\",\"kind\":\"text\",\"content\":\"ref\",\"displayName\":\"Ref\",\"createdAt\":100}]".to_string()),
+        );
 
         fs::remove_dir_all(root).expect("fixture workspace should be removed");
     }
@@ -2637,6 +3008,7 @@ mod tests {
             ChatMessageRecord {
                 id: "old1".to_string(), role: "user".to_string(),
                 content: "batch one".to_string(), stream_status: None, tool_call_id: None,
+                input_references_json: None,
                 created_at: 1_000, session_id: root_string.clone(),
             },
         ];
@@ -2644,11 +3016,13 @@ mod tests {
             ChatMessageRecord {
                 id: "new1".to_string(), role: "user".to_string(),
                 content: "batch two a".to_string(), stream_status: None, tool_call_id: None,
+                input_references_json: None,
                 created_at: 2_000, session_id: root_string.clone(),
             },
             ChatMessageRecord {
                 id: "new2".to_string(), role: "assistant".to_string(),
                 content: "batch two b".to_string(), stream_status: None, tool_call_id: None,
+                input_references_json: None,
                 created_at: 3_000, session_id: root_string.clone(),
             },
         ];
@@ -2697,6 +3071,7 @@ mod tests {
                 content: "new message".to_string(),
                 stream_status: None,
                 tool_call_id: None,
+                input_references_json: None,
                 created_at: 2_000,
                 session_id: root_string.clone(),
             }],
@@ -2764,7 +3139,11 @@ pub fn run() {
             search_files,
             save_pending_diff,
             update_diff_status,
+            save_terminal_card,
+            save_terminal_cards,
             load_diffs_from_workspace,
+            recover_diffs_from_workspace,
+            hash_workspace_file,
             save_chat_messages,
             load_chat_messages,
             save_api_key,
