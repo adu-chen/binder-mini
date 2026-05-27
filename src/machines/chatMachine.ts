@@ -43,6 +43,7 @@ export interface ChatMachineContext {
 export type ChatMachineEvent =
   | { type: "WORKSPACE_OPENED"; workspaceRoot: string }
   | { type: "WORKSPACE_CLOSED" }
+  | { type: "MESSAGES_RESTORED"; messages: AgentMessage[] }
   | { type: "SEND_MESSAGE"; userContent: string; inputReferences: InputReference[] }
   | { type: "PROVIDER_VALID" }
   | { type: "PROVIDER_INVALID"; errorCode: string; errorMessage: string }
@@ -92,6 +93,14 @@ export const chatMachine = setup({
         messages: [...context.messages, userMsg],
         inputReferences: event.inputReferences,
       };
+    }),
+    restoreMessages: assign(({ context, event }) => {
+      if (event.type !== "MESSAGES_RESTORED") return {};
+      const byId = new Map<string, AgentMessage>();
+      for (const message of [...event.messages, ...context.messages]) {
+        byId.set(message.id, message);
+      }
+      return { messages: [...byId.values()].sort((a, b) => a.createdAt - b.createdAt) };
     }),
     finalizeStreamingMessage: assign(({ context }) => {
       if (!context.streamingContent) return {};
@@ -173,6 +182,7 @@ export const chatMachine = setup({
     ready: {
       on: {
         WORKSPACE_CLOSED: { target: "noWorkspace", actions: "persistAndClearSession" },
+        MESSAGES_RESTORED: { actions: "restoreMessages" },
         SEND_MESSAGE: { target: "validatingProvider", actions: "appendUserMessage" },
         PROVIDER_INVALID: { target: "error", actions: "assignError" },
         ACTIVE_FILE_CHANGED: { actions: "appendContextSwitchMessage" },
@@ -180,6 +190,7 @@ export const chatMachine = setup({
     },
     validatingProvider: {
       on: {
+        MESSAGES_RESTORED: { actions: "restoreMessages" },
         PROVIDER_VALID: "sending",
         PROVIDER_INVALID: { target: "error", actions: "assignError" },
         WORKSPACE_CLOSED: { target: "noWorkspace", actions: "persistAndClearSession" },
@@ -187,6 +198,7 @@ export const chatMachine = setup({
     },
     sending: {
       on: {
+        MESSAGES_RESTORED: { actions: "restoreMessages" },
         STREAM_STARTED: "streaming",
         CANCEL: "cancelling",
         FAILED: { target: "error", actions: "assignError" },
@@ -195,6 +207,7 @@ export const chatMachine = setup({
     },
     streaming: {
       on: {
+        MESSAGES_RESTORED: { actions: "restoreMessages" },
         TOKEN_RECEIVED: { actions: "accumulateToken" },
         // BR-DE-UI-003: finalizeToolRequestMessage replaces clearStreamingContent —
         // it both clears streamingContent and appends an assistant message with toolCallId,
@@ -209,6 +222,7 @@ export const chatMachine = setup({
     },
     toolCalling: {
       on: {
+        MESSAGES_RESTORED: { actions: "restoreMessages" },
         TOOL_FINISHED: "streaming",
         CANCEL: "cancelling",
         FAILED: { target: "error", actions: "assignError" },
@@ -218,6 +232,7 @@ export const chatMachine = setup({
     },
     cancelling: {
       on: {
+        MESSAGES_RESTORED: { actions: "restoreMessages" },
         CANCEL_DONE: "ready",
         ABORT_FAILED: { target: "error", actions: "assignError" },
         WORKSPACE_CLOSED: { target: "noWorkspace", actions: "persistAndClearSession" },
@@ -225,6 +240,7 @@ export const chatMachine = setup({
     },
     error: {
       on: {
+        MESSAGES_RESTORED: { actions: "restoreMessages" },
         RETRY: { target: "validatingProvider", actions: "clearError" },
         // BR-AG-STATE-001: allow sending a new message directly from error state;
         // clears the prior error and begins a fresh provider-validation cycle.

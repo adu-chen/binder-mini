@@ -51,6 +51,57 @@ it("chatMachine: SEND_MESSAGE → validatingProvider; user message appended to c
   expect(msgs[0].content).toBe("Hello, binder!");
 });
 
+// covers: BR-AG-PERSIST-001
+it("chatMachine: MESSAGES_RESTORED writes persisted history into context.messages (BR-AG-PERSIST-001)", () => {
+  const actor = bootToReady("/tmp/ws");
+  actor.send({
+    type: "MESSAGES_RESTORED",
+    messages: [
+      {
+        id: "m-user",
+        role: "user",
+        content: "old prompt",
+        createdAt: 1,
+        sessionId: "/tmp/ws",
+      },
+      {
+        id: "m-tool",
+        role: "tool",
+        content: "{\"success\":true}",
+        streamStatus: "done",
+        toolCallId: "tool-1",
+        createdAt: 2,
+        sessionId: "/tmp/ws",
+      },
+    ],
+  });
+  const msgs = actor.getSnapshot().context.messages;
+  expect(msgs).toHaveLength(2);
+  expect(msgs[1].role).toBe("tool");
+  expect(msgs[1].toolCallId).toBe("tool-1");
+  expect(msgs[1].streamStatus).toBe("done");
+});
+
+// covers: BR-AG-PERSIST-001
+it("chatMachine: MESSAGES_RESTORED merges with live messages when restore finishes late", () => {
+  const actor = bootToReady("/tmp/ws");
+  actor.send({ type: "SEND_MESSAGE", userContent: "new prompt", inputReferences: [] });
+  actor.send({
+    type: "MESSAGES_RESTORED",
+    messages: [
+      {
+        id: "old",
+        role: "user",
+        content: "old prompt",
+        createdAt: 1,
+        sessionId: "/tmp/ws",
+      },
+    ],
+  });
+  const msgs = actor.getSnapshot().context.messages;
+  expect(msgs.map((m) => m.content)).toEqual(["old prompt", "new prompt"]);
+});
+
 // covers: BR-AG-DATA-001
 it("chatMachine snapshots InputReference on send and clears after response done", () => {
   const actor = bootToReady();

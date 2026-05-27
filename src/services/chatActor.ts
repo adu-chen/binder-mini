@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useActorRef, useSelector } from "@xstate/react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
@@ -62,60 +62,46 @@ export function useChatActor() {
     // BR-AG-PERSIST-001: restore messages from workspace DB on open
     try {
       const records = await loadChatMessages(workspaceRoot);
-      // Records arrive in saved order; inject directly into machine context
-      // by appending synthetic ACTIVE_FILE_CHANGED — no, instead: machine starts with
-      // empty messages, we populate via a side-channel reassignment after WORKSPACE_OPENED.
-      // For Phase 5, restored messages are stored in a separate ref shown alongside live messages.
-      const msgs = records.map((r) => ({
+      const msgs: AgentMessage[] = records.map((r) => ({
         id: r.id,
         role: r.role as AgentMessage["role"],
         content: r.content,
-        streamStatus: undefined,
+        streamStatus: parseStreamStatus(r.streamStatus),
+        toolCallId: r.toolCallId ?? undefined,
         createdAt: r.createdAt,
         sessionId: r.sessionId,
       }));
-      restoredMessagesRef.current = msgs;
-      setRestoredMessages(msgs);
+      chatActor.send({ type: "MESSAGES_RESTORED", messages: msgs });
     } catch {
-      restoredMessagesRef.current = [];
-      setRestoredMessages([]);
+      chatActor.send({ type: "MESSAGES_RESTORED", messages: [] });
     }
   }
-
-  // Restored messages from DB (shown before live session messages).
-  // State drives re-render; ref provides synchronous access during SSE message accumulation.
-  const [restoredMessages, setRestoredMessages] = useState<AgentMessage[]>([]);
-  const restoredMessagesRef = useRef<AgentMessage[]>([]);
 
   async function onWorkspaceClosed() {
     const workspaceRoot = workspaceRootRef.current;
     // BR-AG-PERSIST-001: persist messages before clearing
-    const messagesToSave = mergeMessagesForPersistence(restoredMessagesRef.current, chatMessages);
+    const messagesToSave = chatActor.getSnapshot().context.messages;
     if (workspaceRoot && messagesToSave.length > 0) {
       try {
-        await saveChatMessages(
-          workspaceRoot,
-          messagesToSave.map((m) => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            streamStatus: m.streamStatus ?? null,
-            toolCallId: m.toolCallId ?? null,
-            createdAt: m.createdAt,
-            sessionId: m.sessionId,
-          })),
-        );
+        await saveChatMessages(workspaceRoot, messagesToRecords(messagesToSave));
       } catch {
         // persistence failure must not block workspace close
       }
     }
     // Stop any active SSE stream
     stopStream();
-    restoredMessagesRef.current = [];
-    setRestoredMessages([]);
     workspaceRootRef.current = null;
     chatActor.send({ type: "WORKSPACE_CLOSED" });
   }
+
+  useEffect(() => {
+    const workspaceRoot = workspaceRootRef.current;
+    if (!workspaceRoot || chatMessages.length === 0) return;
+    const timeout = window.setTimeout(() => {
+      void saveChatMessages(workspaceRoot, messagesToRecords(chatMessages));
+    }, 500);
+    return () => window.clearTimeout(timeout);
+  }, [chatMessages]);
 
   function stopStream() {
     activeRequestIdRef.current = null;
@@ -150,15 +136,20 @@ export function useChatActor() {
     return payload.request_id ?? payload.requestId ?? null;
   }
 
-  function mergeMessagesForPersistence(
-    restored: AgentMessage[],
-    live: AgentMessage[],
-  ): AgentMessage[] {
-    const byId = new Map<string, AgentMessage>();
-    for (const msg of [...restored, ...live]) {
-      byId.set(msg.id, msg);
-    }
-    return [...byId.values()].sort((a, b) => a.createdAt - b.createdAt);
+  function parseStreamStatus(value: string | null): AgentMessage["streamStatus"] | undefined {
+    return value === "streaming" || value === "done" || value === "cancelled" ? value : undefined;
+  }
+
+  function messagesToRecords(messages: AgentMessage[]) {
+    return messages.map((m) => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      streamStatus: m.streamStatus ?? null,
+      toolCallId: m.toolCallId ?? null,
+      createdAt: m.createdAt,
+      sessionId: m.sessionId,
+    }));
   }
 
   function createFailedToolResult(call: ToolCallPayload, reason: string): AgentMessage {
@@ -541,7 +532,6 @@ export function useChatActor() {
       ...(m.toolCallId ? { toolCallId: m.toolCallId } : {}),
     });
     messagesForNextRequestRef.current = [
-      ...restoredMessagesRef.current.map(toPayload),
       ...snap.context.messages.map(toPayload),
     ];
 
@@ -564,16 +554,10 @@ export function useChatActor() {
     chatActor.send({ type: "ACTIVE_FILE_CHANGED", oldPath, newPath });
   }
 
-  // Combined view: restored DB messages + live session messages.
-  // Uses restoredMessages state (not ref) so React re-renders after DB load.
-  function getAllMessages(): AgentMessage[] {
-    return [...restoredMessages, ...chatMessages];
-  }
-
   return {
     chatActor,
     chatValue,
-    chatMessages: getAllMessages(),
+    chatMessages,
     chatStreamingContent,
     chatErrorMessage,
     onWorkspaceOpened,
