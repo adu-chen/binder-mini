@@ -3,7 +3,7 @@ import { useActorRef, useSelector } from "@xstate/react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { chatMachine } from "../machines/chatMachine";
-import { saveChatMessages, loadChatMessages, readFile, listFiles, searchFiles } from "../ipc";
+import { saveChatMessages, loadChatMessages, readFile, listFiles, searchFiles, savePendingDiff } from "../ipc";
 import type { AgentMessage } from "../machines/chatMachine";
 import { applyDiffReplaceInEditor } from "./editorActor";
 import { diffStore } from "../stores/diffStore";
@@ -268,10 +268,42 @@ export function useChatActor() {
       baseRevision: applyResult.success ? applyResult.contentRevisionBeforeApply : "0".repeat(64),
       effectivePath: "open-file",
     });
+    if (workspaceRoot) {
+      void savePendingDiff(workspaceRoot, {
+        id: pendingDiff.id,
+        filePath: pendingDiff.filePath,
+        originalText: pendingDiff.originalText,
+        newText: pendingDiff.newText,
+        summary: pendingDiff.summary,
+        status: pendingDiff.status,
+        effectivePath: pendingDiff.effectivePath,
+        sourceToolId: pendingDiff.sourceToolId,
+        baseRevision: pendingDiff.baseRevision,
+        appliedRangeFrom: null,
+        appliedRangeTo: null,
+        createdAt: pendingDiff.createdAt,
+      });
+    }
 
     if (applyResult.success) {
       diffStore.updateDiff(pendingDiff.id, { appliedRange: applyResult.appliedRange });
       diffStore.getDiffActor(pendingDiff.id)?.send({ type: "LOGICAL_STATE_APPLIED" });
+      if (workspaceRoot) {
+        void savePendingDiff(workspaceRoot, {
+          id: pendingDiff.id,
+          filePath: pendingDiff.filePath,
+          originalText: pendingDiff.originalText,
+          newText: pendingDiff.newText,
+          summary: pendingDiff.summary,
+          status: "preapplied",
+          effectivePath: pendingDiff.effectivePath,
+          sourceToolId: pendingDiff.sourceToolId,
+          baseRevision: pendingDiff.baseRevision,
+          appliedRangeFrom: applyResult.appliedRange.from,
+          appliedRangeTo: applyResult.appliedRange.to,
+          createdAt: pendingDiff.createdAt,
+        });
+      }
       toolResultContent = JSON.stringify({
         success: true,
         diffId: pendingDiff.id,
@@ -280,6 +312,22 @@ export function useChatActor() {
     } else {
       diffStore.getDiffActor(pendingDiff.id)?.send({ type: "LOGICAL_STATE_APPLIED_FAILED" });
       diffStore.moveToTerminal(pendingDiff.id, createTerminalErrorCard(pendingDiff.id, call.id));
+      if (workspaceRoot) {
+        void savePendingDiff(workspaceRoot, {
+          id: pendingDiff.id,
+          filePath: pendingDiff.filePath,
+          originalText: pendingDiff.originalText,
+          newText: pendingDiff.newText,
+          summary: pendingDiff.summary,
+          status: "error",
+          effectivePath: pendingDiff.effectivePath,
+          sourceToolId: pendingDiff.sourceToolId,
+          baseRevision: pendingDiff.baseRevision,
+          appliedRangeFrom: null,
+          appliedRangeTo: null,
+          createdAt: pendingDiff.createdAt,
+        });
+      }
       toolResultContent = JSON.stringify({
         success: false,
         diffId: pendingDiff.id,

@@ -18,7 +18,7 @@ import type { MarkdownStorage } from "tiptap-markdown";
 import { Plugin, PluginKey } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
 import { BlockIdExtension, blockIdPluginKey } from "./extensions/BlockIdExtension";
-import { getEditorSelectionReference, registerEditor, unregisterEditor } from "../stores/editorRegistry";
+import { registerEditor, unregisterEditor } from "../stores/editorRegistry";
 
 type EditorStateName =
   | "noWorkspace"

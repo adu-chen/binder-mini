@@ -42,51 +42,6 @@ export function getActiveEditor(): Editor | null {
   return _activeEditor;
 }
 
-export interface ActiveEditorSelectionReference {
-  content: string;
-  anchor: {
-    blockId?: string;
-    startOffset: number;
-    endOffset: number;
-    offsetKind: "character";
-  };
-}
-
-export function getEditorSelectionReference(editor: Editor): ActiveEditorSelectionReference | null {
-  if (editor.isDestroyed) return null;
-  const { state } = editor.view;
-  const { from, to, empty } = state.selection;
-  if (empty || from >= to) return null;
-
-  const content = state.doc.textBetween(from, to, "\n").trim();
-  if (!content) return null;
-
-  let blockId: string | undefined;
-  let blockStart = from;
-  let blockEnd = to;
-  state.doc.nodesBetween(from, to, (node, pos) => {
-    if (blockId) return false;
-    if (node.type.name !== "heading" && node.type.name !== "paragraph") return true;
-    const nodeBlockId =
-      (node.attrs as Record<string, unknown>)?.["data-block-id"] as string | undefined;
-    if (!nodeBlockId) return true;
-    blockId = nodeBlockId;
-    blockStart = pos + 1;
-    blockEnd = pos + node.nodeSize - 1;
-    return false;
-  });
-
-  return {
-    content,
-    anchor: {
-      blockId,
-      startOffset: Math.max(0, from - blockStart),
-      endOffset: Math.max(0, Math.min(to, blockEnd) - blockStart),
-      offsetKind: "character",
-    },
-  };
-}
-
 // ── document_structure extraction ──────────────────────────────────────────
 
 const DOCUMENT_STRUCTURE_MAX_CHARS = 1500;

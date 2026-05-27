@@ -152,7 +152,6 @@ DialogLayer
 - 文件图标（按扩展名区分 md/txt/other）
 - 文件名
 - 右键菜单：重命名 / 移动 / 删除（需二次确认）
-- 拖拽到 Chat 输入框 → 创建 file 类 InputReference
 
 **状态映射**
 
@@ -232,7 +231,7 @@ DialogLayer
 
 **InputReferenceBar**（chatInput 上方）
 
-- 每个 InputReference 以标签形式展示：`[📄 文件名]` / `[🔗 URL]` / `[" 文本片段…"]`
+- 每个 InputReference 以标签形式展示：`[🔗 URL]` / `[" 文本片段…"]`
 - 右侧 `✕` 删除单个引用
 - 整体在 `inputReferences.length === 0` 时隐藏
 
@@ -381,20 +380,12 @@ Tab 关闭含 preapplied diff 时（三选一对话框）：
 
 ## 7. 交互细节
 
-### 7.1 InputReference 拖拽到 Chat
-
-用户将文件树节点、EditorTab 或编辑器选区拖入 ChatInput 区域：
-- 拖拽进入时：ChatInput 边框高亮（`--accent`）
-- 文件树节点：创建 `kind: "file"` workspace_file 引用，追加到 InputReferenceBar
-- EditorTab：创建 `kind: "file"` editor_content 全文引用，anchor 为 null
-- 编辑器选区：创建 `kind: "file"` editor_content 选区引用，携带 blockId/startOffset/endOffset
-
-### 7.2 ChatInput URL / 文本粘贴
+### 7.1 ChatInput URL / 文本粘贴
 
 - 粘贴内容以 `http://` 或 `https://` 开头 → 创建 `kind: "url"` InputReference
 - 其他粘贴内容 → 创建 `kind: "text"` InputReference（不按长度分叉）
 
-### 7.3 Provider 配置入口
+### 7.2 Provider 配置入口
 
 - 右栏 ChatPanel 右上角齿轮图标 → 展开 ProviderConfigPanel 抽屉
 - apiKeyConfigured 为 false 时，齿轮图标加 `--warning` 小圆点提示
@@ -452,7 +443,7 @@ binder-mini 为桌面端 Tauri 应用，不需要移动端适配。最小支持�
 | TERM-ED-001 | EditorTab | 编辑器标签页 | §4.2 |
 | TERM-ED-003 | editorMachine | 编辑器状态机 | §4.2 |
 | TERM-DOC-003 | DisplayState | 显示状态 | §4.2 |
-| TERM-AG-002 | InputReference | 输入引用 | §4.3、§7.1、§7.2 |
+| TERM-AG-002 | InputReference | 输入引用 | §4.3、§7.1 |
 | TERM-AG-004 | chatMachine | 对话状态机 | §4.3 |
 | TERM-AG-011 | ProviderConfig | Provider 配置 | §4.3 |
 | TERM-DE-001 | PendingDiff | 待审差异 | §5.1、§5.2 |

@@ -144,7 +144,7 @@ export function loadDiffsFromWorkspace(_workspaceRoot: string): Promise<PendingD
  * chain: WS-CLOSE, AG-SEND-MESSAGE
  * rules: BR-AG-PERSIST-001
  * boundary: in=AgentMessage list and workspace_root path | out=chat_messages table replaced in WorkspaceDatabase via save_chat_messages Tauri command
- * term_ref: TERM-WS-002, TERM-AG-010, TERM-AG-013
+ * term_ref: TERM-WS-002, TERM-AG-010, TERM-AG-014
  */
 export function saveChatMessages(_workspaceRoot: string, _messages: ChatMessageRecord[]): Promise<void> {
   return invoke("save_chat_messages", { workspaceRoot: _workspaceRoot, messages: _messages });
@@ -157,7 +157,7 @@ export function saveChatMessages(_workspaceRoot: string, _messages: ChatMessageR
  * chain: WS-OPEN, AG-SEND-MESSAGE
  * rules: BR-AG-PERSIST-001
  * boundary: in=workspace_root path | out=ChatMessageRecord list ordered by created_at from WorkspaceDatabase chat_messages via load_chat_messages Tauri command
- * term_ref: TERM-WS-002, TERM-AG-010, TERM-AG-013
+ * term_ref: TERM-WS-002, TERM-AG-010, TERM-AG-014
  */
 export function loadChatMessages(_workspaceRoot: string): Promise<ChatMessageRecord[]> {
   return invoke("load_chat_messages", { workspaceRoot: _workspaceRoot });

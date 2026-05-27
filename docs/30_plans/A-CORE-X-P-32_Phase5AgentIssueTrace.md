@@ -345,7 +345,6 @@ Phase 5 交付物不包含：
 | DiffStore + diffMachine 实例化 | Phase 6-A |
 | GreenAdditionDecoration 实现 | Phase 6-C |
 | document_structure XML 在 PromptRuntime L0（需 BlockId）| Phase 6-D |
-| InputReference 拖拽文件树入口（UI 交互完整实现）| Phase 5-F（延后）|
 
 ---
 

@@ -27,7 +27,7 @@ Agent 需求必须满足以下原则：
 2. 内容编辑必须经过 Diff Review，不得直接写入文件。
 3. Provider 配置是 Agent 请求的前提，缺失或无效时必须阻断发送。
 4. 工具执行必须可审计，输入边界和执行结果必须记录。
-5. InputReference 是结构化内容载体，传递引用标签、内容快照和精确坐标（blockId、lineRange、textOffset）；Agent 根据引用类型和坐标语义自行判断是将引用作为编辑对象还是背景参考；内容写入必须经由 Diff Review，结构操作仍经由 WS 工具链。
+5. InputReference 是结构化内容载体，传递引用标签和内容快照；Agent 根据引用类型自行判断是将引用作为编辑对象还是背景参考；内容写入必须经由 Diff Review，结构操作仍经由 WS 工具链。
 
 ## 3. 需求清单
 
@@ -386,7 +386,6 @@ chatMachine 覆盖 Agent 对话会话全链路，必须包含以下状态：
 |------|------|---------|
 | 2026-05-26 | v1.9 | REQ-AG-002 验收口径补充 IME 兼容约束（isComposing = true 时 Enter 不触发发送）；AG-SEND-MESSAGE-FLOW S01 异常列补充 ERR-00（IME 合成阶段静默忽略）；§9 新增"IME 合成与 Enter 键兼容"决策约束 |
 | 2026-05-25 | v1.7 | 补齐 ActiveFile 编辑上下文需求：REQ-AG-004/007 明确 edit_current_editor_document 必须以 ED LogicalStateSnapshot 为上下文源，read_file/DiskState 不得替代当前编辑器逻辑态 |
-| 2026-05-26 | v1.8 | REQ-AG-006 对齐设计文档 AG-M-P-03 v1.4：editor_content 入口区分已实现（按钮/TabDrag，全文快照，anchor=null）和设计预留（文本选区，anchor 有效）；anchor 字段重命名为 blockId/startOffset/endOffset（对齐 InputReferenceAnchor）；Agent 语义判断规则改为"anchor 是否有效"而非"类型是否为 editor_content" |
 | 2026-05-25 | v1.6 | 补齐 REQ-AG-001-A API key 持久化需求：明确应用级持久化、跨重启恢复、Workspace 切换不清空、前端不持有明文 key、workspace.db 不保存 key；新增 Provider key 持久化流程和跨模块交互 |
 | 2026-05-25 | v1.5 | 治理修复：API key 存储口径改为前端不持有明文 key；allowedTools 决策移除阶段性实现描述；§6 能力拆分改为顺序索引，不表达实现完成度 |
 | 2026-05-23 | v1.0 | 初始版本，定义 Agent 功能需求颗粒度和 REQ-AG-* ID |

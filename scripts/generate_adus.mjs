@@ -29,6 +29,7 @@ if (!govConfig.adus_path || !govConfig.adus_path.trim()) {
 const PROJECT_ROOT = join(ROOT, (govConfig.project_root || '.').trim());
 const DOCS      = join(PROJECT_ROOT, 'docs');
 const SRC       = join(PROJECT_ROOT, 'src');
+const TAURI_SRC = join(PROJECT_ROOT, 'src-tauri', 'src');
 const TESTS     = join(PROJECT_ROOT, 'tests');
 const OUTPUT    = join(ROOT, govConfig.adus_path.trim());
 
@@ -54,7 +55,7 @@ function collectSourceFiles(dir, results = []) {
     const stat = statSync(full);
     if (stat.isDirectory()) {
       collectSourceFiles(full, results);
-    } else if (entry.endsWith('.ts') || entry.endsWith('.tsx')) {
+    } else if (entry.endsWith('.ts') || entry.endsWith('.tsx') || entry.endsWith('.rs')) {
       results.push(full);
     }
   }
@@ -554,7 +555,7 @@ function contentChanged(oldContent, newContent) {
 
 function main() {
   // 1. 扫描源代码 @GOV 块
-  const srcFiles  = collectSourceFiles(SRC);
+  const srcFiles  = [...collectSourceFiles(SRC), ...collectSourceFiles(TAURI_SRC)];
   const govBlocks = [];
   for (const f of srcFiles) govBlocks.push(...parseGovBlocks(f));
 

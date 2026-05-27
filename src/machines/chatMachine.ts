@@ -182,6 +182,7 @@ export const chatMachine = setup({
       on: {
         PROVIDER_VALID: "sending",
         PROVIDER_INVALID: { target: "error", actions: "assignError" },
+        WORKSPACE_CLOSED: { target: "noWorkspace", actions: "persistAndClearSession" },
       },
     },
     sending: {
@@ -219,11 +220,12 @@ export const chatMachine = setup({
       on: {
         CANCEL_DONE: "ready",
         ABORT_FAILED: { target: "error", actions: "assignError" },
+        WORKSPACE_CLOSED: { target: "noWorkspace", actions: "persistAndClearSession" },
       },
     },
     error: {
       on: {
-        RETRY: { target: "ready", actions: "clearError" },
+        RETRY: { target: "validatingProvider", actions: "clearError" },
         // BR-AG-STATE-001: allow sending a new message directly from error state;
         // clears the prior error and begins a fresh provider-validation cycle.
         SEND_MESSAGE: { target: "validatingProvider", actions: ["clearError", "appendUserMessage"] },

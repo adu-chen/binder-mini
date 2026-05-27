@@ -71,6 +71,7 @@ export const workspaceMachine = setup({
     },
     Closing: {
       on: {
+        CONFIRM_CLOSE: "Closing",
         CANCEL_CLOSE: "Active",
         CLOSE_DONE: { target: "NoWorkspace", actions: "clearWorkspace" },
         CLOSE_FAILED: { target: "Error", actions: "assignCloseError" },

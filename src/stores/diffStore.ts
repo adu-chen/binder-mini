@@ -35,6 +35,8 @@ export interface DiffStoreInstance {
   getAllDiffs(): PendingDiff[];
   /** Apply a partial update to a pending diff (e.g. record appliedRange). */
   updateDiff(diffId: string, update: Partial<PendingDiff>): void;
+  /** Rebuild an in-memory PendingDiff and its diffMachine actor from WorkspaceDatabase. */
+  hydrateDiff(diff: PendingDiff): void;
   /**
    * Remove from pendingDiffs map and prepend the TerminalDiffCard.
    * Called by accept/reject/expire paths after the diffMachine reaches a final state.
@@ -137,6 +139,32 @@ export function createDiffStoreInstance(): DiffStoreInstance {
     notifyListeners();
   }
 
+  function syncActorToStatus(actor: DiffActor, status: PendingDiff["status"]) {
+    if (status === "preapplied") actor.send({ type: "LOGICAL_STATE_APPLIED" });
+    else if (status === "accepting") actor.send({ type: "ACCEPT_REQUESTED" });
+    else if (status === "rejecting") actor.send({ type: "REJECT_REQUESTED" });
+    else if (status === "expired") actor.send({ type: "EXPIRE_REQUESTED" });
+    else if (status === "error") actor.send({ type: "LOGICAL_STATE_APPLIED_FAILED" });
+  }
+
+  function hydrateDiff(diff: PendingDiff): void {
+    if (!diff.id || pendingDiffs.has(diff.id)) return;
+    pendingDiffs.set(diff.id, diff);
+    const actor = createActor(diffMachine);
+    actor.subscribe((snapshot) => {
+      const newStatus = snapshot.value as PendingDiff["status"];
+      const existing = pendingDiffs.get(diff.id);
+      if (existing && existing.status !== newStatus) {
+        pendingDiffs.set(diff.id, { ...existing, status: newStatus });
+        notifyListeners();
+      }
+    });
+    actor.start();
+    syncActorToStatus(actor, diff.status);
+    diffActors.set(diff.id, actor);
+    notifyListeners();
+  }
+
   function moveToTerminal(diffId: string, card: TerminalDiffCard): void {
     pendingDiffs.delete(diffId);
     const actor = diffActors.get(diffId);
@@ -176,6 +204,7 @@ export function createDiffStoreInstance(): DiffStoreInstance {
     getDiff,
     getAllDiffs,
     updateDiff,
+    hydrateDiff,
     moveToTerminal,
     getTerminalCards,
     clear,

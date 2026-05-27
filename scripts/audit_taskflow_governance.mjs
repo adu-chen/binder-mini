@@ -349,9 +349,13 @@ addCheck({
 const markdownWithLegacyHeadings = docFiles.filter(f => /^## (RULE|CHAIN|MODULE|CONSTRAINT)-/m.test(readText(f)));
 addCheck({ name: 'legacy markdown heading IDs absent', status: markdownWithLegacyHeadings.length === 0 ? 'passed' : 'failed', files: markdownWithLegacyHeadings });
 
-// ── 源代码 @GOV 扫描（project_root/src） ─────────────────────────────────
+// ── 源代码 @GOV 扫描（project_root/src + project_root/src-tauri/src） ─────
 const srcDir = PROJECT_ROOT_REL === '.' ? 'src' : `${PROJECT_ROOT_REL}/src`;
-const sourceFiles = collectFiles(srcDir, f => f.endsWith('.ts') || f.endsWith('.tsx'));
+const tauriSrcDir = PROJECT_ROOT_REL === '.' ? 'src-tauri/src' : `${PROJECT_ROOT_REL}/src-tauri/src`;
+const sourceFiles = [
+  ...collectFiles(srcDir, f => f.endsWith('.ts') || f.endsWith('.tsx')),
+  ...collectFiles(tauriSrcDir, f => f.endsWith('.rs')),
+];
 
 const filesWithLineGov = sourceFiles.filter(f => /^\s*\/\/\s*@GOV/m.test(readText(f)));
 addCheck({ name: 'legacy line @GOV absent', status: filesWithLineGov.length === 0 ? 'passed' : 'failed', files: filesWithLineGov });
@@ -425,6 +429,13 @@ for (const block of annotationBlocks) {
   if (!en)     addTermFinding('OWNER_MISSING', 'TERM block missing en',      { file: block.file, line: block.line, term_id: termId });
   if (!chains) addTermFinding('OWNER_MISSING', 'TERM block missing chains',  { file: block.file, line: block.line, term_id: termId });
 
+  if (termMap.has(termId)) {
+    addTermFinding('TERM_DUPLICATE', `TERM term_id="${termId}" duplicated`, {
+      term_id: termId,
+      file_1: termMap.get(termId).file,
+      file_2: block.file,
+    });
+  }
   termMap.set(termId, { zh, en, chains, forbidden, file: block.file });
 
   // TERM_DUPLICATE: same en 或 zh 且 chains 有交集

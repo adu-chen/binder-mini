@@ -84,7 +84,7 @@ struct WorkspaceMutationResult {
 /*
  * @GOV
  * codes: BR-DE-PERSIST-002
- * type: IMPL
+ * type: DATA
  * chain: DE-CREATE-DIFF, DE-ACCEPT-DIFF, DE-REJECT-DIFF, DE-EXPIRE-DIFF
  * rules: BR-DE-PERSIST-002
  * boundary: in=PendingDiffRecord and workspace_root path | out=pending_diffs row upserted to WorkspaceDatabase
@@ -110,11 +110,11 @@ struct PendingDiffRecord {
 /*
  * @GOV
  * codes: BR-AG-PERSIST-001
- * type: IMPL
+ * type: DATA
  * chain: WS-CLOSE, AG-SEND-MESSAGE, WS-OPEN
  * rules: BR-AG-PERSIST-001
  * boundary: in=AgentMessage list and workspace_root path | out=chat_messages table upserted to WorkspaceDatabase
- * term_ref: TERM-WS-002, TERM-AG-010, TERM-AG-013
+ * term_ref: TERM-WS-002, TERM-AG-010, TERM-AG-014
  */
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -366,7 +366,7 @@ fn migrate_workspace_database_schema(connection: &Connection) {
 /*
  * @GOV
  * codes: BR-WS-STATE-002-IMPL-WS-WS-OPEN-001
- * type: IMPL
+ * type: DATA
  * chain: WS-OPEN
  * rules: BR-WS-STATE-002
  * boundary: in=workspace_root path | out=workspace.db schema (workspace_settings, pending_diffs, terminal_diff_cards, chat_messages)
@@ -418,7 +418,7 @@ fn initialize_workspace_database_schema(connection: &Connection) -> Result<(), S
 /*
  * @GOV
  * codes: BR-WS-DATA-005-IMPL-WS-WS-OPEN-002
- * type: IMPL
+ * type: DATA
  * chain: WS-OPEN,WS-SEARCH
  * rules: BR-WS-DATA-005
  * boundary: in=search_db_path | out=search.db FTS5 schema (search_index table)
@@ -823,7 +823,7 @@ fn path_conflict(target: &Path, relative_path: &str) -> PathConflict {
 /*
  * @GOV
  * codes: BR-DE-PERSIST-002
- * type: IMPL
+ * type: IO
  * chain: DE-CREATE-DIFF, DE-ACCEPT-DIFF, DE-REJECT-DIFF, DE-EXPIRE-DIFF
  * rules: BR-DE-PERSIST-002
  * boundary: in=PendingDiffRecord and workspace_root path | out=pending_diffs row upserted to WorkspaceDatabase
@@ -851,7 +851,7 @@ fn save_pending_diff(workspace_root: String, diff: PendingDiffRecord) -> Result<
 /*
  * @GOV
  * codes: BR-DE-PERSIST-002
- * type: IMPL
+ * type: IO
  * chain: DE-ACCEPT-DIFF, DE-REJECT-DIFF, DE-EXPIRE-DIFF
  * rules: BR-DE-PERSIST-002
  * boundary: in=diff_id string and status string | out=pending_diffs.status updated in WorkspaceDatabase
@@ -872,7 +872,7 @@ fn update_diff_status(workspace_root: String, diff_id: String, status: String) -
 /*
  * @GOV
  * codes: BR-DE-PERSIST-002, BR-WS-STATE-002
- * type: IMPL
+ * type: QUERY
  * chain: WS-OPEN, DE-CREATE-DIFF
  * rules: BR-DE-PERSIST-002, BR-WS-STATE-002
  * boundary: in=workspace_root path | out=PendingDiffRecord list of non-terminal PendingDiff rows from WorkspaceDatabase
@@ -921,11 +921,11 @@ fn load_diffs_from_workspace(workspace_root: String) -> Result<Vec<PendingDiffRe
 /*
  * @GOV
  * codes: BR-AG-PERSIST-001
- * type: IMPL
+ * type: IO
  * chain: WS-CLOSE, AG-SEND-MESSAGE
  * rules: BR-AG-PERSIST-001
  * boundary: in=AgentMessage list and workspace_root path | out=chat_messages table upserted to WorkspaceDatabase
- * term_ref: TERM-WS-002, TERM-AG-010, TERM-AG-013
+ * term_ref: TERM-WS-002, TERM-AG-010, TERM-AG-014
  */
 #[tauri::command]
 fn save_chat_messages(workspace_root: String, messages: Vec<ChatMessageRecord>) -> Result<(), String> {
@@ -958,11 +958,11 @@ fn save_chat_messages(workspace_root: String, messages: Vec<ChatMessageRecord>) 
 /*
  * @GOV
  * codes: BR-AG-PERSIST-001
- * type: IMPL
+ * type: QUERY
  * chain: WS-OPEN, AG-SEND-MESSAGE
  * rules: BR-AG-PERSIST-001
  * boundary: in=workspace_root path | out=ChatMessageRecord list ordered by created_at from WorkspaceDatabase chat_messages
- * term_ref: TERM-WS-002, TERM-AG-010, TERM-AG-013
+ * term_ref: TERM-WS-002, TERM-AG-010, TERM-AG-014
  */
 #[tauri::command]
 fn load_chat_messages(workspace_root: String) -> Result<Vec<ChatMessageRecord>, String> {

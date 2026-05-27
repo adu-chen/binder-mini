@@ -15,7 +15,7 @@ InputReference 是用户通过粘贴（Cmd+V）附加到聊天输入框的结构
 
 ## 2. 核心原则
 
-1. InputReference 是结构化内容载体，携带引用标签、内容快照和精确坐标；Agent 根据上下文自行判断引用是编辑对象还是背景参考
+1. InputReference 是结构化内容载体，携带引用标签和内容快照；Agent 根据上下文自行判断引用是编辑对象还是背景参考
 2. InputReference 不直接触发文件写入或 diff 接受；若 Agent 将其作为编辑对象，须经 Diff Review 写入
 3. InputReference 不声明对 Workspace 文件的写权威
 4. 引用内容只注入 system prompt L1 层（见 AG-M-P-02 §3.1），不拼入 user message content
@@ -109,8 +109,7 @@ https://example.com
 |------|------|
 | 不直接触发写操作 | InputReference 不声明写权威；Agent 判断引用是编辑对象时须经 Diff Review，不由引用直接触发 |
 | 不拼入 user message | 引用内容只在 system prompt L1 层注入（AG-M-P-02 §3.1），不拼入 user 的自然语言消息 |
-| filePath 不作工具参数 | `filePath` 不得当作 read_file / update_file 的 `file_path` 参数 |
-| content 不作执行锚点 | `content` 快照不得直接用于生成 diff 的 originalText 或工具定位锚点；anchor 携带的 blockId/offset 可作为 startBlockId/startOffset 辅助参数，但 originalText 仍必须来自 LogicalStateSnapshot（已打开文件）或 read_file（未打开文件）|
+| content 不作执行锚点 | `content` 快照不得直接用于生成 diff 的 originalText 或工具定位锚点；originalText 必须来自 LogicalStateSnapshot（已打开文件）或 read_file（未打开文件）|
 | Workspace 切换后失效 | workspaceMachine → Closing 时清空所有当前引用，不恢复到下一个 Workspace |
 | 发送成功后清空 | 消息发送成功后清空输入区引用列表；发送失败则保留以便重试 |
 
@@ -144,7 +143,4 @@ https://example.com
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
 | 2026-05-23 | v1.0 | 初始版本，定义 binder-mini InputReference 数据结构、入口规则、注入格式和门禁约束 |
-| 2026-05-23 | v1.1 | §1/§2 调整"只读上下文"表述为结构化内容载体，Agent 自行判断是否触发 Diff Review；§3 数据结构改为判别联合类型（kind: file|text|url），补充精确坐标；§4.1 类型表改用 kind 字段；§5 XML 格式 type 属性改为 kind，去除 readonly 属性；§7 门禁约束对齐新语义 |
-| 2026-05-24 | v1.2 | 审计修复：DocumentAnchorTarget 更名为 InputReferenceAnchor 并纳入术语注册；editor_content 入口改用 ActiveFile / EditorTab 术语 |
 | 2026-05-25 | v1.3 | 治理修复：移除阶段性范围描述，改为入口和不支持场景清单；明确本文不表达实现完成度 |
-| 2026-05-26 | v1.4 | §4.1 类型表补充 anchor 状态列；区分 editor_content 已实现（按钮/TabDrag，全文快照，anchor=null）和设计预留（文本选区，anchor 有效）两种入口；明确无 anchor 时 Agent 视为文件级背景参考；§5 prompt 注入格式新增带 anchor 的 editor_content 示例（block-id/start-offset/end-offset 属性）；明确 anchor 仅在有效时注入，可作为 startBlockId/startOffset 辅助参数；§7 门禁约束更新 anchor 辅助参数例外说明 |

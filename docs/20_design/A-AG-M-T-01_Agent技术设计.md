@@ -150,24 +150,14 @@ interface ToolExecution {
 
 ```ts
 type InputReference =
-  | { id: string; kind: "file"; filePath: string; content: string; displayName: string; createdAt: number; anchor?: InputReferenceAnchor }
   | { id: string; kind: "text"; content: string; displayName: string; createdAt: number }
   | { id: string; kind: "url"; url: string; displayName: string; createdAt: number };
-
-interface InputReferenceAnchor {
-  blockId?: string;       // TipTap/ProseMirror 块 ID
-  nodeId?: string;        // 节点 ID（降级定位）
-  startOffset?: number;   // 文本偏移起点
-  endOffset?: number;     // 文本偏移终点
-  offsetKind?: "character" | "utf16";
-}
 ```
 
 约束：
 - `kind` 为判别字段（discriminant），不使用 `type` 或 `mode`
-- `kind: "file"` 涵盖 workspace_file 和 editor_content 两类来源
+- InputReference 仅由 ChatInput 粘贴入口创建，支持 text 和 url 两类
 - InputReference 是结构化内容载体，不声明写权威；是否触发 Diff Review 由 Agent 根据上下文判断
-- `filePath` 只用于内部查找和失效检测，不进入 provider prompt
 
 ### 3.7 PromptRuntime
 
@@ -338,10 +328,9 @@ Prompt Runtime：
 | 2026-05-25 | v1.9 | 治理修复：移除正文中的阶段完成判断，改为能力契约、检索入口和历史候选规则索引；明确本文不表达实现完成度 |
 | 2026-05-23 | v1.0 | 初始版本，定义 Agent Phase 10-12 技术方案、状态机、数据结构、协议和候选规则 |
 | 2026-05-23 | v1.1 | §2 agentMachine 升级为 chatMachine 设计（完整状态机见 AG-M-P-04）；§6 补充 allowedTools 场景动态决策、工具超时 10s 约束、tool_result provider-native 协议；§9 Phase 10 验收标准补充 chatMachine 迁移要求和取消路径验证 |
-| 2026-05-23 | v1.2 | §3.5 InputReference 重构为判别联合类型（kind: file|text|url），补充精确坐标结构，移除旧 mode:"readonly" 字段；§5.2 create_file 说明改为 content 必填不经 Diff Review |
+| 2026-05-23 | v1.2 | §3.5 InputReference 重构为判别联合类型（kind: text|url），移除旧 mode:"readonly" 字段；§5.2 create_file 说明改为 content 必填不经 Diff Review |
 | 2026-05-24 | v1.3 | §2.1 状态图 cancelling→error 事件名从 FAILED 修正为 ABORT_FAILED（与 AG-M-P-04 §2/§4 对齐） |
 | 2026-05-24 | v1.4 | §3.4 ToolName 新增 Phase 13-B 候选 edit_document_block（依赖 BlockId 稳定性策略和 L0 文档结构注入机制）|
 | 2026-05-24 | v1.5 | 精确编辑架构对齐（D-02）：§3.4 ToolName 移除 edit_document_block 候选（定位能力折叠进 edit_current_editor_document anchor 字段，不作为独立工具存在）；内容编辑工具说明改为 originalText+newText 字符精确替换接口 |
 | 2026-05-24 | v1.6 | 审计修复：InputReference 统一为结构化内容载体；§7 标记已升级候选规则；§8 补齐正式规则引用，消除 BR-AG-DATA-001 只读语义残留 |
-| 2026-05-24 | v1.7 | 审计修复：InputReference 坐标类型更名为 InputReferenceAnchor 并对齐 SYS-C-T-01 术语注册；内容编辑工具描述移除全量 proposedText 旧口径 |
 | 2026-05-24 | v1.8 | 审计修复：AG-CAND-STATE-003 升级为 BR-AG-STATE-003；§8 补充 allowedTools 动态过滤和未授权 ToolCall 拒绝正式规则 |

@@ -26,8 +26,8 @@ import type { InputReference, ProviderConfig } from "./types/agent";
 import type { PendingDiff, TerminalDiffCard } from "./types/diff";
 import type { WorkspaceMutationResult } from "./types/workspace";
 import type { PendingDiffStatus } from "./machines/diffMachine";
-import type { ChatMessageRecord } from "./ipc";
-import { saveApiKey, isApiKeyConfigured } from "./ipc";
+import type { ChatMessageRecord, PendingDiffRecord } from "./ipc";
+import { saveApiKey, isApiKeyConfigured, updateDiffStatus } from "./ipc";
 
 const MAX_ACTIVE_FILE_LOGICAL_STATE_SNAPSHOT = 12_000;
 /**
@@ -64,6 +64,7 @@ export default function App() {
     wsValue,
     workspaceSnapshot,
     recentWorkspaces,
+    loadedDiffs,
     openWorkspaceFlow,
     confirmCloseFlow,
   } = useWorkspaceActor({
@@ -72,6 +73,10 @@ export default function App() {
       void chatOnWorkspaceOpened(workspaceRoot);
     },
     onWorkspaceClosed: () => {
+      const root = workspaceSnapshot?.workspace.rootPath;
+      for (const diff of diffStore.getAllDiffs()) {
+        if (root) void updateDiffStatus(root, diff.id, "expired");
+      }
       edOnWorkspaceClosed();
       void chatOnWorkspaceClosed();
       setShowPreappliedSaveDialog(false);
@@ -135,11 +140,34 @@ export default function App() {
     apiKeyConfigured: false,
   });
 
-  const defaultModels: Record<ProviderConfig["provider"], string> = {
+const defaultModels: Record<ProviderConfig["provider"], string> = {
     anthropic: "claude-opus-4-5",
     openai: "gpt-4.1",
     deepseek: "deepseek-chat",
   };
+
+  function pendingDiffFromRecord(record: PendingDiffRecord): PendingDiff | null {
+    const status = record.status as PendingDiffStatus;
+    if (!["pending", "preapplied", "accepting", "rejecting"].includes(status)) {
+      return null;
+    }
+    return {
+      id: record.id,
+      filePath: record.filePath,
+      originalText: record.originalText,
+      newText: record.newText,
+      summary: record.summary,
+      status,
+      effectivePath: record.effectivePath,
+      sourceToolId: record.sourceToolId,
+      baseRevision: record.baseRevision,
+      createdAt: record.createdAt,
+      appliedRange:
+        record.appliedRangeFrom !== null && record.appliedRangeTo !== null
+          ? { from: record.appliedRangeFrom, to: record.appliedRangeTo }
+          : undefined,
+    };
+  }
 
   useEffect(() => {
     void isApiKeyConfigured(providerConfig.provider).then((configured) =>
@@ -242,6 +270,14 @@ export default function App() {
       ? activeContent.length > MAX_ACTIVE_FILE_LOGICAL_STATE_SNAPSHOT
       : undefined;
 
+  useEffect(() => {
+    if (!workspaceSnapshot) return;
+    for (const record of loadedDiffs) {
+      const hydrated = pendingDiffFromRecord(record);
+      if (hydrated) diffStore.hydrateDiff(hydrated);
+    }
+  }, [loadedDiffs, workspaceSnapshot]);
+
   const previousActiveFilePathRef = useRef<string | null>(null);
   useEffect(() => {
     const previous = previousActiveFilePathRef.current;
@@ -272,23 +308,25 @@ export default function App() {
   function handleCloseWorkspaceWithGuard() {
     if (!workspaceSnapshot) return;
     if (!canLeaveWorkspace()) {
+      wsActor.send({ type: "CLOSE_WORKSPACE" });
       setShowCloseGuard(true);
       return;
     }
     // No guard needed — transition machine to Closing then immediately close
     wsActor.send({ type: "CLOSE_WORKSPACE" });
+    wsActor.send({ type: "CONFIRM_CLOSE" });
     void confirmCloseFlow(toChatMessageRecords());
   }
 
   function handleForceCloseWorkspace() {
     setShowCloseGuard(false);
-    wsActor.send({ type: "CLOSE_WORKSPACE" });
+    wsActor.send({ type: "CONFIRM_CLOSE" });
     void confirmCloseFlow(toChatMessageRecords());
   }
 
   function handleCancelClose() {
     setShowCloseGuard(false);
-    // Machine stays in Active (CLOSE_WORKSPACE was not sent yet)
+    wsActor.send({ type: "CANCEL_CLOSE" });
   }
 
   /** BR-AG-PERSIST-001: chat persistence is handled by chatActor.onWorkspaceClosed(). */
@@ -462,6 +500,7 @@ export default function App() {
   /** BR-DE-STATE-003 / BR-DE-STATE-012 / BR-DE-STATE-013: move diff to expired terminal. */
   function expireDiff(diff: PendingDiff) {
     diffStore.getDiffActor(diff.id)?.send({ type: "EXPIRE_REQUESTED" });
+    persistDiffStatus(diff.id, "expired");
     diffStore.moveToTerminal(diff.id, createTerminalDiffCard(diff.id, "expired", diff.sourceToolId));
   }
 
@@ -474,6 +513,7 @@ export default function App() {
     const actor = diffStore.getDiffActor(diff.id);
     actor?.send({ type: "ACCEPT_REQUESTED" });
     actor?.send({ type: "ACCEPT_CONFIRMED" });
+    persistDiffStatus(diff.id, "accepted");
     diffStore.moveToTerminal(diff.id, createTerminalDiffCard(diff.id, "accepted", diff.sourceToolId));
   }
 
@@ -490,12 +530,19 @@ export default function App() {
       : { success: false as const, reason: "text-not-found" as const };
     if (!result.success) {
       actor?.send({ type: "FAILED" });
+      persistDiffStatus(diff.id, "error");
       diffStore.moveToTerminal(diff.id, createTerminalDiffCard(diff.id, "error", diff.sourceToolId));
       return false;
     }
     actor?.send({ type: "TERMINAL_RECORDED" });
+    persistDiffStatus(diff.id, "rejected");
     diffStore.moveToTerminal(diff.id, createTerminalDiffCard(diff.id, "rejected", diff.sourceToolId));
     return true;
+  }
+
+  function persistDiffStatus(diffId: string, status: PendingDiffStatus) {
+    const root = workspaceSnapshot?.workspace.rootPath;
+    if (root) void updateDiffStatus(root, diffId, status);
   }
 
   function handleAcceptDiffById(diffId: string) {

@@ -329,7 +329,7 @@ interface WorkspaceHeaderProps {
 
 **FileTree + FileTreeNode**
 
-Phase 2 骨架：接受 `entries: WorkspaceEntry[]` prop，递归渲染文件名；点击回调占位（Phase 3 接线 editorMachine OPEN_FILE）。右键菜单、拖拽到 Chat 均为视觉占位（Phase 3 实现）。
+Phase 2 骨架：接受 `entries: WorkspaceEntry[]` prop，递归渲染文件名；点击回调占位（Phase 3 接线 editorMachine OPEN_FILE）。右键菜单为视觉占位（Phase 3 实现）。
 
 **@GOV 块（FileTreePanel）**
 

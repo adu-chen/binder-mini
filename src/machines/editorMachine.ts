@@ -35,7 +35,7 @@ export type EditorMachineEvent =
   | { type: "SAVE_FAILED"; errorMessage: string }
   | { type: "CLOSE_TAB"; filePath: string }
   | { type: "SWITCH_TAB"; filePath: string }
-  | { type: "ROLLBACK_LOGICAL_STATE"; diffId: string; appliedRange: { from: number; to: number }; originalText: string };
+  | { type: "ROLLBACK_LOGICAL_STATE"; diffId: string; appliedRange: { from: number; to: number }; originalText: string; isDirtyAfterRollback?: boolean };
 
 export const editorMachine = setup({
   types: {
@@ -56,7 +56,8 @@ export const editorMachine = setup({
       if (event.type !== "SWITCH_TAB") return false;
       return context.tabs.find((t) => t.id === event.filePath)?.fileType === "other";
     },
-    isDirtyAfterRollback: () => false,
+    isDirtyAfterRollback: ({ event }) =>
+      event.type === "ROLLBACK_LOGICAL_STATE" && event.isDirtyAfterRollback === true,
   },
   actions: {
     assignTabOpened: assign(({ context, event }) => {

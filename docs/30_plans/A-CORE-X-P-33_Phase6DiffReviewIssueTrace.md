@@ -703,7 +703,6 @@ Phase 6 交付物不包含：
 | update_file 工具（closed-file 链路的工具入口）| Phase 11 |
 | workspaceMachine 完整关闭门禁（dirty tab + preapplied 联合检测对话框）| Phase 7 跨模块接线 |
 | read_file、search_files、list_files 等只读工具接线 | Phase 7（AG-TOOL-CALL 其余工具）|
-| InputReference 拖拽文件树入口 | Phase 5-F（延后）|
 | PromptRuntime L0 document_structure XML 组装（需 BlockId 端到端）| Phase 7 |
 | workspaceMachine × chatMachine × editorMachine 完整联调 | Phase 7 |
 

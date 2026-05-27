@@ -87,7 +87,7 @@
 
 - WorkspaceHeader（目录名 + 关闭按钮）
 - SearchPanel（搜索框 + 结果列表占位）
-- FileTree（FileTreeNode 递归占位，右键菜单，拖拽到 Chat 创建 InputReference）
+- FileTree（FileTreeNode 递归占位，右键菜单）
 - workspaceMachine 状态映射占位（SYS-C-UI-01 §4.1）
 
 ### 2-D EditorColumn 骨架
@@ -325,9 +325,9 @@ interface ChatMachineContext {
 
 **规则**：`BR-AG-DATA-001`
 
-- 类型：`kind: "file" | "text" | "url"`，内容在创建时快照
-- 入口：拖拽文件树节点 → file；粘贴 URL → url；粘贴其他文本 → text
-- 截断：8000 chars/ref，20000 chars 总计；filePath 不进入 prompt
+- 类型：`kind: "text" | "url"`，内容在创建时快照
+- 入口：粘贴 URL → url；粘贴其他文本 → text
+- 截断：8000 chars/ref，20000 chars 总计
 - 生命周期：发送成功后清空；发送失败保留；Workspace 切换时清空
 
 ---

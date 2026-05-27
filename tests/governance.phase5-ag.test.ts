@@ -96,7 +96,7 @@ it("chatMachine: PROVIDER_INVALID in ready → visible error without appending u
 });
 
 // covers: BR-AG-STATE-001
-it("chatMachine: RETRY from error clears error and returns to ready (BR-AG-STATE-001)", () => {
+it("chatMachine: RETRY from error clears error and re-enters provider validation (BR-AG-STATE-001)", () => {
   const actor = bootToReady();
   actor.send({
     type: "PROVIDER_INVALID",
@@ -105,7 +105,7 @@ it("chatMachine: RETRY from error clears error and returns to ready (BR-AG-STATE
   });
   expect(actor.getSnapshot().value).toBe("error");
   actor.send({ type: "RETRY" });
-  expect(actor.getSnapshot().value).toBe("ready");
+  expect(actor.getSnapshot().value).toBe("validatingProvider");
   expect(actor.getSnapshot().context.errorMessage).toBeNull();
 });
 

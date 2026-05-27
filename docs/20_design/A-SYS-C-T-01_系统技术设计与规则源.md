@@ -335,21 +335,12 @@ code_identifier: search.db
 -->
 
 <!-- TERM
-term_id: TERM-AG-013
+term_id: TERM-AG-014
 chains: AG-SEND-MESSAGE
 zh: 对话消息表
 en: chat_messages
 definition: WorkspaceDatabase 中持久化 AgentMessage 的表；随 Workspace 打开恢复，随 Workspace 关闭落盘。
 forbidden: 聊天表, message表, 历史消息表
--->
-
-<!-- TERM
-term_id: TERM-AG-014
-chains: AG-SEND-MESSAGE
-zh: 输入引用坐标
-en: InputReferenceAnchor
-definition: InputReference 内部携带的引用区域坐标，描述用户引用内容的来源位置；只用于上下文解释和失效检测，不作为 Diff 执行定位权威。
-forbidden: DocumentAnchorTarget, DocumentAnchor, 引用锚点
 -->
 
 <!-- TERM
@@ -739,7 +730,7 @@ rule_id: BR-AG-DATA-001
 需求映射: REQ-AG-006
 -->
 
-InputReference 是结构化内容载体，通过 system prompt L1 层注入 Provider payload；filePath 等内部字段不进入 prompt；Agent 可自行判断引用是编辑对象或背景参考，但不论何种判断，引用内容不得直接触发文件写入——写入必须经由 Diff Review 链路，结构操作必须经由 WS 工具链。
+InputReference 是结构化内容载体，通过 system prompt L1 层注入 Provider payload；Agent 可自行判断引用是编辑对象或背景参考，但不论何种判断，引用内容不得直接触发文件写入——写入必须经由 Diff Review 链路，结构操作必须经由 WS 工具链。
 
 <!-- RULE
 rule_id: BR-AG-TOOL-001
@@ -1108,6 +1099,7 @@ ChatInput 的 Enter 键触发发送时必须检查 IME 合成状态，实现必�
 | 2026-05-26 | v3.5 | §0 新增 TERM-DE-012（DiffActionBar，批量操作栏）；修正 editorActor.ts @GOV type IMPL→UTIL；删除 editorRegistry.ts 未注册链路 ED-DIFF-RENDER；修正 BlockIdExtension.ts boundary out= 抽象词 data |
 | 2026-05-25 | v3.4 | 补齐 ActiveFile 编辑上下文规则：新增 TERM-AG-015（LogicalStateSnapshot）和 BR-AG-DATA-004，明确 edit_current_editor_document 必须以 ED LogicalStateSnapshot 为上下文源，read_file/DiskState 不得替代当前编辑器逻辑态 |
 | 2026-05-25 | v3.3 | 补齐 Agent API key 持久化规则：新增 TERM-AG-013（ProviderCredential）和 BR-AG-PERSIST-002，明确 Provider API key 为应用级后端持久化凭据，跨应用重启与 Workspace 切换保持有效，前端只接收 apiKeyConfigured |
+| 2026-05-27 | v3.4 | 审计修复：将 chat_messages 术语改为 TERM-AG-014，消除与 ProviderCredential 的 TERM-AG-013 ID 冲突 |
 | 2026-05-22 | v1.9 | 注册 Editor Markdown 读取保存转换规则 |
 | 2026-05-22 | v1.8 | 注册 Editor dirty 关闭保护与状态栏规则 |
 | 2026-05-22 | v1.7 | 注册 Editor 多标签正式规则 |
