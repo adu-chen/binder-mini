@@ -345,7 +345,7 @@ fn open_workspace_database(database_path: &Path) -> Result<Connection, String> {
     }
 }
 
-/// Add columns introduced in Phase 6 to pre-existing pending_diffs tables.
+/// Add columns introduced after earlier MVP schemas to pre-existing workspace tables.
 /// ALTER TABLE ADD COLUMN returns an error when the column already exists — we ignore those.
 /// NOT NULL columns require a DEFAULT so existing rows stay valid.
 fn migrate_workspace_database_schema(connection: &Connection) {
@@ -356,10 +356,47 @@ fn migrate_workspace_database_schema(connection: &Connection) {
         "ALTER TABLE pending_diffs ADD COLUMN base_revision TEXT NOT NULL DEFAULT '';",
         "ALTER TABLE pending_diffs ADD COLUMN applied_range_from INTEGER;",
         "ALTER TABLE pending_diffs ADD COLUMN applied_range_to INTEGER;",
+        "ALTER TABLE chat_messages ADD COLUMN stream_status TEXT;",
+        "ALTER TABLE chat_messages ADD COLUMN tool_call_id TEXT;",
+        "ALTER TABLE chat_messages ADD COLUMN session_id TEXT NOT NULL DEFAULT '';",
     ];
     for stmt in migrations {
         // Silence "duplicate column name" errors — they mean the column already exists.
         let _ = connection.execute_batch(stmt);
+    }
+
+    // Remove the legacy `chat_tab_id TEXT NOT NULL` column that causes INSERT failures
+    // when an older workspace.db is opened with the current schema.
+    // SQLite does not support ALTER COLUMN, so we use the canonical
+    // create-copy-drop-rename pattern.  The PRAGMA guard makes this idempotent.
+    let has_chat_tab_id = connection
+        .prepare("PRAGMA table_info(chat_messages)")
+        .ok()
+        .and_then(|mut stmt| {
+            stmt.query_map([], |row| row.get::<_, String>(1))
+                .ok()
+                .map(|rows| rows.filter_map(|r| r.ok()).any(|col| col == "chat_tab_id"))
+        })
+        .unwrap_or(false);
+
+    if has_chat_tab_id {
+        let _ = connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS chat_messages_v2 (\
+                id TEXT PRIMARY KEY, \
+                role TEXT NOT NULL, \
+                content TEXT NOT NULL, \
+                stream_status TEXT, \
+                tool_call_id TEXT, \
+                created_at INTEGER NOT NULL, \
+                session_id TEXT NOT NULL \
+            ); \
+            INSERT OR IGNORE INTO chat_messages_v2 \
+                (id, role, content, stream_status, tool_call_id, created_at, session_id) \
+                SELECT id, role, content, stream_status, tool_call_id, created_at, session_id \
+                FROM chat_messages; \
+            DROP TABLE chat_messages; \
+            ALTER TABLE chat_messages_v2 RENAME TO chat_messages;",
+        );
     }
 }
 
@@ -2624,6 +2661,52 @@ mod tests {
         assert_eq!(loaded[0].id, "new1");
         assert_eq!(loaded[1].id, "new2");
         assert!(!loaded.iter().any(|m| m.id == "old1"));
+
+        fs::remove_dir_all(root).expect("fixture workspace should be removed");
+    }
+
+    #[test]
+    fn migrates_legacy_chat_messages_without_session_id() {
+        let root = test_workspace_root("chat-legacy-session-id");
+        fs::create_dir_all(root.join(".binder")).expect("fixture workspace should be created");
+        let db_path = workspace_database_path(&root);
+        {
+            let conn = Connection::open(&db_path).expect("legacy db should open");
+            conn.execute_batch(
+                r#"
+                CREATE TABLE chat_messages (
+                    id TEXT PRIMARY KEY,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at INTEGER NOT NULL
+                );
+                INSERT INTO chat_messages (id, role, content, created_at)
+                VALUES ('legacy-1', 'user', 'old message', 1000);
+                "#,
+            )
+            .expect("legacy chat_messages table should be created");
+        }
+
+        initialize_workspace_metadata(&root).expect("metadata should migrate legacy schema");
+        let root_string = root.to_string_lossy().to_string();
+        save_chat_messages(
+            root_string.clone(),
+            vec![ChatMessageRecord {
+                id: "new-1".to_string(),
+                role: "user".to_string(),
+                content: "new message".to_string(),
+                stream_status: None,
+                tool_call_id: None,
+                created_at: 2_000,
+                session_id: root_string.clone(),
+            }],
+        )
+        .expect("save should work after session_id migration");
+        let loaded = load_chat_messages(root_string).expect("messages should load after migration");
+
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, "new-1");
+        assert_eq!(loaded[0].content, "new message");
 
         fs::remove_dir_all(root).expect("fixture workspace should be removed");
     }
