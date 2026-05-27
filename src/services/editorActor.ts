@@ -4,6 +4,7 @@ import { editorMachine } from "../machines/editorMachine";
 import { openEditorDocument } from "./editorService";
 import { writeWorkspaceFile } from "../ipc";
 import { getActiveEditor } from "../stores/editorRegistry";
+import type { MarkdownStorage } from "tiptap-markdown";
 
 // ── applyDiffReplaceInEditor ─────────────────────────────────────────────────
 
@@ -28,6 +29,15 @@ export type ApplyDiffResult =
     }
   | { success: false; reason: "no-editor" | "text-not-found" };
 
+export type RollbackDiffResult =
+  | {
+      success: true;
+      appliedRange: { from: number; to: number };
+      contentRevisionBeforeApply: string;
+      contentRevisionAfterApply: string;
+    }
+  | { success: false; reason: "no-editor" | "text-not-found" | "revision-mismatch" };
+
 export interface ApplyDiffOptions {
   /** 0-based index of which occurrence to replace when originalText appears multiple times. Default: 0. */
   occurrenceIndex?: number;
@@ -42,6 +52,28 @@ function makeRevisionToken(): string {
   const r1 = Math.random().toString(16).slice(2).padStart(24, "0");
   const r2 = Math.random().toString(16).slice(2).padStart(24, "0");
   return (ts + r1 + r2).slice(0, 64);
+}
+
+function serializeEditorContent(
+  editor: NonNullable<ReturnType<typeof getActiveEditor>>,
+  fileType: "md" | "txt" | "other" | undefined,
+): string {
+  if (fileType === "txt") {
+    return editor.getText({ blockSeparator: "\n" });
+  }
+  const markdown = (editor.storage as { markdown?: MarkdownStorage }).markdown;
+  if (markdown?.getMarkdown) {
+    return markdown.getMarkdown();
+  }
+  return editor.getText({ blockSeparator: "\n" });
+}
+
+function readEditorRangeText(from: number, to: number): string | null {
+  const editor = getActiveEditor();
+  if (!editor || editor.isDestroyed) return null;
+  const doc = editor.view.state.doc;
+  if (from < 0 || from > to || to > doc.content.size + 1) return null;
+  return doc.textBetween(from, to, "\n");
 }
 
 /**
@@ -130,7 +162,10 @@ export function applyDiffReplaceInEditor(
   const contentRevisionBeforeApply = makeRevisionToken();
 
   // BR-AG-DATA-003: deleteRange + insertContentAt is the sole mutation path.
-  editor.chain().focus().deleteRange({ from, to }).insertContentAt(from, newText).run();
+  const applied = editor.chain().focus().deleteRange({ from, to }).insertContentAt(from, newText).run();
+  if (!applied) {
+    return { success: false, reason: "text-not-found" };
+  }
 
   const contentRevisionAfterApply = makeRevisionToken();
 
@@ -140,6 +175,61 @@ export function applyDiffReplaceInEditor(
     contentRevisionBeforeApply,
     contentRevisionAfterApply,
   };
+}
+
+/**
+ * BR-DE-STATE-002: Roll back a preapplied diff using its verified PM appliedRange.
+ * The range must still contain expectedNewText; otherwise the diff is stale and
+ * reject enters error instead of replacing the wrong occurrence.
+ */
+export function rollbackDiffInEditor(
+  appliedRange: { from: number; to: number } | undefined,
+  expectedNewText: string,
+  originalText: string,
+): RollbackDiffResult {
+  const editor = getActiveEditor();
+  if (!editor || editor.isDestroyed) {
+    return { success: false, reason: "no-editor" };
+  }
+  if (!appliedRange) {
+    return { success: false, reason: "text-not-found" };
+  }
+
+  const { from, to } = appliedRange;
+  const currentText = readEditorRangeText(from, to);
+  if (currentText === null) {
+    return { success: false, reason: "text-not-found" };
+  }
+  if (currentText !== expectedNewText) {
+    return { success: false, reason: "revision-mismatch" };
+  }
+
+  const contentRevisionBeforeApply = makeRevisionToken();
+  const applied = editor
+    .chain()
+    .focus()
+    .deleteRange({ from, to })
+    .insertContentAt(from, originalText)
+    .run();
+  if (!applied) {
+    return { success: false, reason: "text-not-found" };
+  }
+  const contentRevisionAfterApply = makeRevisionToken();
+
+  return {
+    success: true,
+    appliedRange: { from, to: from + originalText.length },
+    contentRevisionBeforeApply,
+    contentRevisionAfterApply,
+  };
+}
+
+export function isActiveEditorRangeText(
+  appliedRange: { from: number; to: number } | undefined,
+  expectedText: string,
+): boolean {
+  if (!appliedRange) return false;
+  return readEditorRangeText(appliedRange.from, appliedRange.to) === expectedText;
 }
 
 /**
@@ -247,6 +337,7 @@ export function useEditorActor() {
     tabId: string,
     originalText: string,
     newText: string,
+    options: ApplyDiffOptions = {},
   ): ApplyDiffResult {
     if (!originalText) {
       return { success: false, reason: "text-not-found" };
@@ -254,12 +345,12 @@ export function useEditorActor() {
 
     const activeTabId = edActor.getSnapshot().context.activeTabId;
     if (tabId === activeTabId) {
-      const result = applyDiffReplaceInEditor(originalText, newText);
+      const result = applyDiffReplaceInEditor(originalText, newText, options);
       if (result.success) {
-        const current = contentMapRef.current.get(tabId) ?? "";
-        const matchIdx = current.indexOf(originalText);
-        if (matchIdx !== -1) {
-          const next = `${current.slice(0, matchIdx)}${newText}${current.slice(matchIdx + originalText.length)}`;
+        const tab = edActor.getSnapshot().context.tabs.find((t) => t.id === tabId);
+        const editor = getActiveEditor();
+        if (editor && !editor.isDestroyed) {
+          const next = serializeEditorContent(editor, tab?.fileType);
           contentMapRef.current.set(tabId, next);
           setActiveContent(next);
         }
@@ -285,12 +376,62 @@ export function useEditorActor() {
     };
   }
 
+  function rollbackDiffInTab(
+    tabId: string,
+    appliedRange: { from: number; to: number } | undefined,
+    expectedNewText: string,
+    originalText: string,
+  ): RollbackDiffResult {
+    const activeTabId = edActor.getSnapshot().context.activeTabId;
+    if (tabId === activeTabId) {
+      const result = rollbackDiffInEditor(appliedRange, expectedNewText, originalText);
+      if (result.success) {
+        const tab = edActor.getSnapshot().context.tabs.find((t) => t.id === tabId);
+        const editor = getActiveEditor();
+        if (editor && !editor.isDestroyed) {
+          const next = serializeEditorContent(editor, tab?.fileType);
+          contentMapRef.current.set(tabId, next);
+          setActiveContent(next);
+        }
+      }
+      return result;
+    }
+
+    const content = contentMapRef.current.get(tabId);
+    if (content === undefined) return { success: false, reason: "text-not-found" };
+    const matchIdx = content.indexOf(expectedNewText);
+    if (matchIdx === -1) return { success: false, reason: "text-not-found" };
+    if (content.indexOf(expectedNewText, matchIdx + 1) !== -1) {
+      return { success: false, reason: "revision-mismatch" };
+    }
+
+    const next = `${content.slice(0, matchIdx)}${originalText}${content.slice(matchIdx + expectedNewText.length)}`;
+    contentMapRef.current.set(tabId, next);
+    edActor.send({ type: "USER_EDIT" });
+
+    return {
+      success: true,
+      appliedRange: { from: matchIdx, to: matchIdx + originalText.length },
+      contentRevisionBeforeApply: makeRevisionToken(),
+      contentRevisionAfterApply: makeRevisionToken(),
+    };
+  }
+
   function closeTab(filePath: string) {
     edActor.send({ type: "CLOSE_TAB", filePath });
   }
 
   function switchTab(filePath: string) {
     edActor.send({ type: "SWITCH_TAB", filePath });
+  }
+
+  /**
+   * BR-AG-DATA-004: Synchronously read the active file's LogicalState from contentMapRef,
+   * bypassing React state lag. Use this at send time to guarantee the snapshot is the
+   * canonical current logical state, not a stale React render's copy.
+   */
+  function getActiveContentNow(): string {
+    return contentMapRef.current.get(edActiveTabId ?? "") ?? "";
   }
 
   return {
@@ -300,14 +441,17 @@ export function useEditorActor() {
     edActiveTabId,
     edErrorMessage,
     activeContent,
+    getActiveContentNow,
     onWorkspaceOpened,
     onWorkspaceClosed,
     openFile,
     saveFile,
     setContent,
     applyDiffReplaceInTab,
+    rollbackDiffInTab,
     closeTab,
     switchTab,
     applyDiffReplaceInEditor,
+    isActiveEditorRangeText,
   };
 }

@@ -27,7 +27,7 @@ import type { PendingDiff, TerminalDiffCard } from "./types/diff";
 import type { WorkspaceMutationResult } from "./types/workspace";
 import type { PendingDiffStatus } from "./machines/diffMachine";
 import type { ChatMessageRecord, PendingDiffRecord } from "./ipc";
-import { saveApiKey, isApiKeyConfigured, updateDiffStatus } from "./ipc";
+import { saveApiKey, isApiKeyConfigured, updateDiffStatus, saveTerminalCard, saveTerminalCards } from "./ipc";
 
 const MAX_ACTIVE_FILE_LOGICAL_STATE_SNAPSHOT = 12_000;
 /**
@@ -48,12 +48,15 @@ export default function App() {
     edActiveTabId,
     edErrorMessage,
     activeContent,
+    getActiveContentNow,
     onWorkspaceOpened: edOnWorkspaceOpened,
     onWorkspaceClosed: edOnWorkspaceClosed,
     openFile: edOpenFile,
     saveFile: edSaveFile,
     setContent: edSetContent,
     applyDiffReplaceInTab: edApplyDiffReplaceInTab,
+    rollbackDiffInTab: edRollbackDiffInTab,
+    isActiveEditorRangeText: edIsActiveEditorRangeText,
     closeTab: edCloseTab,
     switchTab: edSwitchTab,
   } = useEditorActor();
@@ -72,18 +75,23 @@ export default function App() {
       edOnWorkspaceOpened(workspaceRoot);
       void chatOnWorkspaceOpened(workspaceRoot);
     },
-    onWorkspaceClosed: () => {
+    onWorkspaceClosed: async () => {
       const root = workspaceSnapshot?.workspace.rootPath;
-      for (const diff of diffStore.getAllDiffs()) {
-        if (root) void updateDiffStatus(root, diff.id, "expired");
+      const expiredCards = diffStore.expireAllOnClose();
+      if (root && expiredCards.length > 0) {
+        try {
+          await saveTerminalCards(root, expiredCards);
+        } catch {
+          // Closing still proceeds; failed persistence leaves no in-memory workspace state.
+        }
       }
       edOnWorkspaceClosed();
       void chatOnWorkspaceClosed();
       setShowPreappliedSaveDialog(false);
       setPreappliedCloseTabId(null);
       setInputReferences([]);
-      // BR-DE-STATE-013: all non-terminal PendingDiffs cleared — diffStore.clear() stops
-      // all per-diff actors and notifies subscribers, which re-renders allDiffs as [].
+      // BR-DE-STATE-013: expireAllOnClose handles business expiry; clear() is final
+      // in-memory teardown for the closed workspace.
       diffStore.clear();
     },
   });
@@ -121,18 +129,12 @@ export default function App() {
     cancelMessage: chatCancelMessage,
     retryMessage: chatRetryMessage,
     notifyActiveFileChanged,
-  } = useChatActor();
+  } = useChatActor({
+    getActiveFilePath: () => edActiveTabId,
+    applyDiffReplaceInTab: edApplyDiffReplaceInTab,
+  });
 
   const [inputReferences, setInputReferences] = useState<InputReference[]>([]);
-  const previousChatValueRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    const previous = previousChatValueRef.current;
-    if (previous === "streaming" && chatValue === "ready") {
-      setInputReferences([]);
-    }
-    previousChatValueRef.current = chatValue;
-  }, [chatValue]);
 
   const [providerConfig, setProviderConfig] = useState<ProviderConfig>({
     provider: "anthropic",
@@ -151,21 +153,19 @@ const defaultModels: Record<ProviderConfig["provider"], string> = {
     if (!["pending", "preapplied", "accepting", "rejecting"].includes(status)) {
       return null;
     }
+    const recoveredStatus: PendingDiffStatus = status === "preapplied" ? "pending" : status;
     return {
       id: record.id,
       filePath: record.filePath,
       originalText: record.originalText,
       newText: record.newText,
       summary: record.summary,
-      status,
-      effectivePath: record.effectivePath,
+      status: recoveredStatus,
+      effectivePath: status === "preapplied" ? "closed-file" : record.effectivePath,
       sourceToolId: record.sourceToolId,
       baseRevision: record.baseRevision,
       createdAt: record.createdAt,
-      appliedRange:
-        record.appliedRangeFrom !== null && record.appliedRangeTo !== null
-          ? { from: record.appliedRangeFrom, to: record.appliedRangeTo }
-          : undefined,
+      appliedRange: undefined,
     };
   }
 
@@ -255,9 +255,12 @@ const defaultModels: Record<ProviderConfig["provider"], string> = {
     ? activeTab.fileType === "other" ? "readonly" : "editable"
     : undefined;
   const activeFileDirty = activeTab?.dirty ?? false;
-  const activePreappliedDiff: PendingDiff | null = activeFilePath
-    ? (allDiffs.find((d) => d.filePath === activeFilePath && d.status === "preapplied") ?? null)
-    : null;
+  const activePreappliedDiffs: PendingDiff[] = activeFilePath
+    ? allDiffs.filter((d) => d.filePath === activeFilePath && d.status === "preapplied")
+    : [];
+  const activeAppliedRanges = activePreappliedDiffs
+    .map((d) => d.appliedRange)
+    .filter((range): range is { from: number; to: number } => Boolean(range));
   const activeFilePendingDiffCount = activeFilePath
     ? allDiffs.filter((d) => d.filePath === activeFilePath).length
     : 0;
@@ -275,6 +278,9 @@ const defaultModels: Record<ProviderConfig["provider"], string> = {
     for (const record of loadedDiffs) {
       const hydrated = pendingDiffFromRecord(record);
       if (hydrated) diffStore.hydrateDiff(hydrated);
+      if (record.status === "preapplied") {
+        void updateDiffStatus(workspaceSnapshot.workspace.rootPath, record.id, "pending");
+      }
     }
   }, [loadedDiffs, workspaceSnapshot]);
 
@@ -390,12 +396,6 @@ const defaultModels: Record<ProviderConfig["provider"], string> = {
   async function handleOpenFile(relativePath: string) {
     if (!workspaceSnapshot) return;
     await edOpenFile(workspaceSnapshot.workspace.rootPath, relativePath);
-    // Expire preapplied diffs that belong to other files (no longer visible in editor).
-    for (const diff of allDiffs) {
-      if (diff.status === "preapplied" && diff.filePath !== relativePath) {
-        expireDiff(diff);
-      }
-    }
   }
 
   async function handleSaveFile(tabId?: string) {
@@ -419,14 +419,14 @@ const defaultModels: Record<ProviderConfig["provider"], string> = {
     //
     // NOTE: diffStore.getAllDiffs() is used here instead of the `allDiffs` React snapshot.
     // handleEditorChange can be called synchronously from inside TipTap's onUpdate during
-    // edApplyDiffReplaceInTab (e.g. during rejectDiff). At that point the React snapshot is
+    // edRollbackDiffInTab (e.g. during rejectDiff). At that point the React snapshot is
     // stale — it still shows `preapplied` for a diff whose actor has already transitioned to
     // `rejecting` (actor subscriber updates cachedAllDiffs synchronously). Reading from the
     // store directly prevents a spurious expireDiff() call that would stop the actor before
     // rejectDiff sends TERMINAL_RECORDED, producing a XState warning and a duplicate terminal card.
     for (const diff of diffStore.getAllDiffs()) {
       if (diff.status === "preapplied" && diff.filePath === activeFilePath) {
-        if (!diff.newText || !content.includes(diff.newText)) {
+        if (!diff.newText || !edIsActiveEditorRangeText(diff.appliedRange, diff.newText)) {
           expireDiff(diff);
         }
       }
@@ -500,8 +500,9 @@ const defaultModels: Record<ProviderConfig["provider"], string> = {
   /** BR-DE-STATE-003 / BR-DE-STATE-012 / BR-DE-STATE-013: move diff to expired terminal. */
   function expireDiff(diff: PendingDiff) {
     diffStore.getDiffActor(diff.id)?.send({ type: "EXPIRE_REQUESTED" });
-    persistDiffStatus(diff.id, "expired");
-    diffStore.moveToTerminal(diff.id, createTerminalDiffCard(diff.id, "expired", diff.sourceToolId));
+    const card = createTerminalDiffCard(diff.id, "expired", diff.sourceToolId);
+    persistTerminalCard(card);
+    diffStore.moveToTerminal(diff.id, card);
   }
 
   /**
@@ -513,8 +514,9 @@ const defaultModels: Record<ProviderConfig["provider"], string> = {
     const actor = diffStore.getDiffActor(diff.id);
     actor?.send({ type: "ACCEPT_REQUESTED" });
     actor?.send({ type: "ACCEPT_CONFIRMED" });
-    persistDiffStatus(diff.id, "accepted");
-    diffStore.moveToTerminal(diff.id, createTerminalDiffCard(diff.id, "accepted", diff.sourceToolId));
+    const card = createTerminalDiffCard(diff.id, "accepted", diff.sourceToolId);
+    persistTerminalCard(card);
+    diffStore.moveToTerminal(diff.id, card);
   }
 
   /**
@@ -526,23 +528,25 @@ const defaultModels: Record<ProviderConfig["provider"], string> = {
     actor?.send({ type: "REJECT_REQUESTED" });
     const tabId = edTabs.find((t) => t.filePath === diff.filePath)?.id;
     const result = tabId
-      ? edApplyDiffReplaceInTab(tabId, diff.newText, diff.originalText)
+      ? edRollbackDiffInTab(tabId, diff.appliedRange, diff.newText, diff.originalText)
       : { success: false as const, reason: "text-not-found" as const };
     if (!result.success) {
       actor?.send({ type: "FAILED" });
-      persistDiffStatus(diff.id, "error");
-      diffStore.moveToTerminal(diff.id, createTerminalDiffCard(diff.id, "error", diff.sourceToolId));
+      const card = createTerminalDiffCard(diff.id, "error", diff.sourceToolId);
+      persistTerminalCard(card);
+      diffStore.moveToTerminal(diff.id, card);
       return false;
     }
     actor?.send({ type: "TERMINAL_RECORDED" });
-    persistDiffStatus(diff.id, "rejected");
-    diffStore.moveToTerminal(diff.id, createTerminalDiffCard(diff.id, "rejected", diff.sourceToolId));
+    const card = createTerminalDiffCard(diff.id, "rejected", diff.sourceToolId);
+    persistTerminalCard(card);
+    diffStore.moveToTerminal(diff.id, card);
     return true;
   }
 
-  function persistDiffStatus(diffId: string, status: PendingDiffStatus) {
+  function persistTerminalCard(card: TerminalDiffCard) {
     const root = workspaceSnapshot?.workspace.rootPath;
-    if (root) void updateDiffStatus(root, diffId, status);
+    if (root) void saveTerminalCard(root, card);
   }
 
   function handleAcceptDiffById(diffId: string) {
@@ -592,7 +596,18 @@ const defaultModels: Record<ProviderConfig["provider"], string> = {
 
   // ── Agent / Chat handlers (Issue 5-A / 5-B / 5-C) ────────────
   async function handleSendAgentMessage(userContent: string) {
-    await chatSendMessage(
+    // BR-AG-DATA-004: read LogicalState from contentMapRef synchronously at send time,
+    // bypassing React state lag. activeFileLogicalStateSnapshot (computed at render time
+    // from activeContent useState) can be stale if TipTap fired onUpdate between the last
+    // render and the user clicking send. getActiveContentNow() reads contentMapRef directly.
+    const liveContent =
+      activeFilePath && activeFileMode === "editable" ? getActiveContentNow() : undefined;
+    const liveSnapshot = liveContent?.slice(0, MAX_ACTIVE_FILE_LOGICAL_STATE_SNAPSHOT);
+    const liveTruncated = liveContent !== undefined
+      ? liveContent.length > MAX_ACTIVE_FILE_LOGICAL_STATE_SNAPSHOT
+      : undefined;
+
+    const sent = await chatSendMessage(
       userContent,
       providerConfig.provider,
       providerConfig.model,
@@ -602,8 +617,8 @@ const defaultModels: Record<ProviderConfig["provider"], string> = {
         activeFileMode,
         activeFileDirty,
         pendingDiffCount: activeFilePendingDiffCount,
-        activeFileLogicalStateSnapshot,
-        activeFileSnapshotTruncated,
+        activeFileLogicalStateSnapshot: liveSnapshot,
+        activeFileSnapshotTruncated: liveTruncated,
         documentStructure:
           activeFilePath && activeFileMode === "editable"
             ? (extractDocumentStructure(activeFilePath) ?? undefined)
@@ -611,6 +626,9 @@ const defaultModels: Record<ProviderConfig["provider"], string> = {
       },
       inputReferences,
     );
+    if (sent) {
+      setInputReferences([]);
+    }
   }
 
   function handleCancelMessage() {
@@ -648,11 +666,11 @@ const defaultModels: Record<ProviderConfig["provider"], string> = {
     })),
   ];
 
-  // BR-DE-UI-003: batch accept/reject all pending/preapplied diffs.
+  // BR-DE-UI-003: batch accept/reject all currently executable preapplied diffs.
   // Each diff is processed independently; failure of one does not block others.
   function handleAcceptAllDiffs() {
     for (const d of allDiffs) {
-      if (d.status === "pending" || d.status === "preapplied") {
+      if (d.status === "preapplied") {
         acceptDiff(d);
       }
     }
@@ -660,7 +678,7 @@ const defaultModels: Record<ProviderConfig["provider"], string> = {
 
   function handleRejectAllDiffs() {
     for (const d of allDiffs) {
-      if (d.status === "pending" || d.status === "preapplied") {
+      if (d.status === "preapplied") {
         rejectDiff(d);
       }
     }
@@ -717,7 +735,7 @@ const defaultModels: Record<ProviderConfig["provider"], string> = {
             activeTabId={edActiveTabId}
             content={activeContent}
             fileType={activeFileType}
-            appliedRange={activePreappliedDiff?.appliedRange ?? null}
+            appliedRanges={activeAppliedRanges}
             errorMessage={edErrorMessage}
             preappliedTabIds={preappliedTabIds}
             onTabClick={(tabId) => edSwitchTab(tabId)}
