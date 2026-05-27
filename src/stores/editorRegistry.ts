@@ -116,6 +116,26 @@ export function extractDocumentStructure(filePath: string): string | null {
   return xmlLines.join("\n");
 }
 
+export function extractVisibleText(filePath: string): string | null {
+  if (!_activeEditor || _activeEditor.isDestroyed) return null;
+  if (!filePath.toLowerCase().endsWith(".md")) return null;
+
+  const lines: string[] = [];
+  _activeEditor.view.state.doc.forEach((node) => {
+    if (node.type.name === "bulletList" || node.type.name === "orderedList") {
+      node.forEach((listItem) => {
+        const text = listItem.textContent.trim();
+        if (text) lines.push(text);
+      });
+      return;
+    }
+    const text = node.textContent.trim();
+    if (text) lines.push(text);
+  });
+
+  return lines.join("\n");
+}
+
 function escapeXmlAttr(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }

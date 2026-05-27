@@ -40,16 +40,16 @@ interface EditorAreaProps {
   filePath?: string | null;
   content: string;
   fileType?: "md" | "txt" | "other";
-  appliedRange: AppliedRange | null;
+  appliedRanges?: AppliedRange[];
   errorMessage: string | null;
   onChange: (content: string) => void;
 }
 
 /**
  * BR-DE-UI-002: GreenAdditionDecoration renders a --diff-add-bg inline highlight
- * over the appliedRange of a preapplied PendingDiff.
+ * over the appliedRanges of preapplied PendingDiffs.
  * Red deletion decoration is confined to DiffCard only — never injected here.
- * Updated via ProseMirror transaction meta when the appliedRange prop changes.
+ * Updated via ProseMirror transaction meta when appliedRanges prop changes.
  */
 const greenDecoKey = new PluginKey<DecorationSet>("greenAdditionDecoration");
 
@@ -63,7 +63,7 @@ const GreenAdditionDecoration = Extension.create({
           init: () => DecorationSet.empty,
           apply(tr, prevSet) {
             const meta = tr.getMeta(greenDecoKey) as
-              | { from: number; to: number }
+              | { from: number; to: number }[]
               | null
               | undefined;
             if (meta === undefined) {
@@ -71,14 +71,18 @@ const GreenAdditionDecoration = Extension.create({
               return prevSet.map(tr.mapping, tr.doc);
             }
             if (!meta) return DecorationSet.empty;
-            const { from, to } = meta;
+            if (meta.length === 0) return DecorationSet.empty;
             const docSize = tr.doc.content.size;
-            if (from >= to || from < 0 || to > docSize + 1) return DecorationSet.empty;
-            return DecorationSet.create(tr.doc, [
-              Decoration.inline(from, to, {
-                style: "background: var(--diff-add-bg);",
-              }),
-            ]);
+            const decorations = meta
+              .filter(({ from, to }) => from < to && from >= 0 && to <= docSize + 1)
+              .map(({ from, to }) =>
+                Decoration.inline(from, to, {
+                  style: "background: var(--diff-add-bg);",
+                }),
+              );
+            return decorations.length > 0
+              ? DecorationSet.create(tr.doc, decorations)
+              : DecorationSet.empty;
           },
         },
         props: {
@@ -110,7 +114,7 @@ export function EditorArea({
   filePath,
   content,
   fileType = "md",
-  appliedRange,
+  appliedRanges = [],
   errorMessage,
   onChange,
 }: EditorAreaProps) {
@@ -167,7 +171,7 @@ export function EditorArea({
       filePath={filePath}
       content={content}
       fileType={fileType}
-      appliedRange={appliedRange}
+      appliedRanges={appliedRanges}
       onChange={onChange}
     />
   );
@@ -178,7 +182,7 @@ function TiptapEditorSurface({
   filePath,
   content,
   fileType = "md",
-  appliedRange,
+  appliedRanges = [],
   onChange,
 }: Omit<EditorAreaProps, "errorMessage">) {
   const editable = isEditable(stateName);
@@ -253,14 +257,14 @@ function TiptapEditorSurface({
     };
   }, [editor]);
 
-  // BR-DE-UI-002: update GreenAdditionDecoration when appliedRange changes.
+  // BR-DE-UI-002: update GreenAdditionDecoration when appliedRanges change.
   // Dispatches a no-content transaction with plugin meta to recompute decorations.
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
     editor.view.dispatch(
-      editor.view.state.tr.setMeta(greenDecoKey, appliedRange ?? null),
+      editor.view.state.tr.setMeta(greenDecoKey, appliedRanges.length > 0 ? appliedRanges : null),
     );
-  }, [editor, appliedRange]);
+  }, [editor, appliedRanges]);
 
   useEffect(() => {
     if (!editor) return;

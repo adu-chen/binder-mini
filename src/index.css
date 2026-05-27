@@ -26,7 +26,7 @@
   --warning: #d4a34a;
 
   /* Diff-specific tokens */
-  --diff-add-bg:         rgba(82, 168, 94, 0.18);
+  --diff-add-bg:         rgba(82, 168, 94, 0.33);
   --diff-del-bg:         rgba(224, 82, 82, 0.18);
   --diff-pending-border: #4a90d9;
   --diff-accepted-bg:    rgba(82, 168, 94, 0.08);

@@ -45,7 +45,7 @@ interface EditorColumnProps {
   activeTabId: string | null;
   content: string;
   fileType?: "md" | "txt" | "other";
-  appliedRange: AppliedRange | null;
+  appliedRanges: AppliedRange[];
   errorMessage: string | null;
   preappliedTabIds: ReadonlySet<string>;
   onTabClick: (tabId: string) => void;
@@ -80,7 +80,7 @@ export function EditorColumn({
   activeTabId,
   content,
   fileType,
-  appliedRange,
+  appliedRanges,
   errorMessage,
   preappliedTabIds,
   onTabClick,
@@ -147,7 +147,7 @@ export function EditorColumn({
         filePath={activeTab?.filePath ?? null}
         content={content}
         fileType={fileType}
-        appliedRange={appliedRange}
+        appliedRanges={appliedRanges}
         errorMessage={errorMessage}
         onChange={onChange}
       />

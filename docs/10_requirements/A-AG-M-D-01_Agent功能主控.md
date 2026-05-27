@@ -284,7 +284,7 @@ Agent 根据引用类型自行判断引用语义：
 - `plain_text` → 作为背景参考文本
 - `url` → 作为背景参考链接；系统只传递 URL 字符串，不发起 fetch 请求；模型如需读取页面内容，须自行调用 web_search 工具
 
-引用内容以 XML 块格式注入 Provider payload L1 层，不拼入 user message；引用本身不直接触发文件写入；消息发送成功后清空，Workspace 切换后失效，发送失败则保留。
+引用内容以 XML 块格式注入 Provider payload L1 层，不拼入 user message；引用本身不直接触发文件写入。发送进入消息流时，InputReference 必须快照到本次 user message 并以只读标签展示；输入区引用标签同步清空。Workspace 切换后未发送引用失效，已发送消息上的引用标签随聊天历史恢复。
 
 ### REQ-AG-007 Prompt Runtime（P1）
 

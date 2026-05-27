@@ -107,7 +107,7 @@ interface ChatMachineContext {
   pendingToolExecutions: ToolExecution[];   // 待执行队列
   activeToolExecution: ToolExecution | null; // 当前正在执行的工具（队列头）
 
-  // 当前 InputReference 列表（发送成功后清空）
+  // 当前待发送 InputReference 列表（SEND_MESSAGE 时清空）
   inputReferences: InputReference[];
 
   // 错误信息（error 状态下使用）
@@ -120,7 +120,7 @@ Context 变更规则：
 
 1. `messages` 只通过状态机 assign 操作追加，不得外部直接 push。
 2. `streamingContent` 在 streaming 状态每次 TOKEN_RECEIVED 时累积，RESPONSE_DONE 或 CANCEL 时合并到 messages 并清空。
-3. `inputReferences` 在 SEND_MESSAGE 事件触发时快照到 payload，RESPONSE_DONE 后清空；FAILED/CANCEL 后保留。
+3. `inputReferences` 在 SEND_MESSAGE 事件触发时快照到本次 user AgentMessage，并立即清空 context 中的待发送引用；Provider payload 仍从本轮 runtimeContext 注入 L1 XML，历史消息上的引用只用于 UI 展示和持久化恢复。
 4. `pendingToolExecutions` 在 streaming 收到全部 tool_use block 后整体写入，进入 toolCalling 时从队列头取出 `activeToolExecution`；TOOL_FINISHED 后结算当前项，若队列非空继续取下一个，队列空时回 streaming 等待 RESPONSE_DONE；CANCEL 时清空队列并标记 activeToolExecution 为 cancelled。
 5. RETRY 从 error 状态重发时：context.messages 截断至最后一条**完整** assistant message（partial streaming 内容丢弃）；若无完整 assistant message，messages 保持 SEND_MESSAGE 之前的状态重发。
 6. 文件切换合成消息：收到 ACTIVE_FILE_CHANGED 时，向 messages 追加 `role: "system"` 的合成消息 `"[Context: Active file switched from {oldPath} to {newPath}]"`；此消息参与 N 条裁剪计算，不单独维护。

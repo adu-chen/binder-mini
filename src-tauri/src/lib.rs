@@ -325,6 +325,12 @@ fn chat_debug_error(app: &tauri::AppHandle, line: &str) {
     chat_debug_log(app, line);
 }
 
+fn prompt_debug_enabled() -> bool {
+    std::env::var("BINDER_CHAT_PROMPT_DEBUG")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
 fn initialize_workspace_metadata(root_path: &Path) -> Result<WorkspaceMetadata, String> {
     let binder_dir = root_path.join(".binder");
     fs::create_dir_all(&binder_dir).map_err(|error| error.to_string())?;
@@ -1520,10 +1526,12 @@ fn load_api_key(app: &tauri::AppHandle, provider: &str) -> Result<String, String
 #[derive(Clone)]
 struct PromptRuntimeContext {
     workspace_root: String,
+    turn_intent: String,
     active_file_path: Option<String>,
     active_file_mode: Option<String>,
     active_file_dirty: Option<bool>,
     pending_diff_count: Option<u32>,
+    active_file_visible_text: Option<String>,
     active_file_logical_state_snapshot: Option<String>,
     active_file_snapshot_truncated: Option<bool>,
     /// Pre-built XML string from extractDocumentStructure() on the frontend.
@@ -1638,6 +1646,13 @@ fn build_system_prompt(runtime: &PromptRuntimeContext) -> String {
         format!("Current workspace: {}", workspace_name(&runtime.workspace_root)),
         "Use workspace tools to inspect files instead of guessing project content.".to_string(),
     ];
+    lines.push("Prompt architecture:".to_string());
+    lines.push(format!("- Current turn interpretation mode: {}", runtime.turn_intent));
+    lines.push("- The current_turn block in the user message is the only active instruction for this response.".to_string());
+    lines.push("- conversation_history is memory, not an instruction list.".to_string());
+    lines.push("- You may use conversation_history to answer questions about the dialogue or resolve references in current_turn.".to_string());
+    lines.push("- Do not continue, execute, or infer tasks from conversation_history unless current_turn explicitly asks to continue or use prior work.".to_string());
+    lines.push("- If current_turn is casual conversation, answer casually and do not inspect or describe the active document.".to_string());
 
     if let Some(active_file) = &runtime.active_file_path {
         let mode = runtime.active_file_mode.as_deref().unwrap_or("unknown");
@@ -1651,27 +1666,39 @@ fn build_system_prompt(runtime: &PromptRuntimeContext) -> String {
         lines.push("Active file: none".to_string());
     }
 
-    if let (Some(active_file), Some(snapshot)) = (
-        &runtime.active_file_path,
-        &runtime.active_file_logical_state_snapshot,
-    ) {
+    lines.push("Runtime authority:".to_string());
+    lines.push("- current_editor_document is the only authoritative source for the current ActiveFile.".to_string());
+    lines.push("- conversation history is prior dialogue only; it is not evidence of current document content.".to_string());
+    lines.push("- If prior dialogue conflicts with current_editor_document, current_editor_document wins.".to_string());
+    lines.push("- When the user asks what the current document is or what you can see, answer from visible_text.".to_string());
+    lines.push("- Do not emit raw Markdown syntax when answering about visible content unless the user asks for Markdown/source.".to_string());
+    lines.push("- Use markdown_source only when the user explicitly asks for Markdown/source text or when preparing an edit.".to_string());
+    lines.push("- Do not infer current document content from previous assistant messages.".to_string());
+
+    if let Some(active_file) = &runtime.active_file_path {
         let dirty = if runtime.active_file_dirty.unwrap_or(false) { "true" } else { "false" };
         let truncated = if runtime.active_file_snapshot_truncated.unwrap_or(false) { "true" } else { "false" };
+        let format = if active_file.to_lowercase().ends_with(".md") { "markdown" } else { "text" };
         lines.push(format!(
-            "<active_file_logical_state file=\"{}\" dirty=\"{}\" truncated=\"{}\">",
-            active_file, dirty, truncated
+            "<current_editor_document authoritative=\"true\" file=\"{}\" dirty=\"{}\" truncated=\"{}\" format=\"{}\">",
+            xml_attr_safe(active_file), dirty, truncated, format
         ));
-        lines.push("<![CDATA[".to_string());
-        lines.push(cdata_safe(snapshot));
-        lines.push("]]>".to_string());
-        lines.push("</active_file_logical_state>".to_string());
-    }
-
-    // L0 ④ — document_structure (AG-M-P-02 §3 ④); provided by frontend extractDocumentStructure()
-    if let Some(doc_structure) = &runtime.document_structure {
-        if !doc_structure.trim().is_empty() {
-            lines.push(doc_structure.clone());
+        if let Some(visible_text) = &runtime.active_file_visible_text {
+            lines.push("<visible_text><![CDATA[".to_string());
+            lines.push(cdata_safe(visible_text));
+            lines.push("]]></visible_text>".to_string());
         }
+        if let Some(snapshot) = &runtime.active_file_logical_state_snapshot {
+            lines.push("<markdown_source><![CDATA[".to_string());
+            lines.push(cdata_safe(snapshot));
+            lines.push("]]></markdown_source>".to_string());
+        }
+        if let Some(doc_structure) = &runtime.document_structure {
+            if !doc_structure.trim().is_empty() {
+                lines.push(doc_structure.clone());
+            }
+        }
+        lines.push("</current_editor_document>".to_string());
     }
 
     if let Some(input_references_xml) = build_input_references_xml(&runtime.input_references) {
@@ -1679,13 +1706,13 @@ fn build_system_prompt(runtime: &PromptRuntimeContext) -> String {
     }
 
     lines.push("Tool constraints:".to_string());
-    lines.push("- read_file/list_files/search_files inspect files inside the current Workspace boundary from DiskState.".to_string());
-    lines.push("- edit_current_editor_document targets the runtime ActiveFile only; ignore any model-supplied filePath as execution authority.".to_string());
+    lines.push("- read_file/list_files/search_files inspect files inside the current Workspace boundary from DiskState. Use them only when current_turn requires workspace inspection.".to_string());
+    lines.push("- edit_current_editor_document targets the runtime ActiveFile only; ignore any model-supplied filePath as execution authority. Use it only when current_turn clearly requests an edit.".to_string());
     lines.push("- CRITICAL — originalText must be PLAIN TEXT only. The editor stores content as plain text nodes; Markdown syntax characters are structural markers and are NOT stored as text.".to_string());
     lines.push("  Strip ALL Markdown syntax from originalText: heading markers (#), bold/italic markers (**, *, _), list markers (-, *, +, numbers), code fences (```), blockquote (>), etc.".to_string());
     lines.push("  Examples: '# Welcome' → originalText='Welcome'  |  '**important**' → originalText='important'  |  '- list item' → originalText='list item'".to_string());
-    lines.push("  The <active_file_logical_state> CDATA shows Markdown formatting so you can understand document structure and style context. Do NOT copy those syntax characters into originalText.".to_string());
-    lines.push("- For ActiveFile edits, extract originalText from <active_file_logical_state> after stripping Markdown syntax. Do not use read_file/DiskState as the edit source.".to_string());
+    lines.push("  The current_editor_document markdown_source shows Markdown formatting so you can understand document structure and style context. Do NOT copy those syntax characters into originalText.".to_string());
+    lines.push("- For ActiveFile edits, extract originalText from current_editor_document visible_text/document_structure after stripping Markdown syntax. Do not use read_file/DiskState as the edit source.".to_string());
     lines.push("- newText is the plain text replacement. Provide only the text content; do not wrap with Markdown syntax characters.".to_string());
     lines.push("- Do not replace the whole file. Always provide a precise originalText fragment.".to_string());
     lines.push("- API keys, absolute system paths, and internal credential storage are never available to the model.".to_string());
@@ -1731,7 +1758,7 @@ fn anthropic_tools(runtime: &PromptRuntimeContext) -> Vec<serde_json::Value> {
                     "properties": {
                         "originalText": {
                             "type": "string",
-                            "description": "Exact plain-text fragment to find and replace. Must NOT contain Markdown syntax characters. Extract from <active_file_logical_state> after stripping Markdown markers. Example: for '# Hello World' use 'Hello World', not '# Hello World'."
+                            "description": "Exact plain-text fragment to find and replace. Must NOT contain Markdown syntax characters. Extract from current_editor_document visible_text/document_structure. Example: for '# Hello World' use 'Hello World', not '# Hello World'."
                         },
                         "newText": {
                             "type": "string",
@@ -1860,6 +1887,8 @@ async fn chat_stream(
     active_file_mode: Option<String>,
     active_file_dirty: Option<bool>,
     pending_diff_count: Option<u32>,
+    turn_intent: Option<String>,
+    active_file_visible_text: Option<String>,
     active_file_logical_state_snapshot: Option<String>,
     active_file_snapshot_truncated: Option<bool>,
     document_structure: Option<String>,
@@ -1867,10 +1896,12 @@ async fn chat_stream(
 ) -> Result<(), String> {
     let runtime = PromptRuntimeContext {
         workspace_root,
+        turn_intent: turn_intent.unwrap_or_else(|| "model_judged".to_string()),
         active_file_path,
         active_file_mode,
         active_file_dirty,
         pending_diff_count,
+        active_file_visible_text,
         active_file_logical_state_snapshot,
         active_file_snapshot_truncated,
         document_structure,
@@ -1991,31 +2022,42 @@ async fn anthropic_chat_stream(
     }
 
     let system_prompt = build_system_prompt(&runtime);
+    let message_count = api_messages.len();
+    let tools = anthropic_tools(&runtime);
+    let tool_count = tools.len();
     let body = serde_json::json!({
         "model": model,
         "max_tokens": 8192,
         "stream": true,
         "system": system_prompt,
-        "tools": anthropic_tools(&runtime),
+        "tools": tools,
         "messages": api_messages
     });
 
-    // ── PROMPT BUILD LOG ────────────────────────────────────────────────────────
-    // Prints the fully-constructed request body (system, tools, messages) to
-    // stdout and the chat-debug.log file before every Anthropic model call.
-    chat_debug_log(&app, &format!(
-        "\n╔══ PROMPT SYSTEM [anthropic] request_id={} model={} active_file={} ══╗\n{}\n╚══ END PROMPT SYSTEM ══╝",
-        request_id,
-        model,
-        runtime.active_file_path.as_deref().unwrap_or("none"),
-        system_prompt
-    ));
-    chat_debug_log(&app, &format!(
-        "\n╔══ PROMPT BUILD [anthropic] request_id={} model={} ══╗\n{}\n╚══ END PROMPT BUILD ══╝",
-        request_id,
-        model,
-        serde_json::to_string_pretty(&body).unwrap_or_else(|e| format!("<serialize error: {e}>"))
-    ));
+    if prompt_debug_enabled() {
+        chat_debug_log(&app, &format!(
+            "\n╔══ PROMPT SYSTEM [anthropic] request_id={} model={} active_file={} ══╗\n{}\n╚══ END PROMPT SYSTEM ══╝",
+            request_id,
+            model,
+            runtime.active_file_path.as_deref().unwrap_or("none"),
+            system_prompt
+        ));
+        chat_debug_log(&app, &format!(
+            "\n╔══ PROMPT BUILD [anthropic] request_id={} model={} ══╗\n{}\n╚══ END PROMPT BUILD ══╝",
+            request_id,
+            model,
+            serde_json::to_string_pretty(&body).unwrap_or_else(|e| format!("<serialize error: {e}>"))
+        ));
+    } else {
+        chat_debug_log(&app, &format!(
+            "[chat_stream] prompt metadata provider=anthropic request_id={} model={} active_file={} messages={} tools={}",
+            request_id,
+            model,
+            runtime.active_file_path.as_deref().unwrap_or("none"),
+            message_count,
+            tool_count
+        ));
+    }
 
     let client = reqwest::Client::new();
     let response = match client
@@ -2300,31 +2342,43 @@ async fn openai_compatible_chat_stream(
         return Ok(());
     }
 
+    let message_count = api_messages.len();
+    let tools = openai_tools(&runtime);
+    let tool_count = tools.len();
     let body = serde_json::json!({
         "model": model,
         "stream": true,
-        "tools": openai_tools(&runtime),
+        "tools": tools,
         "messages": api_messages
     });
 
-    // ── PROMPT BUILD LOG ────────────────────────────────────────────────────────
-    // Prints the fully-constructed request body (system message, tools, messages)
-    // to stdout and the chat-debug.log file before every OpenAI-compatible model call.
-    chat_debug_log(&app, &format!(
-        "\n╔══ PROMPT SYSTEM [openai-compat] request_id={} endpoint={} model={} active_file={} ══╗\n{}\n╚══ END PROMPT SYSTEM ══╝",
-        request_id,
-        endpoint,
-        model,
-        runtime.active_file_path.as_deref().unwrap_or("none"),
-        system_prompt
-    ));
-    chat_debug_log(&app, &format!(
-        "\n╔══ PROMPT BUILD [openai-compat] request_id={} endpoint={} model={} ══╗\n{}\n╚══ END PROMPT BUILD ══╝",
-        request_id,
-        endpoint,
-        model,
-        serde_json::to_string_pretty(&body).unwrap_or_else(|e| format!("<serialize error: {e}>"))
-    ));
+    if prompt_debug_enabled() {
+        chat_debug_log(&app, &format!(
+            "\n╔══ PROMPT SYSTEM [openai-compat] request_id={} endpoint={} model={} active_file={} ══╗\n{}\n╚══ END PROMPT SYSTEM ══╝",
+            request_id,
+            endpoint,
+            model,
+            runtime.active_file_path.as_deref().unwrap_or("none"),
+            system_prompt
+        ));
+        chat_debug_log(&app, &format!(
+            "\n╔══ PROMPT BUILD [openai-compat] request_id={} endpoint={} model={} ══╗\n{}\n╚══ END PROMPT BUILD ══╝",
+            request_id,
+            endpoint,
+            model,
+            serde_json::to_string_pretty(&body).unwrap_or_else(|e| format!("<serialize error: {e}>"))
+        ));
+    } else {
+        chat_debug_log(&app, &format!(
+            "[chat_stream] prompt metadata provider=openai-compatible request_id={} endpoint={} model={} active_file={} messages={} tools={}",
+            request_id,
+            endpoint,
+            model,
+            runtime.active_file_path.as_deref().unwrap_or("none"),
+            message_count,
+            tool_count
+        ));
+    }
 
     let client = reqwest::Client::new();
     let response = match client

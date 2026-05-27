@@ -37,6 +37,8 @@ export interface DiffStoreInstance {
   updateDiff(diffId: string, update: Partial<PendingDiff>): void;
   /** Rebuild an in-memory PendingDiff and its diffMachine actor from WorkspaceDatabase. */
   hydrateDiff(diff: PendingDiff): void;
+  /** BR-DE-STATE-013: expire every live diff for WORKSPACE_CLOSED and return terminal cards for persistence. */
+  expireAllOnClose(): TerminalDiffCard[];
   /**
    * Remove from pendingDiffs map and prepend the TerminalDiffCard.
    * Called by accept/reject/expire paths after the diffMachine reaches a final state.
@@ -149,19 +151,29 @@ export function createDiffStoreInstance(): DiffStoreInstance {
 
   function hydrateDiff(diff: PendingDiff): void {
     if (!diff.id || pendingDiffs.has(diff.id)) return;
-    pendingDiffs.set(diff.id, diff);
+    const hydratedDiff: PendingDiff = diff.status === "preapplied"
+      ? {
+          ...diff,
+          status: "pending",
+          effectivePath: "closed-file",
+          appliedRange: undefined,
+          contentRevisionBeforeApply: undefined,
+          contentRevisionAfterApply: undefined,
+        }
+      : diff;
+    pendingDiffs.set(hydratedDiff.id, hydratedDiff);
     const actor = createActor(diffMachine);
     actor.subscribe((snapshot) => {
       const newStatus = snapshot.value as PendingDiff["status"];
-      const existing = pendingDiffs.get(diff.id);
+      const existing = pendingDiffs.get(hydratedDiff.id);
       if (existing && existing.status !== newStatus) {
-        pendingDiffs.set(diff.id, { ...existing, status: newStatus });
+        pendingDiffs.set(hydratedDiff.id, { ...existing, status: newStatus });
         notifyListeners();
       }
     });
     actor.start();
-    syncActorToStatus(actor, diff.status);
-    diffActors.set(diff.id, actor);
+    syncActorToStatus(actor, hydratedDiff.status);
+    diffActors.set(hydratedDiff.id, actor);
     notifyListeners();
   }
 
@@ -174,6 +186,30 @@ export function createDiffStoreInstance(): DiffStoreInstance {
     }
     terminalCards = [card, ...terminalCards];
     notifyListeners();
+  }
+
+  function expireAllOnClose(): TerminalDiffCard[] {
+    const cards: TerminalDiffCard[] = [];
+    for (const diff of Array.from(pendingDiffs.values())) {
+      const actor = diffActors.get(diff.id);
+      actor?.send({ type: "EXPIRE_REQUESTED" });
+      const card: TerminalDiffCard = {
+        diffId: diff.id,
+        status: "expired",
+        message: "Diff expired",
+        sourceToolId: diff.sourceToolId,
+        resolvedAt: Date.now(),
+      };
+      cards.push(card);
+      pendingDiffs.delete(diff.id);
+      actor?.stop();
+      diffActors.delete(diff.id);
+    }
+    if (cards.length > 0) {
+      terminalCards = [...cards, ...terminalCards];
+      notifyListeners();
+    }
+    return cards;
   }
 
   function getTerminalCards(): TerminalDiffCard[] {
@@ -205,6 +241,7 @@ export function createDiffStoreInstance(): DiffStoreInstance {
     getAllDiffs,
     updateDiff,
     hydrateDiff,
+    expireAllOnClose,
     moveToTerminal,
     getTerminalCards,
     clear,

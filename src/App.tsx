@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createTerminalDiffCard } from "./services/diffService";
 import {
   canChangeWorkspace,
@@ -13,7 +14,7 @@ import { useWorkspaceActor } from "./services/workspaceActor";
 import { useEditorActor } from "./services/editorActor";
 import { useChatActor } from "./services/chatActor";
 import { diffStore } from "./stores/diffStore";
-import { extractDocumentStructure } from "./stores/editorRegistry";
+import { extractDocumentStructure, extractVisibleText } from "./stores/editorRegistry";
 import { useWorkspaceSearch } from "./hooks/useWorkspaceSearch";
 import { MainLayout } from "./components/MainLayout";
 import { FileTreePanel } from "./components/FileTreePanel";
@@ -98,6 +99,8 @@ export default function App() {
 
   // ── Workspace close guard ───────────────────────────────────────
   const [showCloseGuard, setShowCloseGuard] = useState(false);
+  const pendingAppCloseRef = useRef(false);
+  const allowNativeAppCloseRef = useRef(false);
 
   // ── PathConflict error banner (BR-WS-DATA-002, BR-AG-TOOL-001) ─
   const conflictTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -307,6 +310,50 @@ const defaultModels: Record<ProviderConfig["provider"], string> = {
     });
   }
 
+  function closeAppAfterWorkspaceTeardown() {
+    allowNativeAppCloseRef.current = true;
+    void getCurrentWindow().close();
+  }
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+
+    void getCurrentWindow().onCloseRequested((event) => {
+      if (allowNativeAppCloseRef.current) return;
+      if (!workspaceSnapshot) return;
+
+      event.preventDefault();
+      pendingAppCloseRef.current = true;
+
+      if (!canLeaveWorkspace()) {
+        wsActor.send({ type: "CLOSE_WORKSPACE" });
+        setShowCloseGuard(true);
+        return;
+      }
+
+      wsActor.send({ type: "CLOSE_WORKSPACE" });
+      wsActor.send({ type: "CONFIRM_CLOSE" });
+      void confirmCloseFlow(toChatMessageRecords()).then(() => {
+        if (pendingAppCloseRef.current) {
+          pendingAppCloseRef.current = false;
+          closeAppAfterWorkspaceTeardown();
+        }
+      });
+    }).then((handler) => {
+      if (disposed) {
+        handler();
+        return;
+      }
+      unlisten = handler;
+    });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [workspaceSnapshot, edTabs, allDiffs, wsActor, confirmCloseFlow]);
+
   function handleOpenWorkspace() {
     void openWorkspaceFlow();
   }
@@ -327,10 +374,16 @@ const defaultModels: Record<ProviderConfig["provider"], string> = {
   function handleForceCloseWorkspace() {
     setShowCloseGuard(false);
     wsActor.send({ type: "CONFIRM_CLOSE" });
-    void confirmCloseFlow(toChatMessageRecords());
+    void confirmCloseFlow(toChatMessageRecords()).then(() => {
+      if (pendingAppCloseRef.current) {
+        pendingAppCloseRef.current = false;
+        closeAppAfterWorkspaceTeardown();
+      }
+    });
   }
 
   function handleCancelClose() {
+    pendingAppCloseRef.current = false;
     setShowCloseGuard(false);
     wsActor.send({ type: "CANCEL_CLOSE" });
   }
@@ -603,6 +656,10 @@ const defaultModels: Record<ProviderConfig["provider"], string> = {
     const liveContent =
       activeFilePath && activeFileMode === "editable" ? getActiveContentNow() : undefined;
     const liveSnapshot = liveContent?.slice(0, MAX_ACTIVE_FILE_LOGICAL_STATE_SNAPSHOT);
+    const liveVisibleText =
+      activeFilePath && activeFileMode === "editable"
+        ? (extractVisibleText(activeFilePath) ?? liveContent)
+        : undefined;
     const liveTruncated = liveContent !== undefined
       ? liveContent.length > MAX_ACTIVE_FILE_LOGICAL_STATE_SNAPSHOT
       : undefined;
@@ -617,6 +674,7 @@ const defaultModels: Record<ProviderConfig["provider"], string> = {
         activeFileMode,
         activeFileDirty,
         pendingDiffCount: activeFilePendingDiffCount,
+        activeFileVisibleText: liveVisibleText,
         activeFileLogicalStateSnapshot: liveSnapshot,
         activeFileSnapshotTruncated: liveTruncated,
         documentStructure:

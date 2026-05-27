@@ -9,6 +9,7 @@
  */
 
 import type { InputReference } from "../types/agent";
+import type { CSSProperties } from "react";
 
 interface InputReferenceBarProps {
   references: InputReference[];
@@ -19,12 +20,31 @@ export function InputReferenceBar({ references, onRemove }: InputReferenceBarPro
   if (references.length === 0) return null;
 
   return (
+    <InputReferenceTags
+      references={references}
+      onRemove={onRemove}
+      style={{ padding: "6px 8px 0" }}
+    />
+  );
+}
+
+interface InputReferenceTagsProps {
+  references?: InputReference[];
+  onRemove?: (index: number) => void;
+  style?: CSSProperties;
+}
+
+export function InputReferenceTags({ references = [], onRemove, style }: InputReferenceTagsProps) {
+  if (references.length === 0) return null;
+  const editable = Boolean(onRemove);
+
+  return (
     <div
       style={{
         display: "flex",
         flexWrap: "wrap",
         gap: 4,
-        padding: "6px 8px 0",
+        ...style,
       }}
     >
       {references.map((ref, i) => (
@@ -53,23 +73,25 @@ export function InputReferenceBar({ references, onRemove }: InputReferenceBarPro
           >
             {ref.displayName}
           </span>
-          <button
-            onClick={() => onRemove(i)}
-            style={{
-              color: "var(--text-muted)",
-              lineHeight: 1,
-              padding: "0 1px",
-              fontSize: 11,
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.color = "var(--text-primary)";
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.color = "var(--text-muted)";
-            }}
-          >
-            ✕
-          </button>
+          {editable && (
+            <button
+              onClick={() => onRemove?.(i)}
+              style={{
+                color: "var(--text-muted)",
+                lineHeight: 1,
+                padding: "0 1px",
+                fontSize: 11,
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.color = "var(--text-primary)";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.color = "var(--text-muted)";
+              }}
+            >
+              ✕
+            </button>
+          )}
         </span>
       ))}
     </div>

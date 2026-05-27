@@ -78,7 +78,7 @@ workspaceMachine 处于 `Loading` 时：全局遮罩 + 加载指示（不可操�
 
 | 语义 | Token | 值 | 用途 |
 |------|-------|----|------|
-| 绿增（GreenAddition）| `--diff-add-bg` | `rgba(82, 168, 94, 0.18)` | 编辑器内 newText 高亮 |
+| 绿增（GreenAddition）| `--diff-add-bg` | `rgba(82, 168, 94, 0.33)` | 编辑器内 newText 高亮 |
 | 红删（仅 chat 展示）| `--diff-del-bg` | `rgba(224, 82, 82, 0.18)` | chat stream diff 视图中 originalText |
 | pending 卡边框 | `--diff-pending-border` | `#4a90d9` | pending/preapplied diff 卡 |
 | accepted 卡色调 | `--diff-accepted-bg` | `rgba(82, 168, 94, 0.08)` | 终态 accepted 卡背景 |
@@ -201,6 +201,7 @@ DialogLayer
 **MessageList**
 
 - 用户消息（`role: user`）：右对齐气泡，`--bg-elevated` 背景
+- 用户消息若携带 InputReference 快照，在气泡下方以只读标签展示；标签不提供删除按钮
 - 助手消息（`role: assistant`）：左对齐，无气泡背景，紧凑排版
 - 系统合成消息（`role: system`，如文件切换通知）：`--text-muted` 居中细小文字，不突出展示
 - 流式消息：尾部闪烁光标
@@ -233,7 +234,8 @@ DialogLayer
 
 - 每个 InputReference 以标签形式展示：`[🔗 URL]` / `[" 文本片段…"]`
 - 右侧 `✕` 删除单个引用
-- 整体在 `inputReferences.length === 0` 时隐藏
+- 仅展示待发送引用；发送进入消息流后清空，已发送引用改由对应 user MessageBubble 下方只读标签展示
+- 整体在待发送 `inputReferences.length === 0` 时隐藏
 
 **ProviderConfigPanel**（右上角图标触发，抽屉式展开）
 

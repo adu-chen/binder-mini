@@ -9,7 +9,9 @@
  */
 
 import { DiffCard } from "./DiffCard";
+import { InputReferenceTags } from "./InputReferenceBar";
 import type { PendingDiffStatus } from "../machines/diffMachine";
+import type { InputReference } from "../types/agent";
 
 export interface DiffForBubble {
   diffId: string;
@@ -23,6 +25,7 @@ interface MessageBubbleProps {
   role: "user" | "assistant" | "system" | "tool";
   content: string;
   isStreaming?: boolean;
+  inputReferences?: InputReference[];
   /** BR-DE-UI-003: DiffCards linked to this message via toolCallId ↔ sourceToolId. */
   diffs?: DiffForBubble[];
   onAcceptDiff?: (diffId: string) => void;
@@ -60,6 +63,7 @@ export function MessageBubble({
   role,
   content,
   isStreaming = false,
+  inputReferences,
   diffs,
   onAcceptDiff,
   onRejectDiff,
@@ -99,6 +103,17 @@ export function MessageBubble({
           />
         )}
       </div>
+
+      {role === "user" && inputReferences && inputReferences.length > 0 && (
+        <InputReferenceTags
+          references={inputReferences}
+          style={{
+            maxWidth: "85%",
+            justifyContent: "flex-end",
+            marginTop: 4,
+          }}
+        />
+      )}
 
       {/* BR-DE-UI-003: DiffCards linked to this assistant message via toolCallId ↔ sourceToolId */}
       {hasDiffs && (

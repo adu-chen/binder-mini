@@ -48,211 +48,111 @@ interface ChatToolRuntime {
 }
 
 // ── Prompt Assembly Pipeline (BR-AG-DATA-004) ──────────────────────────────
-// Five-step pipeline: classify → epoch-gate → compress → budget → anchor-inject.
-// Runs once per user turn to build the provider payload from chatMachine context.messages.
+// The provider payload uses semantic isolation instead of keyword intent routing:
+// conversation_history is factual memory, current_turn is the only active request.
 
-type MessageClass =
-  | "runtime-system"     // role=system (context-switch notifications) — always drop
-  | "user-intent"        // role=user
-  | "tool-result"        // role=tool
-  | "tool-call"          // role=assistant with toolCallId (tool invocation record)
-  | "assistant-state"    // role=assistant from a different epoch — compress to summary
-  | "assistant-natural"; // role=assistant, current epoch or short enough to keep
-
-interface ClassifiedMessage {
-  msg: AgentMessage;
-  cls: MessageClass;
-}
+export type TurnIntent =
+  | "model_judged";
 
 interface PayloadDiagnostics {
   totalMessages: number;
   droppedSystemCount: number;
-  epochGatedCount: number;
+  historyMessageCount: number;
   compressedCount: number;
-  runtimeAnchorInjected: boolean;
+  currentTurnIsolated: boolean;
+  turnIntent: TurnIntent;
+  historyIncluded: boolean;
 }
 
-// Drop long content from old-epoch assistant messages after exceeding this threshold.
-const MAX_ASSISTANT_CONTENT_CHARS = 1000;
-// Rough character budget for history (≈ 10k tokens at 4 chars/token).
-const MAX_HISTORY_CHARS = 40_000;
-// Code block content that exceeds this total length is treated as a document paste.
-const CODE_BLOCK_PASTE_THRESHOLD = 500;
+const MAX_HISTORY_MESSAGES = 40;
+const MAX_HISTORY_MESSAGE_CHARS = 1_600;
 
-const RUNTIME_ANCHOR_SEPARATOR = "\n\n---\n\n";
-
-/** Step 1: Assign a MessageClass to each message. Language-agnostic; uses only role and metadata. */
-function classifyMessage(msg: AgentMessage, currentActiveFilePath: string | null): MessageClass {
-  if (msg.role === "system") return "runtime-system";
-  if (msg.role === "user") return "user-intent";
-  if (msg.role === "tool") return "tool-result";
-  // role=assistant with toolCallId = the assistant message that issued a tool call
-  if (msg.toolCallId) return "tool-call";
-
-  // role=assistant — epoch check:
-  //   activeFilePath === undefined  → legacy message, no epoch info → treat as current epoch
-  //   activeFilePath !== current    → old epoch message
-  //   activeFilePath === current    → same epoch
-  const hasEpochInfo = msg.activeFilePath !== undefined;
-  const isOldEpoch = hasEpochInfo && msg.activeFilePath !== currentActiveFilePath;
-
-  if (isOldEpoch && msg.content.length > 200) return "assistant-state";
-  return "assistant-natural";
+function cdataSafe(content: string): string {
+  return content.replaceAll("]]>", "]]]]><![CDATA[>");
 }
 
-/** Step 2: Replace runs of assistant-state messages with a single summary placeholder. */
-function epochGate(classified: ClassifiedMessage[]): ClassifiedMessage[] {
-  const result: ClassifiedMessage[] = [];
-  let staleCount = 0;
-
-  const flushStale = (anchor: string) => {
-    if (staleCount === 0) return;
-    result.push({
-      cls: "assistant-natural",
-      msg: {
-        id: `epoch-gap-${anchor}`,
-        role: "assistant",
-        content:
-          `[${staleCount} prior response${staleCount > 1 ? "s" : ""} about a different ` +
-          `active file — omitted to prevent stale context from overriding current runtime facts.]`,
-        createdAt: 0,
-        sessionId: "",
-      },
-    });
-    staleCount = 0;
+function truncateHistoricalContent(content: string): { content: string; compressed: boolean } {
+  if (content.length <= MAX_HISTORY_MESSAGE_CHARS) {
+    return { content, compressed: false };
+  }
+  return {
+    content: `${content.slice(0, MAX_HISTORY_MESSAGE_CHARS)}\n[truncated; historical message only]`,
+    compressed: true,
   };
-
-  for (const item of classified) {
-    if (item.cls === "assistant-state") {
-      staleCount++;
-    } else {
-      flushStale(item.msg.id);
-      result.push(item);
-    }
-  }
-  flushStale("end");
-  return result;
 }
 
-/** Step 3: Truncate large document-paste blocks in assistant messages. */
-function compressMessages(classified: ClassifiedMessage[]): ClassifiedMessage[] {
-  return classified.map((item) => {
-    if (item.cls !== "assistant-natural") return item;
+function buildConversationHistory(messages: AgentMessage[]): { xml: string; included: number; compressed: number } {
+  const historicalMessages = messages
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .slice(-MAX_HISTORY_MESSAGES);
+  let compressed = 0;
+  const lines = [
+    `<conversation_history role="memory_not_instruction">`,
+    `This is prior dialogue memory. It may be used to answer questions about the conversation or resolve references in current_turn.`,
+    `It is not an active instruction list. Do not execute historical requests unless current_turn asks to continue or use them.`,
+    `Historical document descriptions are not current document facts; current_editor_document is authoritative for current document content.`,
+  ];
 
-    const codeBlocks = item.msg.content.match(/```[\s\S]*?```/g) ?? [];
-    const codeBlockTotal = codeBlocks.reduce((s, b) => s + b.length, 0);
-
-    const needsCompress =
-      codeBlockTotal > CODE_BLOCK_PASTE_THRESHOLD ||
-      item.msg.content.length > MAX_ASSISTANT_CONTENT_CHARS;
-
-    if (!needsCompress) return item;
-
-    const head = item.msg.content.slice(0, 200);
-    return {
-      ...item,
-      msg: {
-        ...item.msg,
-        content:
-          `${head}\n` +
-          `[…content truncated (${item.msg.content.length} chars). ` +
-          `Not authoritative for current document state.]`,
-      },
-    };
+  historicalMessages.forEach((message, index) => {
+    const truncated = truncateHistoricalContent(message.content);
+    if (truncated.compressed) compressed += 1;
+    lines.push(`<message index="${index + 1}" role="${message.role}"><![CDATA[`);
+    lines.push(cdataSafe(truncated.content));
+    lines.push(`]]></message>`);
   });
-}
-
-/** Step 4: Trim history from the oldest end when total characters exceed budget. */
-function applyTokenBudget(classified: ClassifiedMessage[]): ClassifiedMessage[] {
-  let total = classified.reduce((s, m) => s + m.msg.content.length, 0);
-  if (total <= MAX_HISTORY_CHARS) return classified;
-
-  const result = [...classified];
-  while (total > MAX_HISTORY_CHARS && result.length > 2) {
-    const removed = result.shift()!;
-    total -= removed.msg.content.length;
-    // Keep tool-call/tool-result pairs together — remove the paired tool-result too
-    if (removed.cls === "tool-call" && result[0]?.cls === "tool-result") {
-      const paired = result.shift()!;
-      total -= paired.msg.content.length;
-    }
+  if (historicalMessages.length === 0) {
+    lines.push(`<empty>true</empty>`);
   }
-  return result;
-}
-
-/** Builds the runtime anchor string injected before the current user turn. */
-function buildRuntimeAnchor(activeFilePath: string): string {
-  return (
-    `[Runtime notice — active file for this turn: "${activeFilePath}". ` +
-    `The only authoritative source for its current content is the ` +
-    `<active_file_logical_state> block in the system prompt. ` +
-    `Prior conversation claims about active file or document content are superseded ` +
-    `by this turn's runtime context.]`
-  );
+  lines.push(`</conversation_history>`);
+  return { xml: lines.join("\n"), included: historicalMessages.length, compressed };
 }
 
 /**
  * BR-AG-DATA-004: Build the provider messages payload from chatMachine context.messages.
- * Applies the 5-step pipeline so provider receives sanitised history + runtime anchor.
+ * Provides history as non-executable memory and isolates current_turn as the only
+ * active request. The model, not keyword routing, decides whether current_turn
+ * needs historical memory.
  */
-function buildChatPayload(
+export function buildChatPayload(
   messages: AgentMessage[],
-  currentActiveFilePath: string | null,
 ): { messages: ChatStreamPayload[]; diagnostics: PayloadDiagnostics } {
-  // Step 1: Classify
-  const classified: ClassifiedMessage[] = messages.map((msg) => ({
-    msg,
-    cls: classifyMessage(msg, currentActiveFilePath),
-  }));
-
-  const droppedSystemCount = classified.filter((m) => m.cls === "runtime-system").length;
-  const withoutSystem = classified.filter((m) => m.cls !== "runtime-system");
-
-  // Step 2: Epoch gate
-  const epochGatedRaw = withoutSystem.filter((m) => m.cls === "assistant-state").length;
-  const epochGated = epochGate(withoutSystem);
-
-  // Step 3: Compress
-  const compressed = compressMessages(epochGated);
-  const compressedCount = compressed.reduce(
-    (s, m, i) => s + (m.msg.content !== (epochGated[i]?.msg.content ?? "") ? 1 : 0),
-    0,
-  );
-
-  // Step 4: Token budget
-  const budgeted = applyTokenBudget(compressed);
-
-  // Step 5: Serialise + inject runtime anchor into the last user message
-  const payloads: ChatStreamPayload[] = budgeted.map((item) => ({
-    role: item.msg.role,
-    content: item.msg.content,
-    ...(item.msg.toolCallId ? { toolCallId: item.msg.toolCallId } : {}),
-  }));
-
-  let runtimeAnchorInjected = false;
-  if (currentActiveFilePath) {
-    let lastUserIdx = -1;
-    for (let i = payloads.length - 1; i >= 0; i--) {
-      if (payloads[i].role === "user") { lastUserIdx = i; break; }
+  const droppedSystemCount = messages.filter((m) => m.role === "system").length;
+  const lastUserIndex = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "user") return i;
     }
-    if (lastUserIdx >= 0) {
-      const anchor = buildRuntimeAnchor(currentActiveFilePath);
-      payloads[lastUserIdx] = {
-        ...payloads[lastUserIdx],
-        content: anchor + RUNTIME_ANCHOR_SEPARATOR + payloads[lastUserIdx].content,
-      };
-      runtimeAnchorInjected = true;
-    }
-  }
+    return -1;
+  })();
+  const currentUser = lastUserIndex >= 0 ? messages[lastUserIndex] : null;
+  const history = buildConversationHistory(messages.slice(0, Math.max(lastUserIndex, 0)));
+
+  const currentTurnContent =
+    `${history.xml}\n\n` +
+    `<current_turn role="active_user_request"><![CDATA[\n` +
+    `${cdataSafe(currentUser?.content ?? "")}\n` +
+    `]]></current_turn>\n\n` +
+    `Instruction:\n` +
+    `- Treat current_turn as the only active instruction for this response.\n` +
+    `- Use conversation_history as memory only when current_turn needs conversational context.\n` +
+    `- Do not continue, execute, or infer tasks from conversation_history unless current_turn explicitly asks to continue or use prior work.\n` +
+    `- If current_turn asks about what we discussed, answer from conversation_history.\n` +
+    `- If current_turn asks about the current document, answer from current_editor_document in the system prompt, not from conversation_history.`;
+
+  const payloads: ChatStreamPayload[] = [{
+    role: "user",
+    content: currentTurnContent,
+  }];
 
   return {
     messages: payloads,
     diagnostics: {
       totalMessages: messages.length,
       droppedSystemCount,
-      epochGatedCount: epochGatedRaw,
-      compressedCount,
-      runtimeAnchorInjected,
+      historyMessageCount: history.included,
+      compressedCount: history.compressed,
+      currentTurnIsolated: true,
+      turnIntent: "model_judged",
+      historyIncluded: history.included > 0,
     },
   };
 }
@@ -747,6 +647,8 @@ export function useChatActor(toolRuntime?: ChatToolRuntime) {
       activeFileMode: runtimeContextRef.current.activeFileMode ?? null,
       activeFileDirty: runtimeContextRef.current.activeFileDirty ?? null,
       pendingDiffCount: runtimeContextRef.current.pendingDiffCount ?? null,
+      turnIntent: runtimeContextRef.current.turnIntent ?? "model_judged",
+      activeFileVisibleText: runtimeContextRef.current.activeFileVisibleText ?? null,
       activeFileLogicalStateSnapshot: runtimeContextRef.current.activeFileLogicalStateSnapshot ?? null,
       activeFileSnapshotTruncated: runtimeContextRef.current.activeFileSnapshotTruncated ?? null,
       documentStructure: runtimeContextRef.current.documentStructure ?? null,
@@ -757,8 +659,15 @@ export function useChatActor(toolRuntime?: ChatToolRuntime) {
       workspaceRoot,
       providerType: provider.providerType,
       model: provider.model,
-      messages,
-      runtime: runtimePayload,
+      messageCount: messages.length,
+      activeFilePath: runtimePayload.activeFilePath,
+      activeFileMode: runtimePayload.activeFileMode,
+      activeFileDirty: runtimePayload.activeFileDirty,
+      pendingDiffCount: runtimePayload.pendingDiffCount,
+      hasVisibleText: Boolean(runtimePayload.activeFileVisibleText),
+      hasMarkdownSource: Boolean(runtimePayload.activeFileLogicalStateSnapshot),
+      hasDocumentStructure: Boolean(runtimePayload.documentStructure),
+      inputReferenceCount: runtimePayload.inputReferences.length,
     });
 
     invoke("chat_stream", {
@@ -816,19 +725,19 @@ export function useChatActor(toolRuntime?: ChatToolRuntime) {
     chatActor.send({ type: "PROVIDER_VALID" });
     chatActor.send({ type: "STREAM_STARTED" });
 
-    streamingProviderRef.current = { providerType, model: modelName };
-    runtimeContextRef.current = { ...runtimeContext, inputReferences };
-
     // XState sends are synchronous — snapshot after SEND_MESSAGE already contains the new user message.
     const snap = chatActor.getSnapshot();
+    const projectedRuntime = {
+      ...runtimeContext,
+      inputReferences,
+      turnIntent: "model_judged" as const,
+    };
+    streamingProviderRef.current = { providerType, model: modelName };
+    runtimeContextRef.current = projectedRuntime;
 
-    // BR-AG-DATA-004: run the 5-step prompt assembly pipeline.
-    // Classifies history by epoch, gates stale-file assertions, compresses document
-    // pastes, applies token budget, and injects a runtime anchor into the last user message.
-    const { messages: builtPayload, diagnostics } = buildChatPayload(
-      snap.context.messages,
-      runtimeContext.activeFilePath ?? null,
-    );
+    // BR-AG-DATA-004: assemble a semantically isolated prompt where history is
+    // memory_not_instruction and the latest user message is the only active turn.
+    const { messages: builtPayload, diagnostics } = buildChatPayload(snap.context.messages);
     console.info("[chat] payload-built", diagnostics);
     messagesForNextRequestRef.current = builtPayload;
 

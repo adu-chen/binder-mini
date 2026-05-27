@@ -37,7 +37,7 @@ const VISUAL_MAP: Record<PendingDiffStatus, VisualSpec> = {
     opacity: 1,
     label: "待处理",
     labelColor: "var(--accent)",
-    showActions: true,
+    showActions: false,
     showBusy: false,
   },
   preapplied: {

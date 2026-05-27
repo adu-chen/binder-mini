@@ -158,6 +158,7 @@ type InputReference =
 - `kind` 为判别字段（discriminant），不使用 `type` 或 `mode`
 - InputReference 仅由 ChatInput 粘贴入口创建，支持 text 和 url 两类
 - InputReference 是结构化内容载体，不声明写权威；是否触发 Diff Review 由 Agent 根据上下文判断
+- SEND_MESSAGE 时 InputReference 快照写入本次 user AgentMessage，用于消息流只读标签展示和聊天历史恢复；Provider 请求仍只通过 PromptRuntime L1 注入本轮引用，不把引用正文拼入 user message content。
 
 ### 3.7 PromptRuntime
 

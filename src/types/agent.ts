@@ -26,9 +26,11 @@ export interface ProviderCredential {
 
 export interface AgentRuntimeContext {
   activeFilePath?: string;
+  turnIntent?: "model_judged";
   activeFileMode?: "editable" | "readonly";
   activeFileDirty?: boolean;
   pendingDiffCount?: number;
+  activeFileVisibleText?: string;
   activeFileLogicalStateSnapshot?: string;
   activeFileSnapshotTruncated?: boolean;
   /** XML string built by extractDocumentStructure(); injected as L0 ④ in system prompt. */

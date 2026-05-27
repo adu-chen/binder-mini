@@ -47,9 +47,9 @@ interface ChatPanelProps {
   onCreateUrlReference: (url: string) => void;
   onAcceptDiff: (diffId: string) => void;
   onRejectDiff: (diffId: string) => void;
-  /** BR-DE-UI-003: batch-accept all pending/preapplied diffs. */
+  /** BR-DE-UI-003: batch-accept all currently executable preapplied diffs. */
   onAcceptAll: () => void;
-  /** BR-DE-UI-003: batch-reject all pending/preapplied diffs. */
+  /** BR-DE-UI-003: batch-reject all currently executable preapplied diffs. */
   onRejectAll: () => void;
 }
 
@@ -80,9 +80,9 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const isStreaming = STREAMING_STATES.has(stateName);
 
-  // BR-DE-UI-003: DiffActionBar shows only when pending/preapplied diffs exist.
+  // BR-DE-UI-003: DiffActionBar shows only when executable preapplied diffs exist.
   const nonTerminalCount = diffs.filter(
-    (d) => d.status === "pending" || d.status === "preapplied",
+    (d) => d.status === "preapplied",
   ).length;
 
   return (

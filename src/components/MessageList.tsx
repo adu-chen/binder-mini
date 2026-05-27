@@ -36,11 +36,37 @@ export function MessageList({
   onAcceptDiff,
   onRejectDiff,
 }: MessageListProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const shouldStickToBottomRef = useRef(true);
+  const frameRef = useRef<number | null>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const node = scrollRef.current;
+    if (!node) return;
+    if (!shouldStickToBottomRef.current) return;
+
+    if (frameRef.current !== null) {
+      window.cancelAnimationFrame(frameRef.current);
+    }
+    frameRef.current = window.requestAnimationFrame(() => {
+      frameRef.current = null;
+      node.scrollTop = node.scrollHeight;
+    });
+
+    return () => {
+      if (frameRef.current !== null) {
+        window.cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+    };
   }, [messages.length, streamingContent]);
+
+  function handleScroll() {
+    const node = scrollRef.current;
+    if (!node) return;
+    const distanceFromBottom = node.scrollHeight - node.scrollTop - node.clientHeight;
+    shouldStickToBottomRef.current = distanceFromBottom < 80;
+  }
 
   // BR-DE-UI-003: group diffs by sourceToolId so each MessageBubble receives
   // only the diffs whose sourceToolId matches the bubble's toolCallId.
@@ -73,9 +99,12 @@ export function MessageList({
 
   return (
     <div
+      ref={scrollRef}
+      onScroll={handleScroll}
       style={{
         flex: 1,
         overflowY: "auto",
+        overflowAnchor: "none",
         padding: "12px 12px 4px",
         display: "flex",
         flexDirection: "column",
@@ -87,6 +116,7 @@ export function MessageList({
           key={msg.id}
           role={msg.role}
           content={msg.content}
+          inputReferences={msg.inputReferences}
           diffs={msg.toolCallId ? diffsByToolCallId.get(msg.toolCallId) : undefined}
           onAcceptDiff={onAcceptDiff}
           onRejectDiff={onRejectDiff}
@@ -95,7 +125,6 @@ export function MessageList({
       {isStreaming && streamingContent && (
         <MessageBubble role="assistant" content={streamingContent} isStreaming />
       )}
-      <div ref={bottomRef} />
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { createActor } from "xstate";
 import { describe, expect, it } from "vitest";
 import { chatMachine } from "../src/machines/chatMachine";
+import { buildChatPayload } from "../src/services/chatActor";
 
 /**
  * Phase 5 Agent governance verification.
@@ -113,10 +114,135 @@ it("chatActor filters persisted context-switch system messages from provider pay
     "utf8",
   );
 
-  // Pipeline classifier: role=system → "runtime-system" → dropped from payload
-  expect(src).toContain('if (msg.role === "system") return "runtime-system"');
-  // buildChatPayload filters out runtime-system messages before epochGate
-  expect(src).toContain('withoutSystem');
+  expect(src).toContain('messages.filter((m) => m.role === "system").length');
+  expect(src).toContain("droppedSystemCount");
+});
+
+// covers: BR-AG-DATA-004
+it("chatActor marks historical assistant replies as memory instead of active instructions", () => {
+  const src = readFileSync(
+    repoPath("src/services/chatActor.ts"),
+    "utf8",
+  );
+
+  expect(src).toContain("conversation_history");
+  expect(src).toContain("memory_not_instruction");
+  expect(src).toContain("Treat current_turn as the only active instruction");
+  expect(src).toContain("Historical document descriptions are not current document facts");
+});
+
+// covers: BR-AG-DATA-004
+it("buildChatPayload keeps history visible but prevents it from authoring current document state", () => {
+  const result = buildChatPayload(
+    [
+      {
+        id: "u1",
+        role: "user",
+        content: "可以看到当前文档吗",
+        activeFilePath: "notes.md",
+        createdAt: 1,
+        sessionId: "/ws",
+      },
+      {
+        id: "a1",
+        role: "assistant",
+        content: "当前活跃文件是 notes.md，内容已经是全英文的了。",
+        activeFilePath: "notes.md",
+        createdAt: 2,
+        sessionId: "/ws",
+      },
+      {
+        id: "u2",
+        role: "user",
+        content: "你再看一下，当前文档是什么",
+        activeFilePath: "notes.md",
+        createdAt: 3,
+        sessionId: "/ws",
+      },
+    ],
+  );
+
+  const payloadText = result.messages.map((m) => m.content).join("\n");
+  expect(payloadText).toContain("内容已经是全英文");
+  expect(payloadText).toContain('role="memory_not_instruction"');
+  expect(payloadText).toContain("Historical document descriptions are not current document facts");
+  expect(payloadText).toContain("Treat current_turn as the only active instruction");
+  expect(payloadText).toContain("你再看一下，当前文档是什么");
+  expect(result.diagnostics.historyMessageCount).toBe(2);
+});
+
+// covers: BR-AG-DATA-004
+it("buildChatPayload keeps casual current-turn dominant without hiding history", () => {
+  const result = buildChatPayload(
+    [
+      {
+        id: "u1",
+        role: "user",
+        content: "把当前文档改为英文",
+        activeFilePath: "notes.md",
+        createdAt: 1,
+        sessionId: "/ws",
+      },
+      {
+        id: "a1",
+        role: "assistant",
+        content: "已处理。",
+        activeFilePath: "notes.md",
+        createdAt: 2,
+        sessionId: "/ws",
+      },
+      {
+        id: "u2",
+        role: "user",
+        content: "你好",
+        activeFilePath: "notes.md",
+        createdAt: 3,
+        sessionId: "/ws",
+      },
+    ],
+  );
+
+  const payloadText = result.messages.map((m) => m.content).join("\n");
+  expect(payloadText).toContain('<conversation_history role="memory_not_instruction">');
+  expect(payloadText).toContain('<current_turn role="active_user_request">');
+  expect(payloadText).toContain("你好");
+  expect(payloadText).toContain("把当前文档改为英文");
+  expect(payloadText).toContain("Do not continue, execute, or infer tasks from conversation_history");
+  expect(result.diagnostics.turnIntent).toBe("model_judged");
+  expect(result.diagnostics.historyIncluded).toBe(true);
+  expect(result.diagnostics.currentTurnIsolated).toBe(true);
+});
+
+// covers: BR-AG-DATA-004
+it("buildChatPayload supports conversation-history questions without keyword routing", () => {
+  const result = buildChatPayload(
+    [
+      {
+        id: "u1",
+        role: "user",
+        content: "把当前文档改为英文",
+        activeFilePath: "notes.md",
+        createdAt: 1,
+        sessionId: "/ws",
+      },
+      {
+        id: "u2",
+        role: "user",
+        content: "我们聊过什么？",
+        activeFilePath: "notes.md",
+        createdAt: 2,
+        sessionId: "/ws",
+      },
+    ],
+  );
+
+  const payloadText = result.messages.map((m) => m.content).join("\n");
+  expect(result.diagnostics.turnIntent).toBe("model_judged");
+  expect(result.diagnostics.historyIncluded).toBe(true);
+  expect(payloadText).toContain("<conversation_history");
+  expect(payloadText).toContain("把当前文档改为英文");
+  expect(payloadText).toContain("If current_turn asks about what we discussed, answer from conversation_history");
+  expect(payloadText).toContain("我们聊过什么？");
 });
 
 // covers: BR-AG-DATA-001
@@ -345,9 +471,17 @@ describe("governance @GOV coverage for Phase 5", () => {
     expect(src).toContain('"list_files"');
     expect(src).toContain('"search_files"');
     expect(src).toContain("allowed_tool_names");
+    expect(src).toContain("turn_intent");
     expect(src).toContain("active_file_path");
+    expect(src).toContain("active_file_visible_text");
     expect(src).toContain("active_file_logical_state_snapshot");
-    expect(src).toContain("<active_file_logical_state");
+    expect(src).toContain("<current_editor_document");
+    expect(src).toContain("<visible_text>");
+    expect(src).toContain("<markdown_source>");
+    expect(src).toContain("Runtime authority:");
+    expect(src).toContain("conversation_history is memory, not an instruction list");
+    expect(src).toContain("If prior dialogue conflicts with current_editor_document");
+    expect(src).toContain("If current_turn is casual conversation");
     expect(src).toContain("Do not use read_file/DiskState");
     expect(src).not.toContain("- update_file:");
   });

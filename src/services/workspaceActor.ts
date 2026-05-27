@@ -3,7 +3,7 @@ import { useActorRef, useSelector } from "@xstate/react";
 import { workspaceMachine } from "../machines/workspaceMachine";
 import {
   openWorkspace as openWorkspaceIpc,
-  loadDiffsFromWorkspace,
+  recoverDiffsFromWorkspace,
   saveChatMessages,
 } from "../ipc";
 import { normalizeRecentWorkspaces, sortWorkspaceEntries } from "./workspaceService";
@@ -24,7 +24,7 @@ export interface WorkspaceActorBroadcasts {
   /** Called after workspaceMachine Loading → Active (WORKSPACE_OPENED). */
   onWorkspaceOpened: (workspaceRoot: string) => void;
   /** Called after CONFIRM_CLOSE and before CLOSE_DONE (WORKSPACE_CLOSED). */
-  onWorkspaceClosed: () => void;
+  onWorkspaceClosed: () => void | Promise<void>;
 }
 
 /**
@@ -79,10 +79,10 @@ export function useWorkspaceActor(broadcasts: WorkspaceActorBroadcasts) {
     let cancelled = false;
     void (async () => {
       try {
-        // Step 3 of Loading sequence: load non-terminal PendingDiff records from workspace.db
-        const diffs = await loadDiffsFromWorkspace(workspaceRoot);
+        // Step 3 of Loading sequence: recover baseRevision-checked PendingDiff records from workspace.db
+        const recovery = await recoverDiffsFromWorkspace(workspaceRoot);
         if (cancelled) return;
-        setLoadedDiffs(diffs);
+        setLoadedDiffs(recovery.restored);
         // Promote pending open result to active snapshot
         if (pendingResultRef.current) {
           setWorkspaceSnapshot(pendingResultRef.current.snapshot);
@@ -145,7 +145,7 @@ export function useWorkspaceActor(broadcasts: WorkspaceActorBroadcasts) {
     }
 
     // Broadcast WORKSPACE_CLOSED before clearing (per plan: before CLOSE_DONE)
-    broadcastsRef.current.onWorkspaceClosed();
+    await broadcastsRef.current.onWorkspaceClosed();
 
     // Clear workspace data
     setWorkspaceSnapshot(null);
