@@ -85,6 +85,27 @@ it("chatMachine: MESSAGES_RESTORED writes persisted history into context.message
 });
 
 // covers: BR-AG-PERSIST-001
+it("chatMachine: CLEAR_MESSAGES clears chat history, streaming text, references, and errors", () => {
+  const actor = bootToReady("/tmp/ws");
+  actor.send({
+    type: "SEND_MESSAGE",
+    userContent: "clear me",
+    inputReferences: [SAMPLE_REFERENCE],
+    activeFilePath: "notes.md",
+  });
+  actor.send({ type: "PROVIDER_INVALID", errorCode: "X", errorMessage: "failed" });
+  actor.send({ type: "CLEAR_MESSAGES" });
+
+  const snapshot = actor.getSnapshot();
+  expect(snapshot.value).toBe("ready");
+  expect(snapshot.context.workspaceRoot).toBe("/tmp/ws");
+  expect(snapshot.context.messages).toHaveLength(0);
+  expect(snapshot.context.streamingContent).toBe("");
+  expect(snapshot.context.inputReferences).toHaveLength(0);
+  expect(snapshot.context.errorMessage).toBeNull();
+});
+
+// covers: BR-AG-PERSIST-001
 it("chatMachine: MESSAGES_RESTORED merges with live messages when restore finishes late", () => {
   const actor = bootToReady("/tmp/ws");
   actor.send({ type: "SEND_MESSAGE", userContent: "new prompt", inputReferences: [], activeFilePath: null });

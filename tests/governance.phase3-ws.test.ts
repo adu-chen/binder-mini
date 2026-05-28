@@ -37,21 +37,19 @@ describe("Phase 3 Workspace governance", () => {
   });
 
   // covers: BR-WS-STATE-003
-  it("App window close request is routed through Workspace close guard", () => {
+  it("App native close is not routed through Workspace close guard", () => {
     const src = readFileSync(
       resolve(__dirname, "../src/App.tsx"),
       "utf8",
     );
 
-    expect(src).toContain('import { getCurrentWindow } from "@tauri-apps/api/window"');
-    expect(src).toContain("pendingAppCloseRef");
-    expect(src).toContain("allowNativeAppCloseRef");
-    expect(src).toContain("onCloseRequested");
-    expect(src).toContain("event.preventDefault()");
+    expect(src).not.toContain('import { getCurrentWindow } from "@tauri-apps/api/window"');
+    expect(src).not.toContain("onCloseRequested");
+    expect(src).not.toContain("event.preventDefault()");
+    expect(src).not.toContain("closeAppAfterWorkspaceTeardown");
+    expect(src).toContain("function handleCloseWorkspaceWithGuard()");
     expect(src).toContain("setShowCloseGuard(true)");
     expect(src).toContain("confirmCloseFlow(toChatMessageRecords())");
-    expect(src).toContain("closeAppAfterWorkspaceTeardown");
-    expect(src).toContain("getCurrentWindow().close()");
   });
 
   // covers: BR-WS-STATE-002

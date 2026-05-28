@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createTerminalDiffCard } from "./services/diffService";
 import {
   canChangeWorkspace,
@@ -99,8 +98,6 @@ export default function App() {
 
   // ── Workspace close guard ───────────────────────────────────────
   const [showCloseGuard, setShowCloseGuard] = useState(false);
-  const pendingAppCloseRef = useRef(false);
-  const allowNativeAppCloseRef = useRef(false);
 
   // ── PathConflict error banner (BR-WS-DATA-002, BR-AG-TOOL-001) ─
   const conflictTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -130,6 +127,7 @@ export default function App() {
     onWorkspaceClosed: chatOnWorkspaceClosed,
     sendMessage: chatSendMessage,
     cancelMessage: chatCancelMessage,
+    clearChatHistory,
     retryMessage: chatRetryMessage,
     notifyActiveFileChanged,
   } = useChatActor({
@@ -310,50 +308,6 @@ const defaultModels: Record<ProviderConfig["provider"], string> = {
     });
   }
 
-  function closeAppAfterWorkspaceTeardown() {
-    allowNativeAppCloseRef.current = true;
-    void getCurrentWindow().close();
-  }
-
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    let disposed = false;
-
-    void getCurrentWindow().onCloseRequested((event) => {
-      if (allowNativeAppCloseRef.current) return;
-      if (!workspaceSnapshot) return;
-
-      event.preventDefault();
-      pendingAppCloseRef.current = true;
-
-      if (!canLeaveWorkspace()) {
-        wsActor.send({ type: "CLOSE_WORKSPACE" });
-        setShowCloseGuard(true);
-        return;
-      }
-
-      wsActor.send({ type: "CLOSE_WORKSPACE" });
-      wsActor.send({ type: "CONFIRM_CLOSE" });
-      void confirmCloseFlow(toChatMessageRecords()).then(() => {
-        if (pendingAppCloseRef.current) {
-          pendingAppCloseRef.current = false;
-          closeAppAfterWorkspaceTeardown();
-        }
-      });
-    }).then((handler) => {
-      if (disposed) {
-        handler();
-        return;
-      }
-      unlisten = handler;
-    });
-
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, [workspaceSnapshot, edTabs, allDiffs, wsActor, confirmCloseFlow]);
-
   function handleOpenWorkspace() {
     void openWorkspaceFlow();
   }
@@ -374,16 +328,10 @@ const defaultModels: Record<ProviderConfig["provider"], string> = {
   function handleForceCloseWorkspace() {
     setShowCloseGuard(false);
     wsActor.send({ type: "CONFIRM_CLOSE" });
-    void confirmCloseFlow(toChatMessageRecords()).then(() => {
-      if (pendingAppCloseRef.current) {
-        pendingAppCloseRef.current = false;
-        closeAppAfterWorkspaceTeardown();
-      }
-    });
+    void confirmCloseFlow(toChatMessageRecords());
   }
 
   function handleCancelClose() {
-    pendingAppCloseRef.current = false;
     setShowCloseGuard(false);
     wsActor.send({ type: "CANCEL_CLOSE" });
   }
@@ -818,17 +766,16 @@ const defaultModels: Record<ProviderConfig["provider"], string> = {
             referenceError={referenceError}
             onSend={(content) => void handleSendAgentMessage(content)}
             onCancel={handleCancelMessage}
+            onClearHistory={() => void clearChatHistory()}
             onRetry={handleRetryMessage}
             onProviderChange={handleProviderChange}
             onModelChange={handleModelChange}
-            onSaveApiKey={(key) => {
+            onSaveApiKey={async (key) => {
               // BR-AG-SEC-001 / BR-AG-PERSIST-002: API key sent to Rust backend only;
-              // raw key never stored in React state and persists in backend app config.
-              void saveApiKey(providerConfig.provider, key).then(() =>
-                isApiKeyConfigured(providerConfig.provider).then((configured) =>
-                  setProviderConfig((c) => ({ ...c, apiKeyConfigured: configured })),
-                ),
-              );
+              // raw key never stored in React state and persists in Rust-side credential storage.
+              await saveApiKey(providerConfig.provider, key);
+              const configured = await isApiKeyConfigured(providerConfig.provider);
+              setProviderConfig((c) => ({ ...c, apiKeyConfigured: configured }));
             }}
             onRemoveReference={handleRemoveReference}
             onCreateTextReference={handleCreateTextReference}

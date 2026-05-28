@@ -215,6 +215,19 @@ export function saveChatMessages(_workspaceRoot: string, _messages: ChatMessageR
 /**
  * @GOV
  * codes: BR-AG-PERSIST-001
+ * type: IO
+ * chain: AG-SEND-MESSAGE
+ * rules: BR-AG-PERSIST-001
+ * boundary: in=workspace_root path | out=chat_messages rows for current Workspace session deleted via clear_chat_messages Tauri command
+ * term_ref: TERM-WS-002, TERM-AG-010, TERM-AG-014
+ */
+export function clearChatMessages(_workspaceRoot: string): Promise<void> {
+  return invoke("clear_chat_messages", { workspaceRoot: _workspaceRoot });
+}
+
+/**
+ * @GOV
+ * codes: BR-AG-PERSIST-001
  * type: DATA
  * chain: WS-OPEN, AG-SEND-MESSAGE
  * rules: BR-AG-PERSIST-001
@@ -231,7 +244,7 @@ export function loadChatMessages(_workspaceRoot: string): Promise<ChatMessageRec
  * type: DATA
  * chain: AG-SEND-MESSAGE
  * rules: BR-AG-SEC-001, BR-AG-PERSIST-002
- * boundary: in=provider string and api_key string | out=ProviderCredential persisted to app_config_dir on Rust side only; raw key never returned to TypeScript layer
+ * boundary: in=provider string and api_key string | out=ProviderCredential persisted to Rust-side local credential storage only; raw key never returned to TypeScript layer
  * term_ref: TERM-AG-011, TERM-AG-013
  */
 export function saveApiKey(provider: string, apiKey: string): Promise<void> {

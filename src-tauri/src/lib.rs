@@ -1223,6 +1223,30 @@ fn save_chat_messages(workspace_root: String, messages: Vec<ChatMessageRecord>) 
 /*
  * @GOV
  * codes: BR-AG-PERSIST-001
+ * type: IO
+ * chain: AG-SEND-MESSAGE
+ * rules: BR-AG-PERSIST-001
+ * boundary: in=workspace_root path | out=chat_messages rows deleted from WorkspaceDatabase for current session
+ * term_ref: TERM-WS-002, TERM-AG-010, TERM-AG-014
+ */
+#[tauri::command]
+fn clear_chat_messages(workspace_root: String) -> Result<(), String> {
+    let db_path = workspace_database_path(&PathBuf::from(&workspace_root));
+    if !db_path.is_file() {
+        return Ok(());
+    }
+    let conn = Connection::open(&db_path).map_err(|error| error.to_string())?;
+    conn.execute(
+        "DELETE FROM chat_messages WHERE session_id = ?1",
+        params![workspace_root],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+/*
+ * @GOV
+ * codes: BR-AG-PERSIST-001
  * type: QUERY
  * chain: WS-OPEN, AG-SEND-MESSAGE
  * rules: BR-AG-PERSIST-001
@@ -1477,45 +1501,64 @@ fn validate_provider(provider: &str) -> Result<String, String> {
     }
 }
 
-/// BR-AG-SEC-001 / BR-AG-PERSIST-002: API key is stored only in Rust-side
-/// app_config_dir as an application-level ProviderCredential.
-/// Raw key never crosses the IPC boundary back to TypeScript.
-#[tauri::command]
-fn save_api_key(app: tauri::AppHandle, provider: String, api_key: String) -> Result<(), String> {
-    let provider_key = validate_provider(&provider)?;
+fn provider_key_path(app: &tauri::AppHandle, provider: &str) -> Result<PathBuf, String> {
     let config_dir = app
         .path()
         .app_config_dir()
         .map_err(|error| error.to_string())?;
-    fs::create_dir_all(&config_dir).map_err(|error| error.to_string())?;
-    let key_path = config_dir.join(format!("{}.key", provider_key));
-    fs::write(&key_path, api_key.trim().as_bytes()).map_err(|error| error.to_string())
+    Ok(config_dir.join("credentials").join(format!("{}.key", provider)))
+}
+
+fn save_provider_api_key(app: &tauri::AppHandle, provider: &str, api_key: &str) -> Result<(), String> {
+    let key_path = provider_key_path(app, provider)?;
+    if let Some(parent) = key_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    fs::write(&key_path, api_key.trim().as_bytes()).map_err(|error| error.to_string())?;
+    #[cfg(unix)]
+    {
+        let permissions = std::os::unix::fs::PermissionsExt::from_mode(0o600);
+        fs::set_permissions(&key_path, permissions).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn load_provider_api_key(app: &tauri::AppHandle, provider: &str) -> Result<Option<String>, String> {
+    let key_path = provider_key_path(app, provider)?;
+    if !key_path.is_file() {
+        return Ok(None);
+    }
+    let key = fs::read_to_string(&key_path).map_err(|error| error.to_string())?;
+    let trimmed = key.trim().to_string();
+    if trimmed.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(trimmed))
+    }
+}
+
+/// BR-AG-SEC-001 / BR-AG-PERSIST-002: API key is stored only in a Rust-side
+/// provider allowlisted local credential file with 0600 permissions.
+/// Raw key never crosses the IPC boundary back to TypeScript.
+#[tauri::command]
+fn save_api_key(app: tauri::AppHandle, provider: String, api_key: String) -> Result<(), String> {
+    let provider_key = validate_provider(&provider)?;
+    save_provider_api_key(&app, &provider_key, &api_key)
 }
 
 /// BR-AG-SEC-001 / BR-AG-PERSIST-002: Returns only a boolean; raw key never returned.
 #[tauri::command]
 fn is_api_key_configured(app: tauri::AppHandle, provider: String) -> Result<bool, String> {
     let provider_key = validate_provider(&provider)?;
-    let config_dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|error| error.to_string())?;
-    let key_path = config_dir.join(format!("{}.key", provider_key));
-    if !key_path.exists() {
-        return Ok(false);
-    }
-    let content = fs::read_to_string(&key_path).map_err(|error| error.to_string())?;
-    Ok(!content.trim().is_empty())
+    Ok(load_provider_api_key(&app, &provider_key)?.is_some())
 }
 
 fn load_api_key(app: &tauri::AppHandle, provider: &str) -> Result<String, String> {
     let provider_key = validate_provider(provider)?;
-    let config_dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|error| error.to_string())?;
-    let key_path = config_dir.join(format!("{}.key", provider_key));
-    let key = fs::read_to_string(&key_path).map_err(|_| "API key not configured".to_string())?;
+    let key = load_provider_api_key(app, &provider_key)?;
+    let Some(key) = key else {
+        return Err("API key not configured".to_string());
+    };
     let trimmed = key.trim().to_string();
     if trimmed.is_empty() {
         return Err("API key not configured".to_string());
@@ -1873,7 +1916,7 @@ fn emit_tool_calls(app: &tauri::AppHandle, request_id: &str, calls: Vec<ToolCall
 
 /// BR-AG-STATE-002: SSE stream from selected provider.
 /// Emits "chat-stream-event" Tauri events for each token, done, or failure.
-/// BR-AG-SEC-001: API key loaded from Rust app_config_dir, never passed from TypeScript.
+/// BR-AG-SEC-001: API key loaded from Rust-side credential storage, never passed from TypeScript.
 /// BR-AG-STATE-003: model is validated against supported set before request.
 #[tauri::command]
 async fn chat_stream(
@@ -3020,18 +3063,21 @@ mod tests {
                 id: "m1".to_string(), role: "user".to_string(),
                 content: "hello".to_string(), stream_status: None, tool_call_id: None,
                 input_references_json: Some("[{\"id\":\"r1\",\"kind\":\"text\",\"content\":\"ref\",\"displayName\":\"Ref\",\"createdAt\":100}]".to_string()),
+                active_file_path: None,
                 created_at: 1_000, session_id: root_string.clone(),
             },
             ChatMessageRecord {
                 id: "m2".to_string(), role: "assistant".to_string(),
                 content: "world".to_string(), stream_status: Some("done".to_string()),
                 tool_call_id: None, input_references_json: None,
+                active_file_path: None,
                 created_at: 2_000, session_id: root_string.clone(),
             },
             ChatMessageRecord {
                 id: "m3".to_string(), role: "user".to_string(),
                 content: "again".to_string(), stream_status: None, tool_call_id: None,
                 input_references_json: None,
+                active_file_path: None,
                 created_at: 3_000, session_id: root_string.clone(),
             },
         ];
@@ -3063,6 +3109,7 @@ mod tests {
                 id: "old1".to_string(), role: "user".to_string(),
                 content: "batch one".to_string(), stream_status: None, tool_call_id: None,
                 input_references_json: None,
+                active_file_path: None,
                 created_at: 1_000, session_id: root_string.clone(),
             },
         ];
@@ -3071,12 +3118,14 @@ mod tests {
                 id: "new1".to_string(), role: "user".to_string(),
                 content: "batch two a".to_string(), stream_status: None, tool_call_id: None,
                 input_references_json: None,
+                active_file_path: None,
                 created_at: 2_000, session_id: root_string.clone(),
             },
             ChatMessageRecord {
                 id: "new2".to_string(), role: "assistant".to_string(),
                 content: "batch two b".to_string(), stream_status: None, tool_call_id: None,
                 input_references_json: None,
+                active_file_path: None,
                 created_at: 3_000, session_id: root_string.clone(),
             },
         ];
@@ -3090,6 +3139,35 @@ mod tests {
         assert_eq!(loaded[1].id, "new2");
         assert!(!loaded.iter().any(|m| m.id == "old1"));
 
+        fs::remove_dir_all(root).expect("fixture workspace should be removed");
+    }
+
+    #[test]
+    fn test_clear_chat_messages_removes_current_session_history() {
+        let root = test_workspace_root("chat-clear");
+        fs::create_dir_all(&root).expect("fixture workspace should be created");
+        initialize_workspace_metadata(&root).expect("metadata should initialize");
+        let root_string = root.to_string_lossy().to_string();
+
+        save_chat_messages(
+            root_string.clone(),
+            vec![ChatMessageRecord {
+                id: "clear-1".to_string(),
+                role: "user".to_string(),
+                content: "remove me".to_string(),
+                stream_status: None,
+                tool_call_id: None,
+                input_references_json: None,
+                active_file_path: None,
+                created_at: 1_000,
+                session_id: root_string.clone(),
+            }],
+        )
+        .expect("message should be saved before clear");
+        clear_chat_messages(root_string.clone()).expect("messages should clear");
+        let loaded = load_chat_messages(root_string).expect("messages should load after clear");
+
+        assert!(loaded.is_empty());
         fs::remove_dir_all(root).expect("fixture workspace should be removed");
     }
 
@@ -3126,6 +3204,7 @@ mod tests {
                 stream_status: None,
                 tool_call_id: None,
                 input_references_json: None,
+                active_file_path: None,
                 created_at: 2_000,
                 session_id: root_string.clone(),
             }],
@@ -3170,9 +3249,9 @@ mod tests {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
+        .setup(|_app| {
             #[cfg(debug_assertions)]
-            if let Some(webview) = app.get_webview_window("main") {
+            if let Some(webview) = _app.get_webview_window("main") {
                 webview.open_devtools();
             }
             Ok(())
@@ -3199,6 +3278,7 @@ pub fn run() {
             recover_diffs_from_workspace,
             hash_workspace_file,
             save_chat_messages,
+            clear_chat_messages,
             load_chat_messages,
             save_api_key,
             is_api_key_configured,

@@ -3,7 +3,7 @@ import { useActorRef, useSelector } from "@xstate/react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { chatMachine } from "../machines/chatMachine";
-import { saveChatMessages, loadChatMessages, readFile, listFiles, searchFiles, savePendingDiff, hashWorkspaceFile } from "../ipc";
+import { saveChatMessages, loadChatMessages, clearChatMessages, readFile, listFiles, searchFiles, savePendingDiff, hashWorkspaceFile } from "../ipc";
 import type { AgentMessage } from "../machines/chatMachine";
 import type { ApplyDiffOptions, ApplyDiffResult } from "./editorActor";
 import { diffStore } from "../stores/diffStore";
@@ -753,6 +753,17 @@ export function useChatActor(toolRuntime?: ChatToolRuntime) {
     chatActor.send({ type: "CANCEL_DONE" });
   }
 
+  async function clearChatHistory() {
+    const workspaceRoot = workspaceRootRef.current;
+    stopStream();
+    chatActor.send({ type: "CLEAR_MESSAGES" });
+    messagesForNextRequestRef.current = [];
+    streamingProviderRef.current = null;
+    if (workspaceRoot) {
+      await clearChatMessages(workspaceRoot);
+    }
+  }
+
   function retryMessage() {
     chatActor.send({ type: "RETRY" });
   }
@@ -771,6 +782,7 @@ export function useChatActor(toolRuntime?: ChatToolRuntime) {
     onWorkspaceClosed,
     sendMessage,
     cancelMessage,
+    clearChatHistory,
     retryMessage,
     notifyActiveFileChanged,
   };

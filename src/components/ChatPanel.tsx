@@ -38,6 +38,7 @@ interface ChatPanelProps {
   referenceError: string | null;
   onSend: (content: string) => void;
   onCancel: () => void;
+  onClearHistory: () => void;
   onRetry: () => void;
   onProviderChange: (provider: ProviderConfig["provider"]) => void;
   onModelChange: (model: string) => void;
@@ -66,6 +67,7 @@ export function ChatPanel({
   referenceError,
   onSend,
   onCancel,
+  onClearHistory,
   onRetry,
   onProviderChange,
   onModelChange,
@@ -79,6 +81,7 @@ export function ChatPanel({
   onRejectAll,
 }: ChatPanelProps) {
   const isStreaming = STREAMING_STATES.has(stateName);
+  const canClearHistory = messages.length > 0 || streamingContent.length > 0;
 
   // BR-DE-UI-003: DiffActionBar shows only when executable preapplied diffs exist.
   const nonTerminalCount = diffs.filter(
@@ -115,6 +118,45 @@ export function ChatPanel({
       {/* Active chat area */}
       {stateName !== "noWorkspace" && (
         <>
+          <div
+            style={{
+              flexShrink: 0,
+              height: 36,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "0 8px 0 12px",
+              borderBottom: "1px solid var(--border)",
+              background: "var(--bg-panel)",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 12,
+                color: "var(--text-secondary)",
+                userSelect: "none",
+              }}
+            >
+              Chat
+            </div>
+            <button
+              type="button"
+              className="icon-btn"
+              title="清除聊天历史"
+              aria-label="清除聊天历史"
+              disabled={!canClearHistory}
+              onClick={onClearHistory}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 6h18" />
+                <path d="M8 6V4h8v2" />
+                <path d="M6 6l1 15h10l1-15" />
+                <path d="M10 11v6" />
+                <path d="M14 11v6" />
+              </svg>
+            </button>
+          </div>
+
           {/* BR-DE-UI-003: MessageList receives all diffs; DiffCards are rendered inline
               inside each MessageBubble whose toolCallId matches diff.sourceToolId. */}
           <MessageList

@@ -1,80 +1,69 @@
 # Binder Mini
 
-Binder Mini is a local-first desktop document editor for governed AI-assisted writing. It is built with Tauri 2, React, TypeScript, and Rust.
+A local-first desktop document editor with an AI chat panel and inline diff review.
 
-The project is developed under the ADU/APC governance model in this repository. Technical design documents are the final source of implementation rules, and code must map back to registered rules or an approved Issue Trace.
+You open a local folder as a workspace, edit Markdown and text files, and chat with an AI that can propose edits to your open document. Each proposed edit arrives as a diff card — you accept, reject, or let it expire without touching the file.
 
-## Current MVP
+## Features
 
-- Open a local Workspace.
-- Browse top-level Workspace files.
-- Open `.md` and `.txt` files as editable documents.
-- Open other files as readonly documents.
-- Save the current editable document.
-- Configure an Agent provider placeholder.
-- Send observable local streaming Agent responses.
-- Run readonly Agent tools inside the Workspace boundary:
-  - `read_file`
-  - `list_files`
-  - `search_files`
-- Create `PendingDiff` proposals with `edit_current_editor_document`.
-- Accept, reject, and expire Diff Review cards.
+- **Inline diff review** — AI edits show as pending diffs with per-diff and batch accept / reject controls
+- **Multi-provider** — switch between Anthropic (Claude), OpenAI (GPT-4), and DeepSeek from the chat panel
+- **Local workspace** — files stay on disk; no cloud sync, no account required beyond an API key
+- **Streaming responses** — token-by-token output with cancel support mid-stream
+- **File management** — create, rename, delete, and full-text search files inside the workspace
+- **Tab editor** — open multiple files with dirty-state tracking and save-guard on pending diffs
 
-## Governance
+## Stack
 
-Core project rules live in:
+| Layer | Technology |
+|-------|-----------|
+| Desktop shell | [Tauri 2](https://tauri.app) |
+| Backend | Rust |
+| Frontend | React 19 + TypeScript |
+| Editor | [TipTap 3](https://tiptap.dev) |
+| State machines | [XState 5](https://stately.ai/docs/xstate) |
+| AI providers | Anthropic SDK · OpenAI SDK |
 
-- `ADU.md`
-- `ADP.md`
-- `CLAUDE.md`
-- `docs/00_core/A-CORE-C-P-01_APC.md`
-- `docs/20_design/A-SYS-C-T-01_系统技术设计与规则源.md`
-- `docs/30_plans/A-CORE-X-P-02_开发实施计划.md`
-
-For code changes, create or update an Issue Trace under `docs/30_plans/` before editing files. The Issue Trace must define allowed files, forbidden files, rule sources, expected behavior, and validation commands.
-
-## Development
-
-Install dependencies:
+## Getting started
 
 ```bash
 npm ci
-```
-
-Run the web dev server:
-
-```bash
-npm run dev
-```
-
-Run the Tauri app:
-
-```bash
 npm run tauri dev
 ```
 
-Run checks:
+On first launch, open the provider panel to enter your API key. Keys are stored by the Rust backend and never held in JavaScript state.
+
+## How the diff workflow works
+
+When the AI calls `edit_current_editor_document`, the proposed change is highlighted in the editor and a diff card appears inline with the AI message. From there:
+
+- **Accept** — confirms the change; the file stays dirty until you save explicitly
+- **Reject** — reverts the editor to the text before the edit
+- **Batch** — accept or reject all pending diffs across the active file at once
+
+Closing a file or workspace with unresolved diffs triggers a guard dialog.
+
+## Development
 
 ```bash
-npm run governance:generate
-npm run governance:audit
-npm run check:ts
-npm run test
-npm run check:rust
-npm run build
+npm run tauri dev        # run the desktop app
+npm run check:all        # full gate: audit + tsc + tests + cargo check
 ```
 
-Run the standard gate:
+Individual checks:
 
 ```bash
-npm run check:all
+npm run governance:audit   # read-only rule audit
+npm run check:ts           # TypeScript
+npm run test               # Vitest
+npm run check:rust         # cargo check
 ```
 
-## Release Status
+## Governance
 
-Current version: `0.1.0`
+This project uses the ADU/ADP governance model: design documents are the authoritative source for rules, and every code block maps back to a registered rule or an approved Issue Trace. Core documents live in `docs/00_core/` and `docs/20_design/`.
 
-This is an MVP. It does not yet provide real provider API calls, persistent provider credentials, recursive file tree navigation, packaged installers, or multi-file editing tools.
+For code changes, create or update an Issue Trace under `docs/30_plans/` before editing files.
 
 ## License
 

@@ -1,7 +1,7 @@
 {
   "name": "binder-mini",
   "version": "0.1.0",
-  "description": "Local-first governed AI document editor MVP.",
+  "description": "Local-first desktop document editor with AI chat and inline diff review. Built with Tauri 2, Rust, React, and TipTap.",
   "type": "module",
   "private": false,
   "license": "MIT",
